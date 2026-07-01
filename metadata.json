@@ -1,0 +1,6 @@
+{
+  "name": "Painting Contractor CRM",
+  "description": "A comprehensive CRM for professional painting contractors and residential painters, featuring sales pipeline tracking, estimate generation with custom material/labor calculators, room-by-room paint color specs, task checklists, and full Google Drive file sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

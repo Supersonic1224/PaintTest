@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { User } from 'firebase/auth';
 import { ClientLead, ProjectDetails as ProjectType, RoomSpec, ProjectTask } from './types';
 import { 
@@ -19,7 +19,9 @@ import {
   saveClientToFirestore, 
   saveProjectToFirestore, 
   deleteClientFromFirestore, 
-  deleteProjectFromFirestore 
+  deleteProjectFromFirestore,
+  checkIsAuthorizedInFirestore,
+  addAuthorizedUserToFirestore
 } from './firebaseService';
 import { getSupabase } from './supabase';
 import {
@@ -29,7 +31,8 @@ import {
   saveProjectToSupabase,
   deleteClientFromSupabase,
   deleteProjectFromSupabase,
-  checkIsAuthorized
+  checkIsAuthorized,
+  addAuthorizedUser
 } from './supabaseService';
 
 import Dashboard from './components/Dashboard';
@@ -40,6 +43,7 @@ import InvoicesList from './components/InvoicesList';
 import WorkOrdersList from './components/WorkOrdersList';
 import SettingsPanel from './components/SettingsPanel';
 import AdminPortal from './components/AdminPortal';
+import ClientSignPortal from './components/ClientSignPortal';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { 
@@ -63,7 +67,8 @@ import {
   CheckSquare,
   Settings,
   ShieldAlert,
-  ExternalLink
+  ExternalLink,
+  Globe
 } from 'lucide-react';
 
 // --- SEED SEED DATA FOR DEMO / LOCAL MODE ---
@@ -103,9 +108,9 @@ const DEMO_PROJECTS: ProjectType[] = [
     summary: {
       materialCost: 450.00,
       laborCost: 4767.11,
-      taxRate: 0.08,
+      taxRate: 0.13,
       discount: 0,
-      totalPrice: 5634.31
+      totalPrice: 5917.33
     },
     tasks: [],
     createdAt: '2026-06-15T12:00:00.000Z',
@@ -143,9 +148,9 @@ const DEMO_PROJECTS: ProjectType[] = [
     summary: {
       materialCost: 520.50,
       laborCost: 5365.187,
-      taxRate: 0.08,
+      taxRate: 0.13,
       discount: 0,
-      totalPrice: 6359.687
+      totalPrice: 6650.83
     },
     tasks: [
       { id: 't1', text: 'Powerwash and strip peeling exterior paint layers', completed: true },
@@ -167,10 +172,47 @@ const STANDARD_CHECKLIST: ProjectTask[] = [
   { id: 't7', text: 'Clean-up site, remove tape, vacuum dust, and present job', completed: false }
 ];
 
+const maskString = (val: string | undefined): string => {
+  if (!val) return '';
+  return val.trim().split(/\s+/).map(word => {
+    if (word.length === 0) return '';
+    return word[0] + '*'.repeat(word.length - 1);
+  }).join(' ');
+};
+
+const maskEmail = (email: string | undefined): string => {
+  if (!email) return '';
+  const atIndex = email.indexOf('@');
+  if (atIndex <= 0) return maskString(email);
+  const localPart = email.substring(0, atIndex);
+  const domainPart = email.substring(atIndex);
+  return maskString(localPart) + domainPart;
+};
+
+const maskPhone = (phone: string | undefined): string => {
+  if (!phone) return '';
+  return phone.replace(/[0-9]/g, (match, offset) => {
+    if (offset === 0) return match;
+    return '*';
+  });
+};
+
+const maskAddress = (address: string | undefined): string => {
+  if (!address) return '';
+  return address.trim().split(/\s+/).map(word => {
+    if (word.length === 0) return '';
+    return word[0] + '*'.repeat(word.length - 1);
+  }).join(' ');
+};
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [driveToken, setDriveToken] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sharedProposalId, setSharedProposalId] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('proposalId');
+  });
   
   // App navigation state: 'dashboard' | 'proposals' | 'invoices' | 'work-orders' | 'settings' | 'clients' | 'edit-client' | 'project-details' | 'quick-calc'
   const [currentView, setCurrentView] = useState<'dashboard' | 'proposals' | 'invoices' | 'work-orders' | 'settings' | 'clients' | 'edit-client' | 'project-details' | 'quick-calc' | 'admin-portal'>('dashboard');
@@ -179,11 +221,13 @@ export default function App() {
   const [needsAuth, setNeedsAuth] = useState(true);
   const [loading, setLoading] = useState(false);
   const [authErrorModalOpen, setAuthErrorModalOpen] = useState(false);
-  const [authErrorCode, setAuthErrorCode] = useState<'popup-blocked' | 'generic' | null>(null);
+  const [authErrorCode, setAuthErrorCode] = useState<'popup-blocked' | 'unauthorized-domain' | 'generic' | null>(null);
 
   // Active storage synced provider state: 'firestore' | 'supabase'
   const [dbProvider, setDbProvider] = useState<'firestore' | 'supabase'>(() => {
-    return (localStorage.getItem('painter_crm_provider') as 'firestore' | 'supabase') || 'firestore';
+    const stored = localStorage.getItem('painter_crm_provider') as 'firestore' | 'supabase';
+    if (stored) return stored;
+    return getSupabase() ? 'supabase' : 'firestore';
   });
 
   // App core database state
@@ -205,6 +249,7 @@ export default function App() {
   // Supabase Auth states
   const [supabaseUser, setSupabaseUser] = useState<any | null>(null);
   const [isSupabaseAuthorized, setIsSupabaseAuthorized] = useState<boolean>(false);
+  const [isFirestoreAuthorized, setIsFirestoreAuthorized] = useState<boolean>(false);
   const [loadingAuthorized, setLoadingAuthorized] = useState<boolean>(false);
 
   const getAnonId = (): string => {
@@ -223,6 +268,66 @@ export default function App() {
     return currentUser?.uid || getAnonId();
   };
 
+  const isAuthorizedUser = useMemo(() => {
+    if (isDemoMode) return true;
+
+    // Check if user is the main developer/owner email to auto-authorize
+    const loggedInEmail = dbProvider === 'supabase' ? supabaseUser?.email : currentUser?.email;
+    if (loggedInEmail && loggedInEmail.trim().toLowerCase() === 'aalnasih4846@gmail.com') {
+      return true;
+    }
+
+    if (dbProvider === 'supabase') {
+      return !!supabaseUser && isSupabaseAuthorized;
+    } else {
+      return !!currentUser && isFirestoreAuthorized;
+    }
+  }, [isDemoMode, dbProvider, supabaseUser, isSupabaseAuthorized, currentUser, isFirestoreAuthorized]);
+
+  const displayClients = useMemo(() => {
+    if (isDemoMode) {
+      return clients;
+    }
+    if (isAuthorizedUser) {
+      return clients;
+    }
+    // Not authorized, mask PII dynamically for guest/pending browsers
+    return clients.map(client => ({
+      ...client,
+      name: maskString(client.name),
+      company: client.company ? maskString(client.company) : client.company,
+      email: client.email ? maskEmail(client.email) : client.email,
+      phone: client.phone ? maskPhone(client.phone) : client.phone,
+      address: client.address ? maskAddress(client.address) : client.address,
+      notes: client.notes ? 'Notes are hidden for non-authorized guests.' : client.notes
+    }));
+  }, [clients, isDemoMode, isAuthorizedUser]);
+
+  const displayProjects = useMemo(() => {
+    if (isDemoMode) {
+      return projects;
+    }
+    if (isAuthorizedUser) {
+      return projects;
+    }
+    // Not authorized, mask project fields dynamically for guest/pending browsers
+    return projects.map(proj => ({
+      ...proj,
+      signerName: proj.signerName ? maskString(proj.signerName) : proj.signerName,
+      teamNotes: 'Hidden for non-authorized guests.'
+    }));
+  }, [projects, isDemoMode, isAuthorizedUser]);
+
+  const activeSelectedProject = useMemo(() => {
+    if (!selectedProject) return undefined;
+    return displayProjects.find(p => p.id === selectedProject.id) || selectedProject;
+  }, [selectedProject, displayProjects]);
+
+  const activeSelectedClient = useMemo(() => {
+    if (!selectedClient) return undefined;
+    return displayClients.find(c => c.id === selectedClient.id) || selectedClient;
+  }, [selectedClient, displayClients]);
+
   // Listen to Supabase Auth State Changes
   useEffect(() => {
     const supabase = getSupabase();
@@ -234,7 +339,9 @@ export default function App() {
       setSupabaseUser(user);
       if (user) {
         setLoadingAuthorized(true);
-        const authStatus = await checkIsAuthorized();
+        const email = user.email || '';
+        const authStatus = await checkIsAuthorized(email);
+        
         setIsSupabaseAuthorized(authStatus);
         setLoadingAuthorized(false);
       } else {
@@ -248,7 +355,9 @@ export default function App() {
       setSupabaseUser(user);
       if (user) {
         setLoadingAuthorized(true);
-        const authStatus = await checkIsAuthorized();
+        const email = user.email || '';
+        const authStatus = await checkIsAuthorized(email);
+        
         setIsSupabaseAuthorized(authStatus);
         setLoadingAuthorized(false);
       } else {
@@ -274,7 +383,8 @@ export default function App() {
       async () => {
         // If not authenticated, we can default to demo/anonymous mode or wait for action
         setNeedsAuth(true);
-        const storedProvider = (localStorage.getItem('painter_crm_provider') as 'firestore' | 'supabase') || 'firestore';
+        const defaultProvider = getSupabase() ? 'supabase' : 'firestore';
+        const storedProvider = (localStorage.getItem('painter_crm_provider') as 'firestore' | 'supabase') || defaultProvider;
         if (storedProvider === 'supabase' && getSupabase()) {
           setIsDemoMode(false);
           await syncUserData(getActiveUid(), 'supabase');
@@ -284,6 +394,23 @@ export default function App() {
       }
     );
   }, [supabaseUser]);
+
+  // Listen to Firestore Auth authorization status
+  useEffect(() => {
+    const checkFirestoreAuth = async () => {
+      if (currentUser && currentUser.email) {
+        setLoadingAuthorized(true);
+        const email = currentUser.email;
+        const authStatus = await checkIsAuthorizedInFirestore(email);
+        
+        setIsFirestoreAuthorized(authStatus);
+        setLoadingAuthorized(false);
+      } else {
+        setIsFirestoreAuthorized(false);
+      }
+    };
+    checkFirestoreAuth();
+  }, [currentUser]);
 
   const loadDemoSeedData = () => {
     // Read local storage or default to seed data
@@ -411,9 +538,17 @@ export default function App() {
         await syncUserData(result.user.uid);
       }
     } catch (err: any) {
-      console.error('Sign in failed:', err);
-      const isPopupClosed = err?.message?.includes('popup-closed-by-user') || err?.code?.includes('popup-closed-by-user') || String(err).includes('popup-closed-by-user');
+      const isPopupClosed = err?.message?.includes('popup-closed-by-user') || err?.code?.includes('popup-closed-by-user') || String(err).includes('popup-closed-by-user') ||
+                            err?.message?.includes('cancelled-popup-request') || err?.code?.includes('cancelled-popup-request') || String(err).includes('cancelled-popup-request');
       if (isPopupClosed) {
+        console.warn('Sign in cancelled or popup closed by user.');
+      } else {
+        console.error('Sign in failed:', err);
+      }
+      const isUnauthorizedDomain = err?.message?.includes('unauthorized-domain') || err?.code?.includes('unauthorized-domain') || String(err).includes('unauthorized-domain');
+      if (isUnauthorizedDomain) {
+        setAuthErrorCode('unauthorized-domain');
+      } else if (isPopupClosed) {
         setAuthErrorCode('popup-blocked');
       } else {
         setAuthErrorCode('generic');
@@ -447,6 +582,11 @@ export default function App() {
     projectTitle: string,
     projectNotes: string
   ) => {
+    if (!isAuthorizedUser) {
+      alert("Access Blocked: Only authorized team members can save or update customer details. Request access in the Team Access portal.");
+      return;
+    }
+
     const isEdit = selectedClient !== undefined;
     const clientDetails: ClientLead = isEdit 
       ? {
@@ -468,13 +608,33 @@ export default function App() {
     
     setClients(updatedClients);
 
-    // Persist as per active user state
+    // Persist as per active user state (with dual-syncing backup)
+    let savedToCloud = false;
     if (dbProvider === 'supabase' && getSupabase()) {
       const activeUid = getActiveUid();
       await saveClientToSupabase(activeUid, clientDetails);
+      savedToCloud = true;
+      if (currentUser) {
+        try {
+          await saveClientToFirestore(currentUser.uid, clientDetails);
+        } catch (err) {
+          console.warn("Could not sync client to Firestore backup:", err);
+        }
+      }
     } else if (!isDemoMode && currentUser) {
       await saveClientToFirestore(currentUser.uid, clientDetails);
-    } else {
+      savedToCloud = true;
+      if (getSupabase()) {
+        try {
+          const sUid = supabaseUser?.id || getAnonId();
+          await saveClientToSupabase(sUid, clientDetails);
+        } catch (err) {
+          console.warn("Could not sync client to Supabase:", err);
+        }
+      }
+    }
+
+    if (isDemoMode || !savedToCloud) {
       localStorage.setItem('painter_crm_clients', JSON.stringify(updatedClients));
     }
 
@@ -486,7 +646,7 @@ export default function App() {
         clientId: clientDetails.id,
         title: projectTitle || ('Interior Painting - ' + clientDetails.name),
         status: 'Draft',
-        description: projectNotes || 'Custom interior residential walls, ceiling and details prep.',
+        description: projectNotes || 'Custom interior residential residential walls, ceiling and details prep.',
         rooms: [], // Fresh new proposal with no configured rooms as requested!
         summary: {
           materialCost: 0,
@@ -503,12 +663,32 @@ export default function App() {
       const updatedProjects = [...projects, newProj];
       setProjects(updatedProjects);
 
+      let savedProjectToCloud = false;
       if (dbProvider === 'supabase' && getSupabase()) {
         const activeUid = getActiveUid();
         await saveProjectToSupabase(activeUid, newProj);
+        savedProjectToCloud = true;
+        if (currentUser) {
+          try {
+            await saveProjectToFirestore(currentUser.uid, newProj);
+          } catch (err) {
+            console.warn("Could not sync project to Firestore backup:", err);
+          }
+        }
       } else if (!isDemoMode && currentUser) {
         await saveProjectToFirestore(currentUser.uid, newProj);
-      } else {
+        savedProjectToCloud = true;
+        if (getSupabase()) {
+          try {
+            const sUid = supabaseUser?.id || getAnonId();
+            await saveProjectToSupabase(sUid, newProj);
+          } catch (err) {
+            console.warn("Could not sync project to Supabase:", err);
+          }
+        }
+      }
+
+      if (isDemoMode || !savedProjectToCloud) {
         localStorage.setItem('painter_crm_projects', JSON.stringify(updatedProjects));
       }
 
@@ -523,37 +703,87 @@ export default function App() {
 
   // Save/Update client record directly from the active project sheet
   const handleSaveClientDirect = async (updatedClient: ClientLead) => {
+    if (!isAuthorizedUser) {
+      alert("Access Blocked: Only authorized team members can save client details. Request access in the Team Access portal.");
+      return;
+    }
+
     const updatedClients = clients.find(c => c.id === updatedClient.id)
       ? clients.map(c => c.id === updatedClient.id ? updatedClient : c)
       : [...clients, updatedClient];
 
     setClients(updatedClients);
 
+    let savedToCloud = false;
     if (dbProvider === 'supabase' && getSupabase()) {
       const activeUid = getActiveUid();
       await saveClientToSupabase(activeUid, updatedClient);
+      savedToCloud = true;
+      if (currentUser) {
+        try {
+          await saveClientToFirestore(currentUser.uid, updatedClient);
+        } catch (err) {
+          console.warn("Could not sync client to Firestore backup:", err);
+        }
+      }
     } else if (!isDemoMode && currentUser) {
       await saveClientToFirestore(currentUser.uid, updatedClient);
-    } else {
+      savedToCloud = true;
+      if (getSupabase()) {
+        try {
+          const sUid = supabaseUser?.id || getAnonId();
+          await saveClientToSupabase(sUid, updatedClient);
+        } catch (err) {
+          console.warn("Could not sync client to Supabase:", err);
+        }
+      }
+    }
+
+    if (isDemoMode || !savedToCloud) {
       localStorage.setItem('painter_crm_clients', JSON.stringify(updatedClients));
     }
   };
 
   // Save/Update project estimate spreadsheet
   const handleSaveProject = async (updatedProject: ProjectType) => {
+    if (!isAuthorizedUser) {
+      alert("Access Blocked: Only authorized team members can save project estimates. Request access in the Team Access portal.");
+      return;
+    }
+
     const updatedProjects = projects.find(p => p.id === updatedProject.id)
       ? projects.map(p => p.id === updatedProject.id ? updatedProject : p)
       : [...projects, updatedProject];
 
     setProjects(updatedProjects);
 
-    // Save to active cloud database provider
+    // Save to active cloud database provider (with dual-syncing backup)
+    let savedToCloud = false;
     if (dbProvider === 'supabase' && getSupabase()) {
       const activeUid = getActiveUid();
       await saveProjectToSupabase(activeUid, updatedProject);
+      savedToCloud = true;
+      if (currentUser) {
+        try {
+          await saveProjectToFirestore(currentUser.uid, updatedProject);
+        } catch (err) {
+          console.warn("Could not sync project to Firestore backup:", err);
+        }
+      }
     } else if (!isDemoMode && currentUser) {
       await saveProjectToFirestore(currentUser.uid, updatedProject);
-    } else {
+      savedToCloud = true;
+      if (getSupabase()) {
+        try {
+          const sUid = supabaseUser?.id || getAnonId();
+          await saveProjectToSupabase(sUid, updatedProject);
+        } catch (err) {
+          console.warn("Could not sync project to Supabase:", err);
+        }
+      }
+    }
+
+    if (isDemoMode || !savedToCloud) {
       localStorage.setItem('painter_crm_projects', JSON.stringify(updatedProjects));
     }
 
@@ -562,14 +792,68 @@ export default function App() {
 
   // Delete project quote proposal
   const handleDeleteProject = async (projectId: string) => {
+    if (!isAuthorizedUser) {
+      alert("Access Blocked: Only authorized team members can delete proposals. Request access in the Team Access portal.");
+      return;
+    }
+
     const updated = projects.filter(p => p.id !== projectId);
     setProjects(updated);
     
+    let deletedFromCloud = false;
+
     if (dbProvider === 'supabase' && getSupabase()) {
-      await deleteProjectFromSupabase(projectId);
+      // Primary is Supabase
+      try {
+        await deleteProjectFromSupabase(projectId);
+        deletedFromCloud = true;
+      } catch (err) {
+        console.error("Failed to delete project from Supabase:", err);
+      }
+
+      // Prompt to delete from Firestore as well (backup)
+      if (currentUser) {
+        const deleteFromBackup = window.confirm(
+          "Would you like to delete this proposal from Firestore (backup) as well?"
+        );
+        if (deleteFromBackup) {
+          try {
+            await deleteProjectFromFirestore(projectId);
+          } catch (err) {
+            console.error("Failed to delete project from Firestore backup:", err);
+          }
+        }
+      }
     } else if (!isDemoMode && currentUser) {
-      await deleteProjectFromFirestore(projectId);
-    } else {
+      // Primary is Firestore
+      const deleteFromBackup = window.confirm(
+        "Are you sure you want to delete this proposal from Firestore?"
+      );
+      if (deleteFromBackup) {
+        try {
+          await deleteProjectFromFirestore(projectId);
+          deletedFromCloud = true;
+        } catch (err) {
+          console.error("Failed to delete project from Firestore:", err);
+        }
+      }
+
+      // Sync delete with Supabase if active/logged in
+      if (getSupabase()) {
+        const deleteFromSupabase = window.confirm(
+          "Would you like to delete this proposal from Supabase as well?"
+        );
+        if (deleteFromSupabase) {
+          try {
+            await deleteProjectFromSupabase(projectId);
+          } catch (err) {
+            console.error("Failed to delete project from Supabase:", err);
+          }
+        }
+      }
+    }
+
+    if (isDemoMode || !deletedFromCloud) {
       localStorage.setItem('painter_crm_projects', JSON.stringify(updated));
     }
 
@@ -579,6 +863,11 @@ export default function App() {
 
   // Launch fresh project builder for a client
   const handleCreateProjectForClient = async (clientId: string) => {
+    if (!isAuthorizedUser) {
+      alert("Access Blocked: Only authorized team members can build projects. Request access in the Team Access portal.");
+      return;
+    }
+
     const clientName = clients.find(c => c.id === clientId)?.name || 'New Paint Project';
     const newProj: ProjectType = {
       id: 'project-' + Math.random().toString(36).substr(2, 9),
@@ -590,7 +879,7 @@ export default function App() {
       summary: {
         materialCost: 0,
         laborCost: 0,
-        taxRate: 0.08,
+        taxRate: 0.13,
         discount: 0,
         totalPrice: 0,
       },
@@ -602,12 +891,32 @@ export default function App() {
     const updatedProjects = [...projects, newProj];
     setProjects(updatedProjects);
 
+    let savedToCloud = false;
     if (dbProvider === 'supabase' && getSupabase()) {
       const activeUid = getActiveUid();
       await saveProjectToSupabase(activeUid, newProj);
+      savedToCloud = true;
+      if (currentUser) {
+        try {
+          await saveProjectToFirestore(currentUser.uid, newProj);
+        } catch (err) {
+          console.warn("Could not sync project to Firestore backup:", err);
+        }
+      }
     } else if (!isDemoMode && currentUser) {
       await saveProjectToFirestore(currentUser.uid, newProj);
-    } else {
+      savedToCloud = true;
+      if (getSupabase()) {
+        try {
+          const sUid = supabaseUser?.id || getAnonId();
+          await saveProjectToSupabase(sUid, newProj);
+        } catch (err) {
+          console.warn("Could not sync project to Supabase:", err);
+        }
+      }
+    }
+
+    if (isDemoMode || !savedToCloud) {
       localStorage.setItem('painter_crm_projects', JSON.stringify(updatedProjects));
     }
 
@@ -617,6 +926,11 @@ export default function App() {
 
   // Instantly synthesize a fresh new proposal and a new CRM client record linked in one go
   const handleCreateNewProposalImmediately = async () => {
+    if (!isAuthorizedUser) {
+      alert("Access Blocked: Only authorized team members can create new proposals. Request access in the Team Access portal.");
+      return;
+    }
+
     const newClientId = 'client-' + Math.random().toString(36).substr(2, 9);
     const newClient: ClientLead = {
       id: newClientId,
@@ -656,14 +970,36 @@ export default function App() {
     setClients(updatedClients);
     setProjects(updatedProjects);
 
+    let savedToCloud = false;
     if (dbProvider === 'supabase' && getSupabase()) {
       const activeUid = getActiveUid();
       await saveClientToSupabase(activeUid, newClient);
       await saveProjectToSupabase(activeUid, newProj);
+      savedToCloud = true;
+      if (currentUser) {
+        try {
+          await saveClientToFirestore(currentUser.uid, newClient);
+          await saveProjectToFirestore(currentUser.uid, newProj);
+        } catch (err) {
+          console.warn("Could not sync to Firestore backup:", err);
+        }
+      }
     } else if (!isDemoMode && currentUser) {
       await saveClientToFirestore(currentUser.uid, newClient);
       await saveProjectToFirestore(currentUser.uid, newProj);
-    } else {
+      savedToCloud = true;
+      if (getSupabase()) {
+        try {
+          const sUid = supabaseUser?.id || getAnonId();
+          await saveClientToSupabase(sUid, newClient);
+          await saveProjectToSupabase(sUid, newProj);
+        } catch (err) {
+          console.warn("Could not sync to Supabase:", err);
+        }
+      }
+    }
+
+    if (isDemoMode || !savedToCloud) {
       localStorage.setItem('painter_crm_clients', JSON.stringify(updatedClients));
       localStorage.setItem('painter_crm_projects', JSON.stringify(updatedProjects));
     }
@@ -707,6 +1043,15 @@ export default function App() {
     'quick-calc': 'Instant Drywall & Paint Estimator',
     'admin-portal': 'Team Access & Admin Portal'
   }[currentView];
+
+  if (sharedProposalId) {
+    return (
+      <ClientSignPortal 
+        proposalId={sharedProposalId} 
+        onBackToApp={isAuthorizedUser ? () => setSharedProposalId(null) : undefined} 
+      />
+    );
+  }
 
   return (
     <div className="h-screen w-screen bg-[#121212] font-sans text-zinc-100 flex overflow-hidden relative">
@@ -954,9 +1299,13 @@ export default function App() {
           {/* Router view states */}
           {currentView === 'dashboard' && (
             <Dashboard
-              clients={clients}
-              projects={projects}
+              clients={displayClients}
+              projects={displayProjects}
               onSelectProject={(projId) => {
+                if (!isAuthorizedUser) {
+                  alert("Access Denied: Only registered team members can open and view proposals. Request access in the Team Access portal.");
+                  return;
+                }
                 const targetProj = projects.find(p => p.id === projId);
                 if (targetProj) {
                   setSelectedProject(targetProj);
@@ -972,9 +1321,13 @@ export default function App() {
 
           {currentView === 'proposals' && (
             <ProposalsList
-              projects={projects}
-              clients={clients}
+              projects={displayProjects}
+              clients={displayClients}
               onSelectProject={(projId) => {
+                if (!isAuthorizedUser) {
+                  alert("Access Denied: Only registered team members can open and view proposals. Request access in the Team Access portal.");
+                  return;
+                }
                 const targetProj = projects.find(p => p.id === projId);
                 if (targetProj) {
                   setSelectedProject(targetProj);
@@ -987,9 +1340,13 @@ export default function App() {
 
           {currentView === 'invoices' && (
             <InvoicesList
-              projects={projects}
-              clients={clients}
+              projects={displayProjects}
+              clients={displayClients}
               onSelectProject={(projId) => {
+                if (!isAuthorizedUser) {
+                  alert("Access Denied: Only registered team members can open and view proposals. Request access in the Team Access portal.");
+                  return;
+                }
                 const targetProj = projects.find(p => p.id === projId);
                 if (targetProj) {
                   setSelectedProject(targetProj);
@@ -1001,8 +1358,8 @@ export default function App() {
 
           {currentView === 'work-orders' && (
             <WorkOrdersList
-              projects={projects}
-              clients={clients}
+              projects={displayProjects}
+              clients={displayClients}
             />
           )}
 
@@ -1024,11 +1381,11 @@ export default function App() {
               isSupabaseAuthorized={isSupabaseAuthorized}
               loadingAuthorized={loadingAuthorized}
               onCheckAuth={async () => {
-                const authStatus = await checkIsAuthorized();
+                const authStatus = await checkIsAuthorized(supabaseUser?.email);
                 setIsSupabaseAuthorized(authStatus);
               }}
-              clients={clients}
-              projects={projects}
+              clients={displayClients}
+              projects={displayProjects}
               onImportBackup={handleImportBackup}
               onPushToSupabase={handlePushToSupabase}
             />
@@ -1038,24 +1395,35 @@ export default function App() {
             <AdminPortal
               supabaseUser={supabaseUser}
               isSupabaseAuthorized={isSupabaseAuthorized}
+              currentUser={currentUser}
+              isFirestoreAuthorized={isFirestoreAuthorized}
               loadingAuthorized={loadingAuthorized}
               dbProvider={dbProvider}
               onSetDbProvider={handleSetDbProvider}
               onCheckAuth={async () => {
-                const authStatus = await checkIsAuthorized();
-                setIsSupabaseAuthorized(authStatus);
+                if (dbProvider === 'supabase') {
+                  const authStatus = await checkIsAuthorized(supabaseUser?.email);
+                  setIsSupabaseAuthorized(authStatus);
+                } else {
+                  if (currentUser?.email) {
+                    const authStatus = await checkIsAuthorizedInFirestore(currentUser.email);
+                    setIsFirestoreAuthorized(authStatus);
+                  }
+                }
               }}
-              clients={clients}
-              projects={projects}
+              clients={displayClients}
+              projects={displayProjects}
               onImportBackup={handleImportBackup}
               onPushToSupabase={handlePushToSupabase}
+              onSignIn={handleSignIn}
+              onSignOut={handleSignOut}
             />
           )}
 
           {currentView === 'edit-client' && (
             <div className="bg-neutral-900 border border-[#222222] rounded-2xl p-6 shadow-xl text-left">
               <LeadForm
-                existingLead={selectedClient}
+                existingLead={activeSelectedClient}
                 onSave={handleSaveClient}
                 onCancel={() => {
                   setSelectedClient(undefined);
@@ -1065,10 +1433,12 @@ export default function App() {
             </div>
           )}
 
-          {currentView === 'project-details' && selectedProject && (
+          {currentView === 'project-details' && selectedProject && activeSelectedProject && (
             <ProjectDetails
-              project={selectedProject}
-              client={clients.find(c => c.id === selectedProject.clientId) || {
+              key={activeSelectedProject.id}
+              project={activeSelectedProject}
+              dbProvider={dbProvider}
+              client={displayClients.find(c => c.id === activeSelectedProject.clientId) || {
                 id: 'unknown',
                 name: 'Unknown Client',
                 email: '',
@@ -1255,37 +1625,77 @@ export default function App() {
                 </div>
                 <div>
                   <h3 className="font-display font-bold text-white text-base">
-                    {authErrorCode === 'popup-blocked'
+                    {authErrorCode === 'unauthorized-domain'
+                      ? 'Domain Not Authorized in Firebase'
+                      : authErrorCode === 'popup-blocked'
                       ? 'Google Sign-In Popup Blocked / Closed'
                       : 'Google Sign-In Failed'}
                   </h3>
                   <span className="text-[10px] text-zinc-500 font-mono tracking-wider block mt-0.5">
-                    ERROR STATE: {authErrorCode === 'popup-blocked' ? 'auth/popup-closed-by-user' : 'auth/sign-in-failed'}
+                    ERROR STATE: {authErrorCode === 'unauthorized-domain' ? 'auth/unauthorized-domain' : authErrorCode === 'popup-blocked' ? 'auth/popup-closed-by-user' : 'auth/sign-in-failed'}
                   </span>
                 </div>
               </div>
 
               <div className="text-zinc-300 text-xs space-y-3 leading-relaxed">
-                <p>
-                  Because this application is currently embedded in the <strong>Google AI Studio preview iframe</strong>, your browser's security/sandbox policies or an active popup blocker may prevent the authentication popup window from communicating back to the app.
-                </p>
+                {authErrorCode === 'unauthorized-domain' ? (
+                  <>
+                    <p>
+                      This application is currently served from <strong className="text-white font-mono bg-neutral-950 px-1.5 py-0.5 rounded border border-neutral-800">{window.location.hostname}</strong>, but this domain has not been whitelisted in your Firebase project configuration.
+                    </p>
 
-                <div className="bg-neutral-950/40 border border-neutral-850 p-4 rounded-xl space-y-3.5">
-                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                    <Laptop className="w-4 h-4 text-blue-400" /> Recommended Steps to Connect:
-                  </h4>
-                  <ol className="list-decimal pl-4 space-y-2.5 text-[11px] text-zinc-400">
-                    <li>
-                      <strong className="text-zinc-200">Open in standalone tab:</strong> Click the button below to open the app directly outside the AI Studio preview frame, or click the <strong className="text-zinc-200">"Open in new tab"</strong> icon in the grey header bar at the top-right of your AI Studio screen.
-                    </li>
-                    <li>
-                      <strong className="text-zinc-200">Grant permissions:</strong> Once opened in the new tab, click the connection button again and allow the sign-in popup.
-                    </li>
-                    <li>
-                      <strong className="text-zinc-200">Alternative Option (Supabase):</strong> You can select the <strong className="text-emerald-400">"Supabase / Postgres SQL"</strong> active database provider in settings, which works immediately in the iframe without requiring Google OAuth popups!
-                    </li>
-                  </ol>
-                </div>
+                    <div className="bg-neutral-950/40 border border-neutral-850 p-4 rounded-xl space-y-3.5">
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <Globe className="w-4 h-4 text-blue-400" /> How to Authorize This Domain:
+                      </h4>
+                      <ol className="list-decimal pl-4 space-y-2.5 text-[11px] text-zinc-400">
+                        <li>
+                          Open your <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline inline-flex items-center gap-0.5">Firebase Console <ExternalLink className="w-2.5 h-2.5" /></a> and select your project.
+                        </li>
+                        <li>
+                          Go to <strong className="text-zinc-200">Build &gt; Authentication</strong>, and click the <strong className="text-zinc-200">Settings</strong> tab at the top.
+                        </li>
+                        <li>
+                          Click on <strong className="text-zinc-200">Authorized domains</strong> in the sidebar menu.
+                        </li>
+                        <li>
+                          Click <strong className="text-blue-400">"Add domain"</strong> and enter this exact domain:
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <code className="bg-neutral-950 border border-neutral-800 px-2 py-1 rounded text-zinc-200 font-mono text-xs select-all">
+                              {window.location.hostname}
+                            </code>
+                          </div>
+                        </li>
+                        <li>
+                          Click <strong className="text-zinc-200">Add</strong> to save the changes, then refresh this page and try again!
+                        </li>
+                      </ol>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p>
+                      Because this application is currently embedded in the <strong>Google AI Studio preview iframe</strong>, your browser's security/sandbox policies or an active popup blocker may prevent the authentication popup window from communicating back to the app.
+                    </p>
+
+                    <div className="bg-neutral-950/40 border border-neutral-850 p-4 rounded-xl space-y-3.5">
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <Laptop className="w-4 h-4 text-blue-400" /> Recommended Steps to Connect:
+                      </h4>
+                      <ol className="list-decimal pl-4 space-y-2.5 text-[11px] text-zinc-400">
+                        <li>
+                          <strong className="text-zinc-200">Open in standalone tab:</strong> Click the button below to open the app directly outside the AI Studio preview frame, or click the <strong className="text-zinc-200">"Open in new tab"</strong> icon in the grey header bar at the top-right of your AI Studio screen.
+                        </li>
+                        <li>
+                          <strong className="text-zinc-200">Grant permissions:</strong> Once opened in the new tab, click the connection button again and allow the sign-in popup.
+                        </li>
+                        <li>
+                          <strong className="text-zinc-200">Alternative Option (Supabase):</strong> You can select the <strong className="text-emerald-400">"Supabase / Postgres SQL"</strong> active database provider in settings, which works immediately in the iframe without requiring Google OAuth popups!
+                        </li>
+                      </ol>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2 justify-end pt-2 border-t border-neutral-850">

@@ -26,7 +26,14 @@ async function driveFetch(
   if (!response.ok) {
     const errText = await response.text();
     console.error('Google Drive API Error Response:', errText);
-    throw new Error(`Google Drive API error: ${response.statusText} (${response.status})`);
+    let errorMessage = `Google Drive API error: ${response.statusText} (${response.status})`;
+    try {
+      const parsed = JSON.parse(errText);
+      if (parsed?.error?.message) {
+        errorMessage = parsed.error.message;
+      }
+    } catch (_) {}
+    throw new Error(errorMessage);
   }
 
   // Some operations (like delete) return no content
@@ -166,7 +173,14 @@ export async function uploadEstimateToDrive(
   if (!response.ok) {
     const errText = await response.text();
     console.error('Multipart upload error:', errText);
-    throw new Error(`Google Drive Upload API error: ${response.statusText} (${response.status})`);
+    let errorMessage = `Google Drive Upload API error: ${response.statusText} (${response.status})`;
+    try {
+      const parsed = JSON.parse(errText);
+      if (parsed?.error?.message) {
+        errorMessage = parsed.error.message;
+      }
+    } catch (_) {}
+    throw new Error(errorMessage);
   }
 
   return response.json();
@@ -231,7 +245,14 @@ export async function uploadFileToDrive(
   if (!response.ok) {
     const errText = await response.text();
     console.error('Binary multipart upload error:', errText);
-    throw new Error(`Google Drive Upload API error: ${response.statusText} (${response.status})`);
+    let errorMessage = `Google Drive Upload API error: ${response.statusText} (${response.status})`;
+    try {
+      const parsed = JSON.parse(errText);
+      if (parsed?.error?.message) {
+        errorMessage = parsed.error.message;
+      }
+    } catch (_) {}
+    throw new Error(errorMessage);
   }
 
   return response.json();

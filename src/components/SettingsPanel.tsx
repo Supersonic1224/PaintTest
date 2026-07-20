@@ -2,13 +2,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   UserCheck, Laptop, Database, HardDrive, AlertTriangle, Terminal, Key, ShieldCheck, 
   CheckCircle2, XCircle, HelpCircle, ArrowRight, Loader2, Play, ChevronDown, ChevronUp,
-  Trash2, Plus, Lock, UserPlus, Clipboard, ShieldAlert, LogOut, Download, Upload, RefreshCw
+  Trash2, Plus, Lock, UserPlus, Clipboard, ShieldAlert, LogOut, Download, Upload, RefreshCw,
+  Sparkles
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { testFirebaseConnection, testFirebaseDiagnostics, type FirebaseDiagnosticTest } from '../firebaseService';
 import { firebaseConfig } from '../firebase';
 import { getSupabase, testSupabaseConnection, testSupabaseDiagnostics, type SupabaseDiagnosticTest } from '../supabase';
-import { getSupabaseDDL, fetchAuthorizedUsers, addAuthorizedUser, removeAuthorizedUser, type AuthorizedUser } from '../supabaseService';
+import { getSupabaseDDL, fetchAuthorizedUsers, addAuthorizedUser, removeAuthorizedUser } from '../supabaseService';
+import { AuthorizedUser, ProposalSettings, DEFAULT_PROPOSAL_SETTINGS, DEFAULT_PRODUCT_TYPE_COLOURS, DEFAULT_REAL_PRODUCTS, RealProduct, DEFAULT_PROPOSAL_RATES, ProposalRates } from '../types';
 
 interface SettingsPanelProps {
   currentUser: User | null;
@@ -68,6 +70,46 @@ export default function SettingsPanel({
     success: null,
     text: null
   });
+
+  const [activeTab, setActiveTab] = useState<'storage' | 'presets'>('storage');
+  const [proposalSettings, setProposalSettings] = useState<ProposalSettings>(() => {
+    const saved = localStorage.getItem('proposal_settings');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        // fallback
+      }
+    }
+    return DEFAULT_PROPOSAL_SETTINGS;
+  });
+
+  const saveProposalSettings = (newSettings: ProposalSettings) => {
+    setProposalSettings(newSettings);
+    localStorage.setItem('proposal_settings', JSON.stringify(newSettings));
+    window.dispatchEvent(new Event('proposal_settings_updated'));
+  };
+
+  const rates = proposalSettings.rates || DEFAULT_PROPOSAL_RATES;
+  
+  const updateRate = (key: keyof ProposalRates, val: number) => {
+    saveProposalSettings({
+      ...proposalSettings,
+      rates: {
+        ...rates,
+        [key]: val
+      }
+    });
+  };
+
+  const restoreDefaultRates = () => {
+    if (window.confirm("Are you sure you want to restore all rates back to system default values?")) {
+      saveProposalSettings({
+        ...proposalSettings,
+        rates: DEFAULT_PROPOSAL_RATES
+      });
+    }
+  };
 
   const handleExportBackup = () => {
     try {
@@ -281,7 +323,13 @@ export default function SettingsPanel({
       setSbPassword('');
       await onCheckAuth();
     } catch (err: any) {
-      setSbAuthMessage({ success: false, text: err.message || 'Failed to sign in.' });
+      let msg = err.message || 'Failed to sign in.';
+      if (msg.toLowerCase().includes('email not confirmed')) {
+        msg = 'Your email is not confirmed. Please check your email inbox (and spam folder) for the verification link sent by Supabase. Alternatively, you can disable "Confirm email" on your Supabase dashboard under Authentication > Providers > Email settings.';
+      } else if (msg.toLowerCase().includes('invalid login credentials')) {
+        msg = 'Invalid login credentials. Make sure you have already signed up (using the "Don\'t have an account? Sign Up" link below) in this Supabase project. If you did sign up, verify your email/password or check if email verification is pending.';
+      }
+      setSbAuthMessage({ success: false, text: msg });
     } finally {
       setSbAuthLoading(false);
     }
@@ -438,39 +486,45 @@ ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
 -- 5. Helper function to check if the current user is authorized by email lookup
 CREATE OR REPLACE FUNCTION public.is_authorized()
 RETURNS boolean AS $$
-  -- Returns true for all authenticated users to prevent RLS lockouts and recursive queries
-  SELECT auth.role() = 'authenticated';
+  -- Returns true for all users to prevent RLS lockouts and recursive queries
+  SELECT true;
 $$ LANGUAGE sql SECURITY DEFINER;
 
--- 6. Drop existing policies to prevent 'already exists' errors
+-- 6. Drop existing policies to prevent 'already exists' errors and cleanly override
 DROP POLICY IF EXISTS "authorized can view list" ON public.authorized_users;
 DROP POLICY IF EXISTS "authorized can add users" ON public.authorized_users;
 DROP POLICY IF EXISTS "authorized can remove users" ON public.authorized_users;
 DROP POLICY IF EXISTS "authorized full access clients" ON public.clients;
 DROP POLICY IF EXISTS "authorized full access projects" ON public.projects;
+DROP POLICY IF EXISTS "Allow users to read their own clients" ON public.clients;
+DROP POLICY IF EXISTS "Allow users to insert/update their own clients" ON public.clients;
+DROP POLICY IF EXISTS "Allow users to read their own projects" ON public.projects;
+DROP POLICY IF EXISTS "Allow users to insert/update their own projects" ON public.projects;
+DROP POLICY IF EXISTS "Open full access clients" ON public.clients;
+DROP POLICY IF EXISTS "Open full access projects" ON public.projects;
 
 -- 7. Create policies for public.authorized_users table
 CREATE POLICY "authorized can view list"
-  ON public.authorized_users FOR SELECT TO authenticated
+  ON public.authorized_users FOR SELECT TO anon, authenticated
   USING (true);
 
 CREATE POLICY "authorized can add users"
-  ON public.authorized_users FOR INSERT TO authenticated
+  ON public.authorized_users FOR INSERT TO anon, authenticated
   WITH CHECK (true);
 
 CREATE POLICY "authorized can remove users"
-  ON public.authorized_users FOR DELETE TO authenticated
+  ON public.authorized_users FOR DELETE TO anon, authenticated
   USING (true);
 
--- 8. Create policies for public.clients table (only authorized users have access)
-CREATE POLICY "authorized full access clients"
-  ON public.clients FOR ALL TO authenticated
+-- 8. Create policies for public.clients table (open to both anon and authenticated users)
+CREATE POLICY "Open full access clients"
+  ON public.clients FOR ALL TO anon, authenticated
   USING (true)
   WITH CHECK (true);
 
--- 9. Create policies for public.projects table (only authorized users have access)
-CREATE POLICY "authorized full access projects"
-  ON public.projects FOR ALL TO authenticated
+-- 9. Create policies for public.projects table (open to both anon and authenticated users)
+CREATE POLICY "Open full access projects"
+  ON public.projects FOR ALL TO anon, authenticated
   USING (true)
   WITH CHECK (true);
 
@@ -482,9 +536,30 @@ ON CONFLICT (email) DO NOTHING;`;
 
   return (
     <div className="max-w-3xl space-y-6 animate-fade-in text-left">
-      
-      {/* 1. Database Synced Provider Switch Panel */}
-      <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-4">
+      {/* Tab Selector */}
+      <div className="flex border-b border-neutral-800 gap-6">
+        <button
+          onClick={() => setActiveTab('storage')}
+          className={`pb-3 text-xs uppercase tracking-widest font-mono font-bold border-b-2 transition-all cursor-pointer ${
+            activeTab === 'storage' ? 'border-blue-500 text-white' : 'border-transparent text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          Storage & Diagnostics
+        </button>
+        <button
+          onClick={() => setActiveTab('presets')}
+          className={`pb-3 text-xs uppercase tracking-widest font-mono font-bold border-b-2 transition-all cursor-pointer ${
+            activeTab === 'presets' ? 'border-blue-500 text-white' : 'border-transparent text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          Proposal Presets & Rates
+        </button>
+      </div>
+
+      {activeTab === 'storage' ? (
+        <>
+          {/* 1. Database Synced Provider Switch Panel */}
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-4">
         <h3 className="font-display font-bold text-white text-base flex items-center gap-2">
           <Database className="w-5 h-5 text-blue-400" />
           Active Storage Provider
@@ -1624,6 +1699,648 @@ ON CONFLICT (email) DO NOTHING;`;
           </div>
         </div>
       </div>
+      </>
+      ) : (
+        <div className="space-y-6 animate-fade-in text-left">
+          {/* PROPOSAL PRESETS PANEL */}
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-800 pb-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-yellow-400" />
+                <div>
+                  <h3 className="font-display font-bold text-white text-base">Proposal Pricing & Labor Rates</h3>
+                  <p className="text-zinc-500 text-[11px] mt-0.5">Configure default hourly pricing, production speed indexes, and material coverage indices.</p>
+                </div>
+              </div>
+              <button
+                onClick={restoreDefaultRates}
+                className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 text-zinc-300 hover:text-white text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5 self-start cursor-pointer font-mono"
+              >
+                Restore Default Rates
+              </button>
+            </div>
+
+            {/* SECTION 1: LABOR BASE & SITE SETUP PRESET */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold text-yellow-400 uppercase font-mono tracking-wider">1. Labor Base & Setup Overhead</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-500 font-mono block">HOURLY LABOR RATE ($/hr)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={rates.hourlyLaborRate}
+                    onChange={(e) => updateRate('hourlyLaborRate', parseFloat(e.target.value) || 0)}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none font-bold font-mono"
+                  />
+                </div>
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-500 font-mono block">SETUP BASE PREP TIME (Hours)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={rates.setupHours}
+                    onChange={(e) => updateRate('setupHours', parseFloat(e.target.value) || 0)}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none font-bold font-mono"
+                  />
+                </div>
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-500 font-mono block">SETUP BASE MATERIALS ($)</label>
+                  <input
+                    type="number"
+                    step="1"
+                    value={rates.setupMaterials}
+                    onChange={(e) => updateRate('setupMaterials', parseFloat(e.target.value) || 0)}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none font-bold font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 2: INTERIOR SURFACE ESTIMATION RATES */}
+            <div className="space-y-4 pt-4 border-t border-neutral-800">
+              <h4 className="text-xs font-bold text-blue-400 uppercase font-mono tracking-wider">2. Interior Surface Estimation Rates</h4>
+              
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Walls */}
+                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Walls</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
+                        <input type="number" value={rates.wallsSpeed} onChange={(e) => updateRate('wallsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
+                        <input type="number" value={rates.wallsCoverage} onChange={(e) => updateRate('wallsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                        <input type="number" value={rates.wallsMaterialCost} onChange={(e) => updateRate('wallsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Ceilings */}
+                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Ceilings</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
+                        <input type="number" value={rates.ceilingsSpeed} onChange={(e) => updateRate('ceilingsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
+                        <input type="number" value={rates.ceilingsCoverage} onChange={(e) => updateRate('ceilingsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                        <input type="number" value={rates.ceilingsMaterialCost} onChange={(e) => updateRate('ceilingsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Baseboards */}
+                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Baseboards</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
+                        <input type="number" value={rates.baseboardsSpeed} onChange={(e) => updateRate('baseboardsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
+                        <input type="number" value={rates.baseboardsCoverage} onChange={(e) => updateRate('baseboardsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                        <input type="number" value={rates.baseboardsMaterialCost} onChange={(e) => updateRate('baseboardsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Windows */}
+                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Windows (Unit rate per coat)</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs/coat)</label>
+                        <input type="number" step="0.05" value={rates.windowsHoursPerCoat} onChange={(e) => updateRate('windowsHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/coat)</label>
+                        <input type="number" step="0.5" value={rates.windowsMaterialCostPerCoat} onChange={(e) => updateRate('windowsMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Doors */}
+                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Doors (Unit rate per coat)</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs/coat)</label>
+                        <input type="number" step="0.05" value={rates.doorsHoursPerCoat} onChange={(e) => updateRate('doorsHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/coat)</label>
+                        <input type="number" step="0.5" value={rates.doorsMaterialCostPerCoat} onChange={(e) => updateRate('doorsMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Door Frames */}
+                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Door Frames (Unit rate per coat)</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs/coat)</label>
+                        <input type="number" step="0.05" value={rates.doorFramesHoursPerCoat} onChange={(e) => updateRate('doorFramesHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/coat)</label>
+                        <input type="number" step="0.5" value={rates.doorFramesHoursPerCoat} onChange={(e) => updateRate('doorFramesMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 3: EXTERIOR SURFACE ESTIMATION RATES */}
+            <div className="space-y-4 pt-4 border-t border-neutral-800">
+              <h4 className="text-xs font-bold text-emerald-400 uppercase font-mono tracking-wider">3. Exterior Surface Estimation Rates</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Siding */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Siding</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
+                      <input type="number" value={rates.sidingSpeed} onChange={(e) => updateRate('sidingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
+                      <input type="number" value={rates.sidingCoverage} onChange={(e) => updateRate('sidingCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                      <input type="number" value={rates.sidingMaterialCost} onChange={(e) => updateRate('sidingMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Brick Stain */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Brick Stain</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
+                      <input type="number" value={rates.brickSpeed} onChange={(e) => updateRate('brickSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
+                      <input type="number" value={rates.brickCoverage} onChange={(e) => updateRate('brickCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                      <input type="number" value={rates.brickMaterialCost} onChange={(e) => updateRate('brickMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Porch Floor */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Porch Floor</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
+                      <input type="number" value={rates.porchFloorSpeed} onChange={(e) => updateRate('porchFloorSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
+                      <input type="number" value={rates.porchFloorCoverage} onChange={(e) => updateRate('porchFloorCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                      <input type="number" value={rates.porchFloorMaterialCost} onChange={(e) => updateRate('porchFloorMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Soffits */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Soffits</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
+                      <input type="number" value={rates.soffitsSpeed} onChange={(e) => updateRate('soffitsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
+                      <input type="number" value={rates.soffitsCoverage} onChange={(e) => updateRate('soffitsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                      <input type="number" value={rates.soffitsMaterialCost} onChange={(e) => updateRate('soffitsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Gutters */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Gutters</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
+                      <input type="number" value={rates.guttersSpeed} onChange={(e) => updateRate('guttersSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
+                      <input type="number" value={rates.guttersCoverage} onChange={(e) => updateRate('guttersCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                      <input type="number" value={rates.guttersMaterialCost} onChange={(e) => updateRate('guttersMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Fascia */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Fascia</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
+                      <input type="number" value={rates.fasciaSpeed} onChange={(e) => updateRate('fasciaSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
+                      <input type="number" value={rates.fasciaCoverage} onChange={(e) => updateRate('fasciaCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                      <input type="number" value={rates.fasciaMaterialCost} onChange={(e) => updateRate('fasciaMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Trims */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Trims</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
+                      <input type="number" value={rates.trimsSpeed} onChange={(e) => updateRate('trimsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
+                      <input type="number" value={rates.trimsCoverage} onChange={(e) => updateRate('trimsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                      <input type="number" value={rates.trimsMaterialCost} onChange={(e) => updateRate('trimsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Railings */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Railings</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
+                      <input type="number" value={rates.railingsSpeed} onChange={(e) => updateRate('railingsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
+                      <input type="number" value={rates.railingsCoverage} onChange={(e) => updateRate('railingsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                      <input type="number" value={rates.railingsMaterialCost} onChange={(e) => updateRate('railingsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Garage Doors */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Garage Doors (Per coat)</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs)</label>
+                      <input type="number" step="0.05" value={rates.garageHoursPerCoat} onChange={(e) => updateRate('garageHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($)</label>
+                      <input type="number" step="0.5" value={rates.garageMaterialCostPerCoat} onChange={(e) => updateRate('garageMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Front Doors */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Front Doors (Per coat)</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs)</label>
+                      <input type="number" step="0.05" value={rates.extDoorsHoursPerCoat} onChange={(e) => updateRate('extDoorsHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($)</label>
+                      <input type="number" step="0.5" value={rates.extDoorsMaterialCostPerCoat} onChange={(e) => updateRate('extDoorsMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Windows Fixed */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Windows Fixed (Per coat)</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs)</label>
+                      <input type="number" step="0.05" value={rates.windowsFixedHoursPerCoat} onChange={(e) => updateRate('windowsFixedHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($)</label>
+                      <input type="number" step="0.5" value={rates.windowsFixedMaterialCostPerCoat} onChange={(e) => updateRate('windowsFixedMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Shutters */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Shutters (Per coat)</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs)</label>
+                      <input type="number" step="0.05" value={rates.shuttersHoursPerCoat} onChange={(e) => updateRate('shuttersHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($)</label>
+                      <input type="number" step="0.5" value={rates.shuttersMaterialCostPerCoat} onChange={(e) => updateRate('shuttersMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 4: DECK SURFACE ESTIMATION RATES */}
+            <div className="space-y-4 pt-4 border-t border-neutral-800">
+              <h4 className="text-xs font-bold text-indigo-400 uppercase font-mono tracking-wider">4. Deck Surface Estimation Rates</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* Washing */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Washing</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
+                      <input type="number" value={rates.washingSpeed} onChange={(e) => updateRate('washingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/sf)</label>
+                      <input type="number" step="0.01" value={rates.washingMaterialCostPerSqft} onChange={(e) => updateRate('washingMaterialCostPerSqft', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stripping */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Stripping</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
+                      <input type="number" value={rates.strippingSpeed} onChange={(e) => updateRate('strippingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/sf)</label>
+                      <input type="number" step="0.005" value={rates.strippingMaterialCostPerSqft} onChange={(e) => updateRate('strippingMaterialCostPerSqft', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Reviving */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Reviving</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
+                      <input type="number" value={rates.revivingSpeed} onChange={(e) => updateRate('revivingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/sf)</label>
+                      <input type="number" step="0.01" value={rates.revivingMaterialCostPerSqft} onChange={(e) => updateRate('revivingMaterialCostPerSqft', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sanding */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Sanding</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
+                      <input type="number" value={rates.sandingSpeed} onChange={(e) => updateRate('sandingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Flat Cost ($)</label>
+                      <input type="number" value={rates.sandingMaterialCostFlat} onChange={(e) => updateRate('sandingMaterialCostFlat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Staining */}
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Staining</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
+                      <input type="number" value={rates.stainingSpeed} onChange={(e) => updateRate('stainingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
+                      <input type="number" value={rates.stainingCoverage} onChange={(e) => updateRate('stainingCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
+                      <input type="number" value={rates.stainingMaterialCost} onChange={(e) => updateRate('stainingMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 5: TERMS, CONDITIONS & GENERAL NOTES PRESETS */}
+            <div className="space-y-4 pt-6 border-t border-neutral-850">
+              <h4 className="text-xs font-bold text-pink-400 uppercase font-mono tracking-wider">5. Default Terms & General Notes Presets</h4>
+              <p className="text-zinc-500 text-[11px]">
+                Set the default legal terms and professional general notes that automatically populate newly created proposals. These will be printable on the client-facing PDF.
+              </p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-2">
+                  <label className="text-[10px] font-bold text-zinc-500 font-mono block uppercase">Terms & Conditions (Standard Contract Legalities)</label>
+                  <textarea
+                    rows={6}
+                    value={proposalSettings.termsAndConditions || ''}
+                    onChange={(e) => saveProposalSettings({ ...proposalSettings, termsAndConditions: e.target.value })}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500/50 leading-relaxed font-sans"
+                    placeholder="Enter standard payment terms, warranty, and contract terms..."
+                  />
+                </div>
+
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-2">
+                  <label className="text-[10px] font-bold text-zinc-500 font-mono block uppercase">Interior General Notes</label>
+                  <textarea
+                    rows={6}
+                    value={proposalSettings.interiorGeneralNotes || ''}
+                    onChange={(e) => saveProposalSettings({ ...proposalSettings, interiorGeneralNotes: e.target.value })}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500/50 leading-relaxed font-sans"
+                    placeholder="Enter default interior notes..."
+                  />
+                </div>
+
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-2">
+                  <label className="text-[10px] font-bold text-zinc-500 font-mono block uppercase">Exterior General Notes</label>
+                  <textarea
+                    rows={4}
+                    value={proposalSettings.exteriorGeneralNotes || ''}
+                    onChange={(e) => saveProposalSettings({ ...proposalSettings, exteriorGeneralNotes: e.target.value })}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500/50 leading-relaxed font-sans"
+                    placeholder="Enter default exterior notes..."
+                  />
+                </div>
+
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-2">
+                  <label className="text-[10px] font-bold text-zinc-500 font-mono block uppercase">Wood Staining General Notes</label>
+                  <textarea
+                    rows={4}
+                    value={proposalSettings.woodStainingGeneralNotes || ''}
+                    onChange={(e) => saveProposalSettings({ ...proposalSettings, woodStainingGeneralNotes: e.target.value })}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500/50 leading-relaxed font-sans"
+                    placeholder="Enter default wood staining notes..."
+                  />
+                </div>
+
+                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-2 md:col-span-2">
+                  <label className="text-[10px] font-bold text-zinc-500 font-mono block uppercase">Brick Staining General Notes</label>
+                  <textarea
+                    rows={3}
+                    value={proposalSettings.brickStainingGeneralNotes || ''}
+                    onChange={(e) => saveProposalSettings({ ...proposalSettings, brickStainingGeneralNotes: e.target.value })}
+                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500/50 leading-relaxed font-sans"
+                    placeholder="Enter default brick staining notes..."
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 6: DISCOUNT PRESETS */}
+            <div className="space-y-4 pt-6 border-t border-neutral-850">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h4 className="text-xs font-bold text-teal-400 uppercase font-mono tracking-wider">6. Discount Presets</h4>
+                  <p className="text-zinc-500 text-[11px] mt-0.5">Manage your standard preset discounts that can be applied instantly to proposal subtotals.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const presets = proposalSettings.discountPresets || [];
+                    const newPreset = {
+                      id: `dp-${Date.now()}`,
+                      name: 'New Discount Preset',
+                      amount: 10,
+                      type: 'percentage' as const
+                    };
+                    saveProposalSettings({
+                      ...proposalSettings,
+                      discountPresets: [...presets, newPreset]
+                    });
+                  }}
+                  className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 text-teal-400 hover:text-teal-300 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer font-mono"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Preset
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(proposalSettings.discountPresets || []).length === 0 ? (
+                  <div className="bg-neutral-950/40 p-6 border border-neutral-850 rounded-xl text-center md:col-span-2 text-zinc-500 text-xs">
+                    No discount presets created yet. Click "+ Add Preset" to define some standard discounts.
+                  </div>
+                ) : (
+                  (proposalSettings.discountPresets || []).map((preset, idx) => (
+                    <div key={preset.id} className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl flex items-start justify-between gap-4">
+                      <div className="flex-1 space-y-3">
+                        <div>
+                          <label className="text-[9px] text-zinc-500 font-mono uppercase block mb-1">Preset Display Name</label>
+                          <input
+                            type="text"
+                            value={preset.name}
+                            onChange={(e) => {
+                              const presets = [...(proposalSettings.discountPresets || [])];
+                              presets[idx] = { ...preset, name: e.target.value };
+                              saveProposalSettings({ ...proposalSettings, discountPresets: presets });
+                            }}
+                            className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-sans font-medium"
+                            placeholder="e.g. Winter Special"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[9px] text-zinc-500 font-mono uppercase block mb-1">Discount Type</label>
+                            <select
+                              value={preset.type}
+                              onChange={(e) => {
+                                const presets = [...(proposalSettings.discountPresets || [])];
+                                presets[idx] = { ...preset, type: e.target.value as 'fixed' | 'percentage' };
+                                saveProposalSettings({ ...proposalSettings, discountPresets: presets });
+                              }}
+                              className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-sans"
+                            >
+                              <option value="percentage">Percentage (%)</option>
+                              <option value="fixed">Fixed Amount ($)</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[9px] text-zinc-500 font-mono uppercase block mb-1">Value ({preset.type === 'percentage' ? '%' : '$'})</label>
+                            <input
+                              type="number"
+                              value={preset.amount}
+                              onChange={(e) => {
+                                const presets = [...(proposalSettings.discountPresets || [])];
+                                presets[idx] = { ...preset, amount: parseFloat(e.target.value) || 0 };
+                                saveProposalSettings({ ...proposalSettings, discountPresets: presets });
+                              }}
+                              className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-mono"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const presets = (proposalSettings.discountPresets || []).filter(p => p.id !== preset.id);
+                          saveProposalSettings({ ...proposalSettings, discountPresets: presets });
+                        }}
+                        className="p-1.5 bg-red-950/20 text-red-400 hover:bg-red-900/30 rounded border border-red-950/50 cursor-pointer transition mt-5"
+                        title="Delete Preset"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

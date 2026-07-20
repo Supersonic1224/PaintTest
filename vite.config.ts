@@ -12,8 +12,8 @@ export default defineConfig(() => {
       },
     },
     define: {
-      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL || 'https://vnmhdsipykudzlecjpbx.supabase.co'),
-      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZubWhkc2lweWt1ZHpsZWNqcGJ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4ODAzMTQsImV4cCI6MjA5NzQ1NjMxNH0.KtilCYKcydD0PbrPQd25PQGst52jr_kEQ6W6Gax7__8'),
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL || ''),
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || ''),
       'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(process.env.GOOGLE_MAPS_PLATFORM_KEY || ''),
     },
     server: {

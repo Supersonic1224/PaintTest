@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ClientLead, ProjectDetails as ProjectType, RoomSpec, ProjectTask, PaintColor } from '../types';
+import { ClientLead, ProjectDetails as ProjectType, RoomSpec, ProjectTask, PaintColor, ProposalSettings, DEFAULT_PROPOSAL_SETTINGS, Installment } from '../types';
 import { googleSignIn, setAccessToken } from '../firebase';
 import { sendProposalEmail } from '../gmailService';
-import { generateProposalPDF } from '../pdfGenerator';
+import { generateProposalPDF, generateReceiptPDF } from '../pdfGenerator';
+import { uploadProjectPhotoToSupabaseBucket } from '../supabaseService';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import { 
   ArrowLeft, 
@@ -34,20 +35,65 @@ import {
   Upload,
   FileText,
   CreditCard,
-  Menu
+  Menu,
+  ShieldAlert,
+  Globe,
+  ExternalLink,
+  Diamond
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface ProjectDetailsProps {
+  key?: string;
   project: ProjectType;
   client: ClientLead;
   driveToken: string | null;
+  dbProvider?: 'firestore' | 'supabase';
   onBack: () => void;
   onSaveProject: (updated: ProjectType) => Promise<void>;
   onDeleteProject: (projectId: string) => Promise<void>;
   onSaveClient?: (updatedClient: ClientLead) => Promise<void>;
   onOpenMenu?: () => void;
 }
+
+// Define interface for custom area preset
+interface AreaPreset {
+  label: string;
+  calcType: 'wall' | 'ceiling' | 'perimeter' | 'item';
+  defaultQty: number | 'auto';
+  defaultCoats: number;
+}
+
+const PRESET_AREAS: Record<'interior' | 'exterior' | 'deck', AreaPreset[]> = {
+  interior: [
+    { label: 'Accent Wall', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Crown Moulding', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Chair Rail', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Wainscoting', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Baseboard Accent', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Accent Ceiling', calcType: 'ceiling', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Cabinets (Qty)', calcType: 'item', defaultQty: 10, defaultCoats: 2 },
+    { label: 'Closet Shelving', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Door Trim (Qty)', calcType: 'item', defaultQty: 2, defaultCoats: 2 },
+    { label: 'Fireplace Mantel', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { label: 'Stairs/Spindles', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { label: 'Radiators (Qty)', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+  ],
+  exterior: [
+    { label: 'Accent Siding', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Deck/Porch Railing', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Pillars/Columns (Qty)', calcType: 'item', defaultQty: 2, defaultCoats: 2 },
+    { label: 'Cornerboards', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Foundation Wall', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Shed/Gazebo', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+  ],
+  deck: [
+    { label: 'Railing Spindles', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Under-decking', calcType: 'ceiling', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Support Posts (Qty)', calcType: 'item', defaultQty: 4, defaultCoats: 2 },
+    { label: 'Stair Risers (Qty)', calcType: 'item', defaultQty: 5, defaultCoats: 2 },
+  ],
+};
 
 // Define interface for Room config options
 interface AreaConfig {
@@ -60,6 +106,7 @@ export default function ProjectDetails({
   project,
   client,
   driveToken,
+  dbProvider,
   onBack,
   onSaveProject,
   onDeleteProject,
@@ -70,9 +117,9 @@ export default function ProjectDetails({
   // Localized form states
   const [proposalNo, setProposalNo] = useState(project.id);
   const [clientName, setClientName] = useState(client.name);
-  const [clientAddress, setClientAddress] = useState(client.address || '45 Overlea Blvd, East York, ON M4H 1C3, Canada');
-  const [clientPhone, setClientPhone] = useState(client.phone || '289-829-1549');
-  const [clientEmail, setClientEmail] = useState(client.email || 'aalnasih4846@gmail.com');
+  const [clientAddress, setClientAddress] = useState(client.address || '');
+  const [clientPhone, setClientPhone] = useState(client.phone || '');
+  const [clientEmail, setClientEmail] = useState(client.email || '');
   const [projectDate, setProjectDate] = useState(() => {
     try {
       return project.createdAt ? project.createdAt.slice(0, 10) : '2026-06-10';
@@ -83,28 +130,60 @@ export default function ProjectDetails({
 
   // Interactive Client Signature & Acceptance state variables
   const [clientSigned, setClientSigned] = useState<boolean>(() => {
+    if (project.clientSigned !== undefined) return project.clientSigned;
     return localStorage.getItem(`proposal-signed-${project.id}`) === 'true';
   });
   const [signerName, setSignerName] = useState<string>(() => {
+    if (project.signerName) return project.signerName;
     return localStorage.getItem(`signer-name-${project.id}`) || client.name || '';
   });
   const [signerTitle, setSignerTitle] = useState<string>(() => {
+    if (project.signerTitle) return project.signerTitle;
     return localStorage.getItem(`signer-title-${project.id}`) || 'Homeowner';
   });
   const [signedDate, setSignedDate] = useState<string>(() => {
+    if (project.signedDate) return project.signedDate;
     return localStorage.getItem(`signer-date-${project.id}`) || '';
   });
 
   // Gmail Sender integration state variables
   const [localToken, setLocalToken] = useState<string | null>(driveToken);
-  const [gmailRecipient, setGmailRecipient] = useState<string>(client.email || 'aalnasih4846@gmail.com');
+  const [gmailRecipient, setGmailRecipient] = useState<string>(client.email || '');
   const [gmailSubject, setGmailSubject] = useState<string>(`Proposal - Painting Estimate for ${client.name} (#${project.id})`);
   const [gmailMessage, setGmailMessage] = useState<string>(
-    `Hi ${client.name},\n\nPlease find attached the painting proposal for your project (#${project.id}). You can view the full details and sign the agreement directly using the link below.\n\nThank you,\nPaintNav Estimating Team`
+    `Hi ${client.name},\n\nPlease find attached the painting proposal for your project (#${project.id}).\n\nYou can review, approve, and sign this proposal instantly online by clicking the "Review & Sign Proposal Online" button below, or view the attached official PDF document.\n\nThank you,\nPaintNav Estimating Team`
   );
   const [isSendingGmail, setIsSendingGmail] = useState<boolean>(false);
   const [gmailSuccess, setGmailSuccess] = useState<boolean>(false);
   const [gmailError, setGmailError] = useState<string>('');
+  const [gmailAuthError, setGmailAuthError] = useState<'popup-blocked' | 'unauthorized-domain' | 'generic' | null>(null);
+  const [isAuthenticating, setIsAuthenticating] = useState<boolean>(false);
+
+  const renderErrorWithLinks = (errorText: string) => {
+    if (!errorText) return null;
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const parts = errorText.split(urlRegex);
+    return (
+      <span>
+        {parts.map((part, i) => {
+          if (part.match(urlRegex)) {
+            return (
+              <a
+                key={i}
+                href={part}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 underline font-bold break-all inline"
+              >
+                {part}
+              </a>
+            );
+          }
+          return part;
+        })}
+      </span>
+    );
+  };
 
   // Sync localToken with driveToken when it changes
   useEffect(() => {
@@ -120,6 +199,7 @@ export default function ProjectDetails({
   const [mapsErrorType, setMapsErrorType] = useState<'NONE' | 'BILLING' | 'DENIED'>('NONE');
   const [showOfflineFallbackModal, setShowOfflineFallbackModal] = useState<boolean>(false);
   const [showSendProposalEmailModal, setShowSendProposalEmailModal] = useState<boolean>(false);
+  const [presetTab, setPresetTab] = useState<'interior' | 'exterior' | 'deck'>('interior');
 
   // Stripe Integration States
   const [isSendingStripe, setIsSendingStripe] = useState<boolean>(false);
@@ -258,14 +338,114 @@ export default function ProjectDetails({
 
   // State parameter for Labor hourly rate - precisely customized to the reference
   const [hourlyLaborRate, setHourlyLaborRate] = useState<number>(() => {
-    return project.id === '26061001' ? 101.13 : 85.00;
+    if (project.id === '26061001') return 101.13;
+    const saved = localStorage.getItem('proposal_settings');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed?.rates?.hourlyLaborRate) {
+          return parsed.rates.hourlyLaborRate;
+        }
+      } catch (e) {}
+    }
+    return 85.00;
+  });
+
+  const [taxRate, setTaxRate] = useState<number>(() => {
+    return project.summary.taxRate ?? 0.13;
+  });
+
+  const [discount, setDiscount] = useState<number>(() => {
+    return project.summary.discount ?? 0;
   });
 
   const [status, setStatus] = useState<ProjectType['status']>(project.status);
+  const [installments, setInstallments] = useState<Installment[]>(() => {
+    return project.installments || [];
+  });
+  const [showCustomInvoiceModal, setShowCustomInvoiceModal] = useState<boolean>(false);
+  const [customInvoicePercent, setCustomInvoicePercent] = useState<number>(30);
+  const [customInvoiceAmount, setCustomInvoiceAmount] = useState<number>(0);
+  const [customInvoiceName, setCustomInvoiceName] = useState<string>("Upfront Deposit (30%)");
+
+  // Payment Received & Send Receipt Modals
+  const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
+  const [receiptInstallments, setReceiptInstallments] = useState<Installment[]>([]);
+  const [activeReceiptInstallmentId, setActiveReceiptInstallmentId] = useState<string | null>(null);
+  const [receiptSubject, setReceiptSubject] = useState<string>('');
+  const [receiptMessage, setReceiptMessage] = useState<string>('');
+  const [receiptNotes, setReceiptNotes] = useState<string>('');
+  const [receiptPaymentMethod, setReceiptPaymentMethod] = useState<string>('Stripe');
+  const [isSendingReceipt, setIsSendingReceipt] = useState<boolean>(false);
+
+  // Send Payment Request Modal
+  const [showRequestModal, setShowRequestModal] = useState<boolean>(false);
+  const [requestInstallmentId, setRequestInstallmentId] = useState<string>('');
+  const [requestSubject, setRequestSubject] = useState<string>('');
+  const [requestMessage, setRequestMessage] = useState<string>('');
+  const [isSendingRequest, setIsSendingRequest] = useState<boolean>(false);
   const [inclusions, setInclusions] = useState(project.inclusions || '');
   const [exclusions, setExclusions] = useState(project.exclusions || '');
   const [specialConditions, setSpecialConditions] = useState(project.specialConditions || '');
   const [teamNotes, setTeamNotes] = useState(project.teamNotes || '');
+  const [selectedRoomIds, setSelectedRoomIds] = useState<Record<string, boolean>>({});
+  const [selectedAreas, setSelectedAreas] = useState<Record<string, boolean>>({});
+  const [selectMode, setSelectMode] = useState<boolean>(false);
+  const [addingAreaRoomId, setAddingAreaRoomId] = useState<string | null>(null);
+
+  const [generalNotes, setGeneralNotes] = useState(() => {
+    if (project.generalNotes !== undefined) return project.generalNotes;
+    const saved = localStorage.getItem('proposal_settings');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.interiorGeneralNotes || parsed.generalNotes || '';
+      } catch (e) {}
+    }
+    return '';
+  });
+
+  const [termsAndConditions, setTermsAndConditions] = useState(() => {
+    if (project.termsAndConditions !== undefined) return project.termsAndConditions;
+    const saved = localStorage.getItem('proposal_settings');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.termsAndConditions || '';
+      } catch (e) {}
+    }
+    return '';
+  });
+
+  const [proposalSettings, setProposalSettings] = useState<ProposalSettings>(() => {
+    const saved = localStorage.getItem('proposal_settings');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        // ignore
+      }
+    }
+    return DEFAULT_PROPOSAL_SETTINGS;
+  });
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      const saved = localStorage.getItem('proposal_settings');
+      if (saved) {
+        try {
+          setProposalSettings(JSON.parse(saved));
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+    window.addEventListener('proposal_settings_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('proposal_settings_updated', handleUpdate);
+    };
+  }, []);
+
   const [rooms, setRooms] = useState<RoomSpec[]>(() => {
     // If the project is the mockup baseline (ID 26061001) and has no rooms, seed with Entrance.
     // Otherwise, start cleanly with no configured room specs if the user has none.
@@ -356,6 +536,12 @@ export default function ProjectDetails({
 
   // Photos tracker: State with automated persistence
   const [photos, setPhotos] = useState<{ id: string; url: string; caption: string; createdAt: string }[]>(() => {
+    // 1. First priority: Check if the project object itself contains photos (loaded from Supabase / Firestore)
+    if (project.photos && project.photos.length > 0) {
+      return project.photos;
+    }
+
+    // 2. Second priority: Fall back to localStorage if available
     try {
       const saved = localStorage.getItem(`proposal-photos-${project.id}`);
       if (saved) return JSON.parse(saved);
@@ -363,21 +549,26 @@ export default function ProjectDetails({
       console.error(e);
     }
 
-    // High fidelity presets for premium design feel
-    return [
-      {
-        id: 'photo-1',
-        url: 'https://images.unsplash.com/photo-1562259949-e8e7689d7828?auto=format&fit=crop&w=400&q=80',
-        caption: 'Foyer plaster repairs and tape preparation',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'photo-2',
-        url: 'https://images.unsplash.com/photo-1589939705384-5185137a7f0f?auto=format&fit=crop&w=400&q=80',
-        caption: 'Premium primer baseboards coating application',
-        createdAt: new Date().toISOString()
-      }
-    ];
+    // 3. Third priority: Pre-populate with high fidelity presets ONLY if this is the default mockup proposal (ID: 26061001)
+    if (project.id === '26061001') {
+      return [
+        {
+          id: 'photo-1',
+          url: 'https://images.unsplash.com/photo-1562259949-e8e7689d7828?auto=format&fit=crop&w=400&q=80',
+          caption: 'Foyer plaster repairs and tape preparation',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'photo-2',
+          url: 'https://images.unsplash.com/photo-1589939705384-5185137a7f0f?auto=format&fit=crop&w=400&q=80',
+          caption: 'Premium primer baseboards coating application',
+          createdAt: new Date().toISOString()
+        }
+      ];
+    }
+
+    // Otherwise, return a clean empty list for new proposals
+    return [];
   });
 
   useEffect(() => {
@@ -388,13 +579,35 @@ export default function ProjectDetails({
     }
   }, [photos, project.id]);
 
-  // Handle local image uploads via client-side base64 FileReader
+  // Handle local image uploads via client-side base64 FileReader with optional Supabase bucket upload
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    Array.from(files).forEach((fileObj) => {
+    Array.from(files).forEach(async (fileObj) => {
       const file = fileObj as File;
+
+      // If active provider is Supabase, attempt bucket upload first!
+      if (dbProvider === 'supabase') {
+        try {
+          triggerNotification(`Uploading "${file.name}" to Supabase storage...`, 'success');
+          const publicUrl = await uploadProjectPhotoToSupabaseBucket(project.id, file);
+          const newPhoto = {
+            id: `photo-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            url: publicUrl,
+            caption: file.name.split('.')[0] || 'Uncaptioned site photo',
+            createdAt: new Date().toISOString()
+          };
+          setPhotos(prev => [...prev, newPhoto]);
+          triggerNotification(`Photo "${file.name}" saved to Supabase successfully.`);
+          return; // Skip base64 fallback since storage upload succeeded
+        } catch (err: any) {
+          console.warn('Supabase storage upload failed, falling back to local Base64 storage:', err);
+          triggerNotification('Storage upload failed, saving locally in project database...', 'error');
+        }
+      }
+
+      // Fallback: Read as base64 FileReader (compatible with Firestore or empty storage buckets)
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
@@ -426,6 +639,434 @@ export default function ProjectDetails({
     return false;
   }, [rooms, hourlyLaborRate, project.rooms]);
 
+  const getRoomsBreakdownText = () => {
+    return rooms.map(room => {
+      const specParts = [];
+      if (room.walls?.checked) specParts.push(`Walls (${room.walls.coats} coats)`);
+      if (room.ceilings?.checked) specParts.push(`Ceilings (${room.ceilings.coats} coats)`);
+      if (room.baseboards?.checked) specParts.push(`Baseboards (${room.baseboards.coats} coats)`);
+      if (room.windows?.checked) specParts.push(`Windows (${room.windows.coats} coats)`);
+      if (room.doors?.checked) specParts.push(`Doors (${room.doors.coats} coats)`);
+      if (room.doorFrames?.checked) specParts.push(`Door Frames (${room.doorFrames.coats} coats)`);
+      
+      const price = liveSummary.roomCosts[room.id] || 0;
+      return `- ${room.name} (${room.length}'x${room.width}'x${room.height}'): ${specParts.join(', ') || 'No surfaces spec'} [Est: $${price.toLocaleString()}]`;
+    }).join('\n');
+  };
+
+  const downloadProposalPDF = () => {
+    try {
+      const { blobUrl } = generateProposalPDF({
+        project,
+        client,
+        rooms,
+        liveSummary,
+        inclusions,
+        exclusions,
+        specialConditions,
+        signerName,
+        signerTitle,
+        signedDate,
+        clientSigned,
+        clientAddress,
+        clientPhone,
+        clientEmail,
+        projectDate,
+        proposalNo,
+        generalNotes,
+        termsAndConditions,
+        signatureDataUrl: project.signatureDataUrl,
+        installments: project.installments || installments,
+      });
+      if (blobUrl) {
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = clientSigned ? `Signed_Proposal_${proposalNo}.pdf` : `Draft_Proposal_${proposalNo}.pdf`;
+        link.click();
+        triggerNotification('PDF generated and downloaded successfully!', 'success');
+      } else {
+        triggerNotification('Could not generate PDF download.', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      triggerNotification('PDF generation failed.', 'error');
+    }
+  };
+
+  const downloadReceiptPDF = (inst: Installment) => {
+    try {
+      const activeInstallments = installments || [];
+      const { blobUrl } = generateReceiptPDF({
+        project,
+        client: {
+          ...client,
+          name: clientName,
+          address: clientAddress,
+          phone: clientPhone,
+          email: clientEmail,
+        },
+        installment: inst,
+        allInstallments: activeInstallments,
+      });
+
+      if (blobUrl) {
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = `Receipt_${proposalNo}_${inst.id}.pdf`;
+        link.click();
+        triggerNotification('Receipt PDF downloaded successfully!', 'success');
+      } else {
+        triggerNotification('Could not generate receipt PDF.', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      triggerNotification('Receipt PDF generation failed.', 'error');
+    }
+  };
+
+  const getPhotoEmailAttachments = async () => {
+    const imageAttachments: Array<{ filename: string; base64: string; contentType: string }> = [];
+    for (let i = 0; i < photos.length; i++) {
+      const photo = photos[i];
+      try {
+        if (photo.url.startsWith('data:')) {
+          const matches = photo.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            const contentType = matches[1];
+            const base64 = matches[2];
+            imageAttachments.push({
+              filename: `${photo.caption || `photo_${i + 1}`}.${contentType.split('/')[1] || 'png'}`,
+              base64,
+              contentType,
+            });
+          }
+        } else if (photo.url.startsWith('http')) {
+          const res = await fetch(photo.url);
+          const blob = await res.blob();
+          
+          const reader = new FileReader();
+          const base64Promise = new Promise<string>((resolve, reject) => {
+            reader.onloadend = () => {
+              const base64data = reader.result as string;
+              const b64 = base64data.split(',')[1];
+              resolve(b64);
+            };
+            reader.onerror = reject;
+          });
+          reader.readAsDataURL(blob);
+          const base64 = await base64Promise;
+          
+          imageAttachments.push({
+            filename: `${photo.caption || `photo_${i + 1}`}.${blob.type.split('/')[1] || 'png'}`,
+            base64,
+            contentType: blob.type || 'image/png',
+          });
+        }
+      } catch (err) {
+        console.error("Failed to attach photo:", photo.caption, err);
+      }
+    }
+    return imageAttachments;
+  };
+
+  const handleOpenInvoiceModalWithPreset = (percent: number, defaultName: string) => {
+    setCustomInvoicePercent(percent);
+    const amount = Math.round(liveSummary.total * (percent / 100));
+    setCustomInvoiceAmount(amount);
+    setCustomInvoiceName(defaultName);
+    setShowCustomInvoiceModal(true);
+  };
+
+  const handleCustomInvoicePercentChange = (pct: number) => {
+    setCustomInvoicePercent(pct);
+    setCustomInvoiceAmount(Math.round(liveSummary.total * (pct / 100)));
+  };
+
+  const handleCustomInvoiceAmountChange = (amt: number) => {
+    setCustomInvoiceAmount(amt);
+    if (liveSummary.total > 0) {
+      setCustomInvoicePercent(Math.round((amt / liveSummary.total) * 100));
+    }
+  };
+
+  const generateReceiptEmailTemplate = (insts: Installment[]) => {
+    const paidItems = insts.filter(i => i.status === 'Paid');
+    const detailsText = paidItems.map(i => `- ${i.name}: $${i.amount.toLocaleString()} (Paid on ${i.paidAt || new Date().toLocaleDateString()})`).join('\n');
+    
+    const outstandingItems = insts.filter(i => i.status !== 'Paid');
+    const outstandingText = outstandingItems.map(i => `- ${i.name}: $${i.amount.toLocaleString()} (Pending)`).join('\n');
+    
+    const totalPaid = paidItems.reduce((sum, i) => sum + i.amount, 0);
+    const totalRemaining = outstandingItems.reduce((sum, i) => sum + i.amount, 0);
+
+    return `Hi ${clientName},\n\nThank you for your payment! We have received and recorded your payment.\n\n` +
+      `**Payment Received details:**\n${detailsText || 'No payments recorded.'}\n\n` +
+      `**Total Paid on Receipt:** $${totalPaid.toLocaleString()}\n\n` +
+      (outstandingText ? `**Remaining Payment Schedule:**\n${outstandingText}\n**Total Remaining Balance:** $${totalRemaining.toLocaleString()}\n\n` : '') +
+      `Please let us know if you have any questions.\n\nThank you,\nPaintNav Estimating Team`;
+  };
+
+  const generateRequestEmailTemplate = (inst: Installment) => {
+    return `Hi ${clientName},\n\nThis is a request for payment regarding the installment: **${inst.name}** for your painting project #${proposalNo}.\n\n` +
+      `**Installment Request Details:**\n` +
+      `- Installment: ${inst.name}\n` +
+      `- Percentage: ${inst.percentage}%\n` +
+      `- Amount Due: $${inst.amount.toLocaleString()}\n` +
+      (inst.stripeInvoiceUrl ? `- Secure Payment Link: ${inst.stripeInvoiceUrl}\n` : '') +
+      `\nPlease review and make payment at your earliest convenience.\n\nThank you,\nPaintNav Estimating Team`;
+  };
+
+  const handleOpenReceiptModal = (preselectInstallmentId?: string) => {
+    let currentInsts = (installments || []).map(inst => ({ ...inst }));
+    
+    if (currentInsts.length === 0) {
+      currentInsts = [
+        {
+          id: 'inst-deposit',
+          name: 'Upfront Deposit (30%)',
+          percentage: 30,
+          amount: Math.round(liveSummary.total * 0.3),
+          status: 'Paid',
+          paidAt: new Date().toLocaleDateString()
+        },
+        {
+          id: 'inst-balance',
+          name: 'Remaining Balance (70%)',
+          percentage: 70,
+          amount: Math.round(liveSummary.total * 0.7),
+          status: 'Paid',
+          paidAt: new Date().toLocaleDateString()
+        }
+      ];
+    } else if (preselectInstallmentId) {
+      currentInsts.forEach(inst => {
+        if (inst.id === preselectInstallmentId) {
+          inst.status = 'Paid';
+          if (!inst.paidAt) {
+            inst.paidAt = new Date().toLocaleDateString();
+          }
+        }
+      });
+    }
+
+    if (preselectInstallmentId) {
+      setActiveReceiptInstallmentId(preselectInstallmentId);
+    } else {
+      const firstPaid = currentInsts.find(i => i.status === 'Paid');
+      setActiveReceiptInstallmentId(firstPaid ? firstPaid.id : null);
+    }
+
+    setReceiptInstallments(currentInsts);
+    setReceiptSubject(`Payment Receipt: PaintNav Estimate #${proposalNo}`);
+    setReceiptNotes('');
+    setReceiptPaymentMethod('Stripe');
+    
+    const initialBody = generateReceiptEmailTemplate(currentInsts);
+    setReceiptMessage(initialBody);
+    
+    setShowReceiptModal(true);
+  };
+
+  const updateReceiptBodyWithInstallments = (updatedInsts: Installment[]) => {
+    const newBody = generateReceiptEmailTemplate(updatedInsts);
+    setReceiptMessage(newBody);
+  };
+
+  const handleOpenRequestModal = (instId: string) => {
+    const inst = (installments || []).find(i => i.id === instId);
+    if (!inst) return;
+
+    setRequestInstallmentId(instId);
+    setRequestSubject(`Payment Request: ${inst.name} (Estimate #${proposalNo})`);
+    
+    const initialBody = generateRequestEmailTemplate(inst);
+    setRequestMessage(initialBody);
+    
+    setShowRequestModal(true);
+  };
+
+  const handleDispatchPaymentRequest = async () => {
+    setIsSendingRequest(true);
+    try {
+      if (!localToken) {
+        triggerNotification('Gmail is not authorized. Please authorize Gmail first.', 'error');
+        return;
+      }
+
+      await sendProposalEmail({
+        accessToken: localToken,
+        to: clientEmail,
+        subject: requestSubject,
+        body: requestMessage.replace(/\n/g, '<br>'),
+      });
+
+      const updated = (installments || []).map(item => {
+        if (item.id === requestInstallmentId) {
+          return { 
+            ...item, 
+            status: 'Requested' as const, 
+            requestedAt: new Date().toLocaleDateString() 
+          };
+        }
+        return item;
+      });
+
+      setInstallments(updated);
+      const updatedProj = { ...project, id: proposalNo, installments: updated };
+      await handleSaveBoth(updatedProj);
+
+      setShowRequestModal(false);
+      triggerNotification(`Payment request email dispatched to ${clientEmail} successfully!`, 'success');
+    } catch (err: any) {
+      console.error(err);
+      triggerNotification(err?.message || 'Failed to dispatch payment request.', 'error');
+    } finally {
+      setIsSendingRequest(false);
+    }
+  };
+
+  const handleDispatchReceiptAndRecordPayment = async () => {
+    setIsSendingReceipt(true);
+    try {
+      setInstallments(receiptInstallments);
+      const updatedProj = { 
+        ...project, 
+        id: proposalNo, 
+        installments: receiptInstallments 
+      };
+
+      const isAllPaid = receiptInstallments.length > 0 && receiptInstallments.every(i => i.status === 'Paid');
+      const nextStatus = isAllPaid ? 'Completed' : status;
+
+      await handleSaveBoth(updatedProj, nextStatus as any);
+
+      if (localToken) {
+        // Generate the receipt PDF to attach
+        const activeId = activeReceiptInstallmentId || (receiptInstallments.find(i => i.status === 'Paid')?.id) || '';
+        const activeInst = receiptInstallments.find(i => i.id === activeId) || receiptInstallments[0];
+
+        let pdfAttachment: any = null;
+        if (activeInst) {
+          try {
+            const { base64: receiptPdfBase64 } = generateReceiptPDF({
+              project: updatedProj,
+              client: {
+                ...client,
+                name: clientName,
+                address: clientAddress,
+                phone: clientPhone,
+                email: clientEmail,
+              } as any,
+              installment: activeInst,
+              allInstallments: receiptInstallments,
+            });
+            pdfAttachment = {
+              filename: `Receipt_${proposalNo}_${activeInst.id}.pdf`,
+              base64: receiptPdfBase64,
+              contentType: 'application/pdf',
+            };
+          } catch (pdfErr) {
+            console.error('Failed to generate PDF for attachment:', pdfErr);
+          }
+        }
+
+        await sendProposalEmail({
+          accessToken: localToken,
+          to: clientEmail,
+          subject: receiptSubject,
+          body: receiptMessage.replace(/\n/g, '<br>'),
+          attachments: pdfAttachment ? [pdfAttachment] : []
+        });
+        triggerNotification(`Payment recorded and receipt with PDF sent successfully!`, 'success');
+      } else {
+        triggerNotification(`Payment recorded successfully! (Gmail not connected for receipt)`, 'success');
+      }
+
+      setShowReceiptModal(false);
+    } catch (err: any) {
+      console.error(err);
+      triggerNotification(err?.message || 'Failed to record payment or send receipt.', 'error');
+    } finally {
+      setIsSendingReceipt(false);
+    }
+  };
+
+  const handleDispatchCustomInvoice = async () => {
+    if (customInvoiceAmount <= 0) {
+      triggerNotification("Invoice amount must be greater than 0.", "error");
+      return;
+    }
+
+    setIsSendingStripe(true);
+    setStripeError(null);
+    setStripeInvoiceUrl(null);
+
+    try {
+      const specsText = getRoomsBreakdownText();
+      const descriptionText = `${customInvoiceName}\n\nConfigured Room Specifications:\n${specsText}`;
+
+      const response = await fetch('/api/stripe/send-bill', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          clientEmail,
+          clientName,
+          amount: customInvoiceAmount,
+          proposalNo,
+          description: descriptionText
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (data.requiresConfig) {
+          setShowStripeConfigModal(true);
+          setStripeError(data.error);
+          triggerNotification('Stripe API Key required.', 'error');
+        } else {
+          setStripeError(data.error || 'Failed to dispatch Stripe invoice.');
+          triggerNotification(data.error || 'Stripe billing failed.', 'error');
+        }
+        return;
+      }
+
+      const newInst = {
+        id: `inst-${Date.now()}`,
+        name: customInvoiceName,
+        percentage: customInvoicePercent,
+        amount: customInvoiceAmount,
+        status: 'Requested' as const,
+        requestedAt: new Date().toLocaleDateString(),
+        stripeInvoiceId: data.invoiceId,
+        stripeInvoiceUrl: data.invoiceUrl,
+      };
+
+      const updatedInstallments = [...(installments || []), newInst];
+      setInstallments(updatedInstallments);
+
+      const nextStatus = status === 'Approved' ? 'Invoiced' : status;
+
+      const updatedProj = {
+        ...project,
+        id: proposalNo,
+        installments: updatedInstallments,
+        status: nextStatus as any
+      };
+      
+      await handleSaveBoth(updatedProj, nextStatus as any);
+      setShowCustomInvoiceModal(false);
+      triggerNotification(`Stripe invoice for $${customInvoiceAmount} sent successfully!`, 'success');
+    } catch (err: any) {
+      console.error(err);
+      triggerNotification('Stripe invoice failed.', 'error');
+    } finally {
+      setIsSendingStripe(false);
+    }
+  };
+
   // Adaptive send button progression config
   const getProgressSendButtonConfig = () => {
     switch (status) {
@@ -442,20 +1083,7 @@ export default function ProjectDetails({
           return {
             label: 'Send Change Order',
             onClick: async () => {
-              const updated: ProjectType = {
-                ...project,
-                id: proposalNo,
-                status: 'Sent',
-                rooms,
-                summary: {
-                  laborCost: liveSummary.laborCost,
-                  materialCost: liveSummary.materialCost,
-                  taxRate: 0.13,
-                  discount: 0,
-                  totalPrice: liveSummary.total,
-                },
-                updatedAt: new Date().toISOString(),
-              };
+              const updated = getLatestProjectPayload('Sent');
               await handleSaveBoth(updated);
               triggerNotification('Change Order CO-1 submitted successfully!');
             },
@@ -466,23 +1094,10 @@ export default function ProjectDetails({
           label: 'Mark Approved',
           onClick: async () => {
             setStatus('Approved');
-            const updated: ProjectType = {
-              ...project,
-              id: proposalNo,
-              status: 'Approved',
-              rooms,
-              summary: {
-                laborCost: liveSummary.laborCost,
-                materialCost: liveSummary.materialCost,
-                taxRate: 0.13,
-                discount: 0,
-                totalPrice: liveSummary.total,
-              },
-              updatedAt: new Date().toISOString(),
-            };
+            const updated = getLatestProjectPayload('Approved');
             await handleSaveBoth(updated, 'Approved');
-            triggerNotification('Proposal accepted! Launching Stripe auto-billing...', 'success');
-            await sendStripeBill(liveSummary.total, false);
+            triggerNotification('Proposal accepted! Launching Stripe auto-billing for 30% upfront deposit...', 'success');
+            await sendStripeBill(liveSummary.deposit, false);
           },
           className: 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/10'
         };
@@ -491,22 +1106,10 @@ export default function ProjectDetails({
           label: 'Send Invoice',
           onClick: async () => {
             setStatus('Invoiced');
-            const updated: ProjectType = {
-              ...project,
-              id: proposalNo,
-              status: 'Invoiced',
-              rooms,
-              summary: {
-                laborCost: liveSummary.laborCost,
-                materialCost: liveSummary.materialCost,
-                taxRate: 0.13,
-                discount: 0,
-                totalPrice: liveSummary.total,
-              },
-              updatedAt: new Date().toISOString(),
-            };
+            const updated = getLatestProjectPayload('Invoiced');
             await handleSaveBoth(updated, 'Invoiced');
-            triggerNotification('Invoice Sent! Status transitioned to Invoiced.');
+            triggerNotification('Launching Stripe final billing for 70% balance...', 'success');
+            await sendStripeBill(liveSummary.balance, false);
           },
           className: 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-600/10'
         };
@@ -514,23 +1117,7 @@ export default function ProjectDetails({
         return {
           label: 'Send Receipt',
           onClick: async () => {
-            setStatus('Completed');
-            const updated: ProjectType = {
-              ...project,
-              id: proposalNo,
-              status: 'Completed',
-              rooms,
-              summary: {
-                laborCost: liveSummary.laborCost,
-                materialCost: liveSummary.materialCost,
-                taxRate: 0.13,
-                discount: 0,
-                totalPrice: liveSummary.total,
-              },
-              updatedAt: new Date().toISOString(),
-            };
-            await handleSaveBoth(updated, 'Completed');
-            triggerNotification('Invoice paid-in-full receipt sent!');
+            handleOpenReceiptModal();
           },
           className: 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/10'
         };
@@ -578,6 +1165,93 @@ export default function ProjectDetails({
     }
 
     // Otherwise, execute our comprehensive math formula!
+    const r = proposalSettings?.rates || {
+      hourlyLaborRate: 85.00,
+      setupHours: 5.0,
+      setupMaterials: 50.00,
+      
+      wallsSpeed: 150,
+      wallsCoverage: 350,
+      wallsMaterialCost: 45,
+      
+      ceilingsSpeed: 140,
+      ceilingsCoverage: 350,
+      ceilingsMaterialCost: 40,
+      
+      baseboardsSpeed: 40,
+      baseboardsCoverage: 200,
+      baseboardsMaterialCost: 25,
+      
+      windowsHoursPerCoat: 0.75,
+      windowsMaterialCostPerCoat: 7.00,
+      
+      doorsHoursPerCoat: 0.8,
+      doorsMaterialCostPerCoat: 9.00,
+      
+      doorFramesHoursPerCoat: 0.5,
+      doorFramesMaterialCostPerCoat: 5.00,
+
+      sidingSpeed: 180,
+      sidingCoverage: 350,
+      sidingMaterialCost: 55,
+      
+      brickSpeed: 120,
+      brickCoverage: 250,
+      brickMaterialCost: 65,
+      
+      porchFloorSpeed: 150,
+      porchFloorCoverage: 350,
+      porchFloorMaterialCost: 50,
+      
+      soffitsSpeed: 50,
+      soffitsCoverage: 200,
+      soffitsMaterialCost: 40,
+      
+      guttersSpeed: 60,
+      guttersCoverage: 250,
+      guttersMaterialCost: 40,
+      
+      fasciaSpeed: 60,
+      fasciaCoverage: 250,
+      fasciaMaterialCost: 40,
+      
+      trimsSpeed: 60,
+      trimsCoverage: 250,
+      trimsMaterialCost: 40,
+      
+      garageHoursPerCoat: 0.75,
+      garageMaterialCostPerCoat: 7.50,
+      
+      extDoorsHoursPerCoat: 0.75,
+      extDoorsMaterialCostPerCoat: 7.50,
+      
+      windowsFixedHoursPerCoat: 0.50,
+      windowsFixedMaterialCostPerCoat: 6.00,
+      
+      railingsSpeed: 40,
+      railingsCoverage: 200,
+      railingsMaterialCost: 35,
+      
+      shuttersHoursPerCoat: 0.50,
+      shuttersMaterialCostPerCoat: 5.00,
+
+      washingSpeed: 200,
+      washingMaterialCostPerSqft: 0.08,
+      
+      strippingSpeed: 100,
+      strippingMaterialCostPerSqft: 0.175,
+      
+      revivingSpeed: 150,
+      revivingMaterialCostPerSqft: 0.10,
+      
+      sandingSpeed: 80,
+      sandingMaterialCostFlat: 30,
+      
+      stainingSpeed: 80,
+      stainingCoverage: 250,
+      stainingMaterialCost: 60,
+    };
+
     let totalHours = 0;
     let totalMaterials = 0;
     const roomCosts: Record<string, number> = {};
@@ -595,53 +1269,212 @@ export default function ProjectDetails({
       const cArea = rL * rW;
       const perimeter = 2 * (rL + rW);
 
-      // Extract specific selections
-      const rWalls = (room as any).walls || { checked: true, qty: 'auto', coats: 2 };
-      const rCeilings = (room as any).ceilings || { checked: true, qty: 'auto', coats: 2 };
-      const rBaseboards = (room as any).baseboards || { checked: true, qty: 'auto', coats: 2 };
-      const rWindows = (room as any).windows || { checked: true, qty: 2, coats: 2 };
-      const rDoors = (room as any).doors || { checked: true, qty: 2, coats: 2 };
-      const rDoorFrames = (room as any).doorFrames || { checked: true, qty: 2, coats: 2 };
+      const category = room.category || 'interior';
 
-      // Walls
-      if (rWalls.checked) {
-        // approx 150 sqft/hour base application rate per coat
-        rHours += (wArea / 150) * rWalls.coats;
-        // materials: 350 sqft per gallon, paint cost ~ $55/gal base config
-        rMaterials += (wArea / 350) * rWalls.coats * 45;
-      }
-      
-      // Ceilings
-      if (rCeilings.checked) {
-        rHours += (cArea / 140) * rCeilings.coats;
-        rMaterials += (cArea / 350) * rCeilings.coats * 40;
+      if (category === 'exterior') {
+        // Siding
+        const rSiding = (room as any)['ext-siding'] || { checked: false, coats: 2 };
+        if (rSiding.checked) {
+          rHours += (wArea / r.sidingSpeed) * rSiding.coats;
+          rMaterials += (wArea / r.sidingCoverage) * rSiding.coats * r.sidingMaterialCost;
+        }
+
+        // Brick Stain
+        const rBrick = (room as any)['ext-brick-stain'] || { checked: false, coats: 2 };
+        if (rBrick.checked) {
+          rHours += (wArea / r.brickSpeed) * rBrick.coats;
+          rMaterials += (wArea / r.brickCoverage) * rBrick.coats * r.brickMaterialCost;
+        }
+
+        // Porch Floor
+        const rPorchFloor = (room as any)['ext-porch-floor'] || { checked: false, coats: 2 };
+        if (rPorchFloor.checked) {
+          rHours += (cArea / r.porchFloorSpeed) * rPorchFloor.coats;
+          rMaterials += (cArea / r.porchFloorCoverage) * rPorchFloor.coats * r.porchFloorMaterialCost;
+        }
+
+        // Soffits
+        const rSoffits = (room as any)['ext-soffits'] || { checked: false, coats: 2 };
+        if (rSoffits.checked) {
+          rHours += (perimeter / r.soffitsSpeed) * rSoffits.coats;
+          rMaterials += (perimeter / r.soffitsCoverage) * rSoffits.coats * r.soffitsMaterialCost;
+        }
+
+        // Gutters
+        const rGutters = (room as any)['ext-gutters'] || { checked: false, coats: 2 };
+        if (rGutters.checked) {
+          rHours += (perimeter / r.guttersSpeed) * rGutters.coats;
+          rMaterials += (perimeter / r.guttersCoverage) * rGutters.coats * r.guttersMaterialCost;
+        }
+
+        // Fascia
+        const rFascia = (room as any)['ext-fascia'] || { checked: false, coats: 2 };
+        if (rFascia.checked) {
+          rHours += (perimeter / r.fasciaSpeed) * rFascia.coats;
+          rMaterials += (perimeter / r.fasciaCoverage) * rFascia.coats * r.fasciaMaterialCost;
+        }
+
+        // Trims
+        const rTrims = (room as any)['ext-trims'] || { checked: false, coats: 2 };
+        if (rTrims.checked) {
+          rHours += (perimeter / r.trimsSpeed) * rTrims.coats;
+          rMaterials += (perimeter / r.trimsCoverage) * rTrims.coats * r.trimsMaterialCost;
+        }
+
+        // Garage Door
+        const rGarage = (room as any)['ext-garage-door'] || { checked: false, qty: 1, coats: 2 };
+        if (rGarage.checked) {
+          const qty = Number(rGarage.qty) || 1;
+          rHours += qty * r.garageHoursPerCoat * rGarage.coats;
+          rMaterials += qty * r.garageMaterialCostPerCoat * rGarage.coats;
+        }
+
+        // Front Doors
+        const rExtDoors = (room as any)['ext-doors'] || { checked: false, qty: 1, coats: 2 };
+        if (rExtDoors.checked) {
+          const qty = Number(rExtDoors.qty) || 1;
+          rHours += qty * r.extDoorsHoursPerCoat * rExtDoors.coats;
+          rMaterials += qty * r.extDoorsMaterialCostPerCoat * rExtDoors.coats;
+        }
+
+        // Windows Fixed
+        const rExtWin = (room as any)['ext-windows-fixed'] || { checked: false, qty: 2, coats: 2 };
+        if (rExtWin.checked) {
+          const qty = Number(rExtWin.qty) || 2;
+          rHours += qty * r.windowsFixedHoursPerCoat * rExtWin.coats;
+          rMaterials += qty * r.windowsFixedMaterialCostPerCoat * rExtWin.coats;
+        }
+
+        // Railings
+        const rRailings = (room as any)['ext-railings'] || { checked: false, coats: 2 };
+        if (rRailings.checked) {
+          rHours += (perimeter / r.railingsSpeed) * rRailings.coats;
+          rMaterials += (perimeter / r.railingsCoverage) * rRailings.coats * r.railingsMaterialCost;
+        }
+
+        // Shutters
+        const rShutters = (room as any)['ext-shutters'] || { checked: false, qty: 2, coats: 2 };
+        if (rShutters.checked) {
+          const qty = Number(rShutters.qty) || 2;
+          rHours += qty * r.shuttersHoursPerCoat * rShutters.coats;
+          rMaterials += qty * r.shuttersMaterialCostPerCoat * rShutters.coats;
+        }
+      } else if (category === 'deck') {
+        // Washing
+        const rWashing = (room as any)['washing'] || { checked: false, coats: 1 };
+        if (rWashing.checked) {
+          rHours += cArea / r.washingSpeed;
+          rMaterials += cArea * r.washingMaterialCostPerSqft;
+        }
+
+        // Stripping
+        const rStripping = (room as any)['stripping'] || { checked: false, coats: 1 };
+        if (rStripping.checked) {
+          rHours += cArea / r.strippingSpeed;
+          rMaterials += cArea * r.strippingMaterialCostPerSqft;
+        }
+
+        // Reviving
+        const rReviving = (room as any)['reviving'] || { checked: false, coats: 1 };
+        if (rReviving.checked) {
+          rHours += cArea / r.revivingSpeed;
+          rMaterials += cArea * r.revivingMaterialCostPerSqft;
+        }
+
+        // Sanding
+        const rSanding = (room as any)['sanding'] || { checked: false, coats: 1 };
+        if (rSanding.checked) {
+          rHours += cArea / r.sandingSpeed;
+          rMaterials += r.sandingMaterialCostFlat;
+        }
+
+        // Staining
+        const rStaining = (room as any)['staining'] || { checked: false, coats: 2 };
+        if (rStaining.checked) {
+          rHours += (cArea / r.stainingSpeed) * rStaining.coats;
+          rMaterials += (cArea / r.stainingCoverage) * rStaining.coats * r.stainingMaterialCost;
+        }
+      } else {
+        // Extract specific selections
+        const rWalls = (room as any).walls || { checked: true, qty: 'auto', coats: 2 };
+        const rCeilings = (room as any).ceilings || { checked: true, qty: 'auto', coats: 2 };
+        const rBaseboards = (room as any).baseboards || { checked: true, qty: 'auto', coats: 2 };
+        const rWindows = (room as any).windows || { checked: true, qty: 2, coats: 2 };
+        const rDoors = (room as any).doors || { checked: true, qty: 2, coats: 2 };
+        const rDoorFrames = (room as any).doorFrames || { checked: true, qty: 2, coats: 2 };
+
+        // Walls
+        if (rWalls.checked) {
+          rHours += (wArea / r.wallsSpeed) * rWalls.coats;
+          rMaterials += (wArea / r.wallsCoverage) * rWalls.coats * r.wallsMaterialCost;
+        }
+        
+        // Ceilings
+        if (rCeilings.checked) {
+          rHours += (cArea / r.ceilingsSpeed) * rCeilings.coats;
+          rMaterials += (cArea / r.ceilingsCoverage) * rCeilings.coats * r.ceilingsMaterialCost;
+        }
+
+        // Baseboards
+        if (rBaseboards.checked) {
+          rHours += (perimeter / r.baseboardsSpeed) * rBaseboards.coats;
+          rMaterials += (perimeter / r.baseboardsCoverage) * rBaseboards.coats * r.baseboardsMaterialCost;
+        }
+
+        // Windows
+        if (rWindows.checked) {
+          const qty = Number(rWindows.qty) || 0;
+          rHours += qty * r.windowsHoursPerCoat * rWindows.coats;
+          rMaterials += qty * r.windowsMaterialCostPerCoat * rWindows.coats;
+        }
+
+        // Doors
+        if (rDoors.checked) {
+          const qty = Number(rDoors.qty) || 0;
+          rHours += qty * r.doorsHoursPerCoat * rDoors.coats;
+          rMaterials += qty * r.doorsMaterialCostPerCoat * rDoors.coats;
+        }
+
+        // Door Frames
+        if (rDoorFrames.checked) {
+          const qty = Number(rDoorFrames.qty) || 0;
+          rHours += qty * r.doorFramesHoursPerCoat * rDoorFrames.coats;
+          rMaterials += qty * r.doorFramesMaterialCostPerCoat * rDoorFrames.coats;
+        }
       }
 
-      // Baseboards
-      if (rBaseboards.checked) {
-        rHours += (perimeter / 40) * rBaseboards.coats;
-        rMaterials += (perimeter / 200) * rBaseboards.coats * 25;
-      }
+      // Custom Areas Calculation
+      if ((room as any).customAreas) {
+        (room as any).customAreas.forEach((cAreaItem: any) => {
+          if (cAreaItem.checked) {
+            const coats = Number(cAreaItem.coats) || 2;
+            const qty = cAreaItem.qty === 'auto' ? 1 : (Number(cAreaItem.qty) || 1);
+            let hours = 0;
+            let materials = 0;
 
-      // Windows
-      if (rWindows.checked) {
-        const qty = Number(rWindows.qty) || 0;
-        rHours += qty * 1.5 * (rWindows.coats / 2);
-        rMaterials += qty * 14 * (rWindows.coats / 2);
-      }
+            const speed = cAreaItem.speed || 150;
+            const coverage = cAreaItem.coverage || 350;
+            const matCost = cAreaItem.materialCost || 25;
 
-      // Doors
-      if (rDoors.checked) {
-        const qty = Number(rDoors.qty) || 0;
-        rHours += qty * 1.6 * (rDoors.coats / 2);
-        rMaterials += qty * 18 * (rDoors.coats / 2);
-      }
+            if (cAreaItem.calcType === 'wall') {
+              hours = (wArea / speed) * coats;
+              materials = (wArea / coverage) * coats * matCost;
+            } else if (cAreaItem.calcType === 'ceiling') {
+              hours = (cArea / speed) * coats;
+              materials = (cArea / coverage) * coats * matCost;
+            } else if (cAreaItem.calcType === 'perimeter') {
+              hours = (perimeter / speed) * coats;
+              materials = (perimeter / coverage) * coats * matCost;
+            } else {
+              // item
+              hours = qty * 0.75 * coats;
+              materials = qty * 7.00 * coats;
+            }
 
-      // Door Frames
-      if (rDoorFrames.checked) {
-        const qty = Number(rDoorFrames.qty) || 0;
-        rHours += qty * 1.0 * (rDoorFrames.coats / 2);
-        rMaterials += qty * 10 * (rDoorFrames.coats / 2);
+            rHours += hours;
+            rMaterials += materials;
+          }
+        });
       }
 
       // Calculate room subtotal
@@ -658,13 +1491,14 @@ export default function ProjectDetails({
 
     // Add a baseline weather/surface preparation factor for any complex workspace
     if (totalHours > 0) {
-      totalHours += 5.0; // Standard 5 hours site set-up and prep work base
-      totalMaterials += 50.00; // Paint sundries, masking paper, caulking
+      totalHours += r.setupHours; // Standard setup hours site set-up and prep work base
+      totalMaterials += r.setupMaterials; // Paint sundries, masking paper, caulking
     }
 
     const subtotal = (totalHours * hourlyLaborRate) + totalMaterials;
-    const hst = subtotal * 0.13; // 13% tax as shown in reference
-    const total = subtotal + hst;
+    const discountedSubtotal = Math.max(0, subtotal - discount);
+    const hst = discountedSubtotal * taxRate;
+    const total = discountedSubtotal + hst;
     const deposit = total * 0.30;
     const balance = total * 0.70;
 
@@ -673,6 +1507,8 @@ export default function ProjectDetails({
       laborCost: Math.round(totalHours * hourlyLaborRate),
       materialCost: Math.round(totalMaterials),
       subtotal: parseFloat(subtotal.toFixed(2)),
+      discount,
+      discountedSubtotal: parseFloat(discountedSubtotal.toFixed(2)),
       hst: parseFloat(hst.toFixed(2)),
       total: parseFloat(total.toFixed(2)),
       deposit: parseFloat(deposit.toFixed(2)),
@@ -680,7 +1516,283 @@ export default function ProjectDetails({
       roomCosts
     };
 
-  }, [rooms, hourlyLaborRate]);
+  }, [rooms, hourlyLaborRate, taxRate, discount]);
+
+  const totalPaid = useMemo(() => {
+    return (installments || [])
+      .filter(inst => inst.status === 'Paid')
+      .reduce((sum, inst) => sum + inst.amount, 0);
+  }, [installments]);
+
+  const remainingCost = useMemo(() => {
+    return Math.max(0, liveSummary.total - totalPaid);
+  }, [liveSummary.total, totalPaid]);
+
+  // Helper to calculate cost details for individual sub-selection items inside a room
+  const calculateSubItem = (room: RoomSpec, subKey: string, coats: number, qty: any) => {
+    const r = proposalSettings?.rates || {
+      hourlyLaborRate: 85.00,
+      setupHours: 5.0,
+      setupMaterials: 50.00,
+      
+      wallsSpeed: 150,
+      wallsCoverage: 350,
+      wallsMaterialCost: 45,
+      
+      ceilingsSpeed: 140,
+      ceilingsCoverage: 350,
+      ceilingsMaterialCost: 40,
+      
+      baseboardsSpeed: 40,
+      baseboardsCoverage: 200,
+      baseboardsMaterialCost: 25,
+      
+      windowsHoursPerCoat: 0.75,
+      windowsMaterialCostPerCoat: 7.00,
+      
+      doorsHoursPerCoat: 0.8,
+      doorsMaterialCostPerCoat: 9.00,
+      
+      doorFramesHoursPerCoat: 0.5,
+      doorFramesMaterialCostPerCoat: 5.00,
+
+      sidingSpeed: 180,
+      sidingCoverage: 350,
+      sidingMaterialCost: 55,
+      
+      brickSpeed: 120,
+      brickCoverage: 250,
+      brickMaterialCost: 65,
+      
+      porchFloorSpeed: 150,
+      porchFloorCoverage: 350,
+      porchFloorMaterialCost: 50,
+      
+      soffitsSpeed: 50,
+      soffitsCoverage: 200,
+      soffitsMaterialCost: 40,
+      
+      guttersSpeed: 60,
+      guttersCoverage: 250,
+      guttersMaterialCost: 40,
+      
+      fasciaSpeed: 60,
+      fasciaCoverage: 250,
+      fasciaMaterialCost: 40,
+      
+      trimsSpeed: 60,
+      trimsCoverage: 250,
+      trimsMaterialCost: 40,
+      
+      garageHoursPerCoat: 0.75,
+      garageMaterialCostPerCoat: 7.50,
+      
+      extDoorsHoursPerCoat: 0.75,
+      extDoorsMaterialCostPerCoat: 7.50,
+      
+      windowsFixedHoursPerCoat: 0.50,
+      windowsFixedMaterialCostPerCoat: 6.00,
+      
+      railingsSpeed: 40,
+      railingsCoverage: 200,
+      railingsMaterialCost: 35,
+      
+      shuttersHoursPerCoat: 0.50,
+      shuttersMaterialCostPerCoat: 5.00,
+
+      washingSpeed: 200,
+      washingMaterialCostPerSqft: 0.08,
+      
+      strippingSpeed: 100,
+      strippingMaterialCostPerSqft: 0.175,
+      
+      revivingSpeed: 150,
+      revivingMaterialCostPerSqft: 0.10,
+      
+      sandingSpeed: 80,
+      sandingMaterialCostFlat: 30,
+      
+      stainingSpeed: 80,
+      stainingCoverage: 250,
+      stainingMaterialCost: 60,
+    };
+
+    const rL = Number(room.length) || 12;
+    const rW = Number(room.width) || 12;
+    const rH = Number(room.height) || 9;
+
+    const wArea = 2 * rH * (rL + rW);
+    const cArea = rL * rW;
+    const perimeter = 2 * (rL + rW);
+
+    let hours = 0;
+    let materials = 0;
+
+    switch (subKey) {
+      // Interior
+      case 'walls':
+        hours = (wArea / r.wallsSpeed) * coats;
+        materials = (wArea / r.wallsCoverage) * coats * r.wallsMaterialCost;
+        break;
+      case 'ceilings':
+        hours = (cArea / r.ceilingsSpeed) * coats;
+        materials = (cArea / r.ceilingsCoverage) * coats * r.ceilingsMaterialCost;
+        break;
+      case 'baseboards':
+        hours = (perimeter / r.baseboardsSpeed) * coats;
+        materials = (perimeter / r.baseboardsCoverage) * coats * r.baseboardsMaterialCost;
+        break;
+      case 'windows':
+        hours = qty * r.windowsHoursPerCoat * coats;
+        materials = qty * r.windowsMaterialCostPerCoat * coats;
+        break;
+      case 'doors':
+        hours = qty * r.doorsHoursPerCoat * coats;
+        materials = qty * r.doorsMaterialCostPerCoat * coats;
+        break;
+      case 'doorFrames':
+        hours = qty * r.doorFramesHoursPerCoat * coats;
+        materials = qty * r.doorFramesMaterialCostPerCoat * coats;
+        break;
+
+      // Exterior
+      case 'ext-siding':
+        hours = (wArea / r.sidingSpeed) * coats;
+        materials = (wArea / r.sidingCoverage) * coats * r.sidingMaterialCost;
+        break;
+      case 'ext-brick-stain':
+        hours = (wArea / r.brickSpeed) * coats;
+        materials = (wArea / r.brickCoverage) * coats * r.brickMaterialCost;
+        break;
+      case 'ext-porch-floor':
+        hours = (cArea / r.porchFloorSpeed) * coats;
+        materials = (cArea / r.porchFloorCoverage) * coats * r.porchFloorMaterialCost;
+        break;
+      case 'ext-soffits':
+        hours = (perimeter / r.soffitsSpeed) * coats;
+        materials = (perimeter / r.soffitsCoverage) * coats * r.soffitsMaterialCost;
+        break;
+      case 'ext-gutters':
+        hours = (perimeter / r.guttersSpeed) * coats;
+        materials = (perimeter / r.guttersCoverage) * coats * r.guttersMaterialCost;
+        break;
+      case 'ext-fascia':
+        hours = (perimeter / r.fasciaSpeed) * coats;
+        materials = (perimeter / r.fasciaCoverage) * coats * r.fasciaMaterialCost;
+        break;
+      case 'ext-trims':
+        hours = (perimeter / r.trimsSpeed) * coats;
+        materials = (perimeter / r.trimsCoverage) * coats * r.trimsMaterialCost;
+        break;
+      case 'ext-garage-door':
+        hours = qty * r.garageHoursPerCoat * coats;
+        materials = qty * r.garageMaterialCostPerCoat * coats;
+        break;
+      case 'ext-doors':
+        hours = qty * r.extDoorsHoursPerCoat * coats;
+        materials = qty * r.extDoorsMaterialCostPerCoat * coats;
+        break;
+      case 'ext-windows-fixed':
+        hours = qty * r.windowsFixedHoursPerCoat * coats;
+        materials = qty * r.windowsFixedMaterialCostPerCoat * coats;
+        break;
+      case 'ext-railings':
+        hours = (perimeter / r.railingsSpeed) * coats;
+        materials = (perimeter / r.railingsCoverage) * coats * r.railingsMaterialCost;
+        break;
+      case 'ext-shutters':
+        hours = qty * r.shuttersHoursPerCoat * coats;
+        materials = qty * r.shuttersMaterialCostPerCoat * coats;
+        break;
+
+      // Deck
+      case 'washing':
+        hours = cArea / r.washingSpeed;
+        materials = cArea * r.washingMaterialCostPerSqft;
+        break;
+      case 'stripping':
+        hours = cArea / r.strippingSpeed;
+        materials = cArea * r.strippingMaterialCostPerSqft;
+        break;
+      case 'reviving':
+        hours = cArea / r.revivingSpeed;
+        materials = cArea * r.revivingMaterialCostPerSqft;
+        break;
+      case 'sanding':
+        hours = cArea / r.sandingSpeed;
+        materials = r.sandingMaterialCostFlat;
+        break;
+      case 'staining':
+        hours = (cArea / r.stainingSpeed) * coats;
+        materials = (cArea / r.stainingCoverage) * coats * r.stainingMaterialCost;
+        break;
+      default:
+        if (subKey.startsWith('custom-')) {
+          const customItem = ((room as any).customAreas || []).find((c: any) => c.key === subKey);
+          if (customItem) {
+            const speed = customItem.speed || 150;
+            const coverage = customItem.coverage || 350;
+            const matCost = customItem.materialCost || 25;
+            const qtyVal = qty === 'auto' ? 1 : (Number(qty) || 1);
+
+            if (customItem.calcType === 'wall') {
+              hours = (wArea / speed) * coats;
+              materials = (wArea / coverage) * coats * matCost;
+            } else if (customItem.calcType === 'ceiling') {
+              hours = (cArea / speed) * coats;
+              materials = (cArea / coverage) * coats * matCost;
+            } else if (customItem.calcType === 'perimeter') {
+              hours = (perimeter / speed) * coats;
+              materials = (perimeter / coverage) * coats * matCost;
+            } else {
+              hours = qtyVal * 0.75 * coats;
+              materials = qtyVal * 7.00 * coats;
+            }
+          }
+        }
+        break;
+    }
+
+    const labor = hours * hourlyLaborRate;
+    const total = labor + materials;
+
+    return {
+      hours: parseFloat(hours.toFixed(1)),
+      laborCost: Math.round(labor),
+      materialCost: Math.round(materials),
+      total: Math.round(total)
+    };
+  };
+
+  // Helper to generate the complete project details payload with all current state variables
+  const getLatestProjectPayload = (targetStatus?: ProjectType['status']): ProjectType => {
+    return {
+      ...project,
+      id: proposalNo,
+      status: targetStatus || (status as any),
+      rooms,
+      inclusions,
+      exclusions,
+      specialConditions,
+      teamNotes,
+      generalNotes,
+      termsAndConditions,
+      photos,
+      clientSigned,
+      signerName,
+      signerTitle,
+      signedDate,
+      installments,
+      summary: {
+        laborCost: liveSummary.laborCost,
+        materialCost: liveSummary.materialCost,
+        taxRate,
+        discount,
+        totalPrice: liveSummary.total,
+      },
+      updatedAt: new Date().toISOString(),
+    };
+  };
 
   // Helper to save both client and project details in unison
   const handleSaveBoth = async (updatedProject: ProjectType, targetStatus?: ProjectType['status']) => {
@@ -702,30 +1814,33 @@ export default function ProjectDetails({
     const payloadProject: ProjectType = {
       ...updatedProject,
       status: targetStatus || updatedProject.status,
+      rooms,
+      inclusions,
+      exclusions,
+      specialConditions,
+      teamNotes,
+      photos,
+      clientSigned,
+      signerName,
+      signerTitle,
+      signedDate,
+      installments: updatedProject.installments || installments,
+      contractorAccessToken: driveToken || updatedProject.contractorAccessToken,
+      summary: {
+        laborCost: liveSummary.laborCost,
+        materialCost: liveSummary.materialCost,
+        taxRate,
+        discount,
+        totalPrice: liveSummary.total,
+      },
+      updatedAt: new Date().toISOString(),
     };
     await onSaveProject(payloadProject);
   };
 
   // Handle saving project back to system database
   const handleSave = async () => {
-    const updated: ProjectType = {
-      ...project,
-      id: proposalNo,
-      status: status as any,
-      rooms,
-      inclusions,
-      exclusions,
-      specialConditions,
-      teamNotes,
-      summary: {
-        laborCost: liveSummary.laborCost,
-        materialCost: liveSummary.materialCost,
-        taxRate: 0.13,
-        discount: 0,
-        totalPrice: liveSummary.total,
-      },
-      updatedAt: new Date().toISOString(),
-    };
+    const updated = getLatestProjectPayload();
     await handleSaveBoth(updated);
     triggerNotification('Proposal and CRM details saved successfully!');
   };
@@ -736,23 +1851,7 @@ export default function ProjectDetails({
     setGmailError('');
     
     try {
-      const updated: ProjectType = {
-        ...project,
-        id: proposalNo,
-        status: 'Sent',
-        rooms,
-        inclusions,
-        exclusions,
-        specialConditions,
-        summary: {
-          laborCost: liveSummary.laborCost,
-          materialCost: liveSummary.materialCost,
-          taxRate: 0.13,
-          discount: 0,
-          totalPrice: liveSummary.total,
-        },
-        updatedAt: new Date().toISOString(),
-      };
+      const updated = getLatestProjectPayload('Sent');
 
       if (sendWithGmail) {
         if (!clientEmail) {
@@ -760,6 +1859,9 @@ export default function ProjectDetails({
           setIsSendingGmail(false);
           return;
         }
+
+        // Fetch project photos as base64 email attachments
+        const imageAttachments = await getPhotoEmailAttachments();
 
         const roomsList = rooms.filter(r => !r.isOption).map(room => {
           const price = liveSummary.roomCosts[room.id] || 0;
@@ -792,6 +1894,14 @@ export default function ProjectDetails({
             <h2 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">PaintNav Proposal & Estimate</h2>
             <p>Dear ${clientName},</p>
             <p>${gmailMessage.replace(/\n/g, '<br/>')}</p>
+
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${window.location.origin}/?proposalId=${project.id}&action=sign" 
+                 style="background-color: #2563eb; color: #ffffff !important; padding: 14px 28px; text-decoration: none; border-radius: 12px; font-weight: bold; display: inline-block; font-size: 15px; box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);"
+                 target="_blank">
+                ✍️ Review & Sign Proposal Online
+              </a>
+            </div>
             
             <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
               <h3 style="margin-top: 0; color: #0f172a;">Summary of Estimate #${proposalNo}</h3>
@@ -854,6 +1964,10 @@ export default function ProjectDetails({
           clientEmail,
           projectDate,
           proposalNo,
+          generalNotes,
+          termsAndConditions,
+          signatureDataUrl: project.signatureDataUrl,
+          installments: project.installments || installments,
         });
 
         await sendProposalEmail({
@@ -863,6 +1977,7 @@ export default function ProjectDetails({
           body: htmlBody,
           pdfBase64: proposalPdfBase64,
           pdfFilename: `Proposal_${proposalNo}.pdf`,
+          attachments: imageAttachments,
         });
 
         triggerNotification('Proposal dispatched to client successfully via Gmail!', 'success');
@@ -937,7 +2052,7 @@ export default function ProjectDetails({
   };
 
   // Add room preset to project spec
-  const handleAddRoomPreset = (presetName: string, length = 12, width = 12) => {
+  const handleAddRoomPreset = (presetName: string, length = 12, width = 12, category: 'interior' | 'exterior' | 'deck' = 'interior') => {
     const newId = 'room-' + Math.random().toString(36).substring(2, 9);
     
     // Copy configurations completely from sidesheet controls
@@ -950,14 +2065,36 @@ export default function ProjectDetails({
       wallsArea: 2 * cfgCeilingHeight * (length + width),
       ceilingArea: length * width,
       paints: [],
+      category,
       // Map configurations from sidesheet
-      walls: { checked: configChecked.walls, qty: 'auto', coats: configCoats.walls },
-      ceilings: { checked: configChecked.ceilings, qty: 'auto', coats: configCoats.ceilings },
-      baseboards: { checked: configChecked.baseboards, qty: 'auto', coats: configCoats.baseboards },
-      windows: { checked: configChecked.windows, qty: configQty.windows, coats: configCoats.windows },
-      doors: { checked: configChecked.doors, qty: configQty.doors, coats: configCoats.doors },
-      doorFrames: { checked: configChecked.doorFrames, qty: configQty.doorFrames, coats: configCoats.doorFrames },
-      wallPaintType: cfgWallPaint
+      walls: { checked: category === 'interior' ? configChecked.walls : false, qty: 'auto', coats: configCoats.walls },
+      ceilings: { checked: category === 'interior' ? configChecked.ceilings : false, qty: 'auto', coats: configCoats.ceilings },
+      baseboards: { checked: category === 'interior' ? configChecked.baseboards : false, qty: 'auto', coats: configCoats.baseboards },
+      windows: { checked: category === 'interior' ? configChecked.windows : false, qty: configQty.windows, coats: configCoats.windows },
+      doors: { checked: category === 'interior' ? configChecked.doors : false, qty: configQty.doors, coats: configCoats.doors },
+      doorFrames: { checked: category === 'interior' ? configChecked.doorFrames : false, qty: configQty.doorFrames, coats: configCoats.doorFrames },
+      wallPaintType: cfgWallPaint,
+
+      // Default exterior keys
+      'ext-siding': { checked: category === 'exterior', coats: 2, qty: 'auto' },
+      'ext-brick-stain': { checked: false, coats: 2, qty: 'auto' },
+      'ext-porch-floor': { checked: false, coats: 2, qty: 'auto' },
+      'ext-soffits': { checked: category === 'exterior', coats: 2, qty: 'auto' },
+      'ext-gutters': { checked: category === 'exterior', coats: 2, qty: 'auto' },
+      'ext-fascia': { checked: category === 'exterior', coats: 2, qty: 'auto' },
+      'ext-trims': { checked: category === 'exterior', coats: 2, qty: 'auto' },
+      'ext-garage-door': { checked: false, coats: 2, qty: 1 },
+      'ext-doors': { checked: false, coats: 2, qty: 1 },
+      'ext-windows-fixed': { checked: false, coats: 2, qty: 2 },
+      'ext-railings': { checked: false, coats: 2, qty: 'auto' },
+      'ext-shutters': { checked: false, coats: 2, qty: 2 },
+
+      // Default deck keys
+      'washing': { checked: category === 'deck', coats: 1, qty: 'auto' },
+      'stripping': { checked: false, coats: 1, qty: 'auto' },
+      'reviving': { checked: false, coats: 1, qty: 'auto' },
+      'sanding': { checked: category === 'deck', coats: 1, qty: 'auto' },
+      'staining': { checked: category === 'deck', coats: 2, qty: 'auto' },
     } as any;
 
     setRooms(prev => [...prev, newRoom]);
@@ -966,6 +2103,40 @@ export default function ProjectDetails({
       [newId]: true // Open accordion automatically
     }));
     triggerNotification(`Added ${presetName} spec to worksheet list!`);
+  };
+
+  // Add custom or preset area to a specific room
+  const handleAddArea = (roomToUpdate: RoomSpec, label: string, calcType: 'wall' | 'ceiling' | 'perimeter' | 'item', defaultQty: number | 'auto' = 'auto', defaultCoats: number = 2) => {
+    const key = `custom-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+    setRooms(prev => prev.map(r => {
+      if (r.id === roomToUpdate.id) {
+        const customAreas = (r as any).customAreas || [];
+        // Prevent duplicates
+        if (customAreas.some((c: any) => c.label.toLowerCase() === label.toLowerCase())) {
+          return r;
+        }
+        return {
+          ...r,
+          customAreas: [
+            ...customAreas,
+            {
+              key,
+              label,
+              checked: true,
+              qty: defaultQty,
+              coats: defaultCoats,
+              hasQty: calcType === 'item',
+              calcType,
+              defaultQty,
+              defaultCoats,
+              isOption: false
+            }
+          ]
+        };
+      }
+      return r;
+    }));
+    triggerNotification(`Added custom layer "${label}" to ${roomToUpdate.name}!`, 'success');
   };
 
   // Clone an existing room
@@ -988,15 +2159,293 @@ export default function ProjectDetails({
     triggerNotification('Removed room spec.');
   };
 
+  const handleToggleRoomSelection = (roomId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedRoomIds(prev => ({
+      ...prev,
+      [roomId]: !prev[roomId]
+    }));
+  };
+
+  const handleToggleAreaSelection = (roomId: string, areaKey: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const key = `${roomId}::${areaKey}`;
+    setSelectedAreas(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  const handleSelectAllRoomsInCategory = (catId: string, roomsList: typeof rooms) => {
+    const catRoomIds = roomsList.filter(r => (r.category || 'interior') === catId).map(r => r.id);
+    const allSelected = catRoomIds.every(id => selectedRoomIds[id]);
+    
+    setSelectedRoomIds(prev => {
+      const next = { ...prev };
+      catRoomIds.forEach(id => {
+        if (allSelected) {
+          delete next[id];
+        } else {
+          next[id] = true;
+        }
+      });
+      return next;
+    });
+  };
+
+  const getSelectedRoomIdsUnified = () => {
+    const ids = new Set<string>();
+    Object.keys(selectedRoomIds).forEach(id => {
+      if (selectedRoomIds[id]) ids.add(id);
+    });
+    Object.keys(selectedAreas).forEach(key => {
+      if (selectedAreas[key]) {
+        const [roomId] = key.split('::');
+        ids.add(roomId);
+      }
+    });
+    return Array.from(ids);
+  };
+
+  const handleBulkDuplicate = () => {
+    const roomIdsToDuplicate = getSelectedRoomIdsUnified();
+    if (roomIdsToDuplicate.length === 0) {
+      triggerNotification('No rooms or area layers selected.', 'error');
+      return;
+    }
+    
+    setRooms(prev => {
+      const duplicated: typeof rooms = [];
+      prev.forEach(room => {
+        duplicated.push(room);
+        if (roomIdsToDuplicate.includes(room.id)) {
+          const isEntireRoomSelected = !!selectedRoomIds[room.id];
+          const roomSpecificSelectedAreas = Object.keys(selectedAreas).filter(
+            key => key.startsWith(`${room.id}::`) && selectedAreas[key]
+          );
+
+          let newRoom = {
+            ...room,
+            id: `room-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            name: `${room.name} (Copy)`
+          };
+
+          if (!isEntireRoomSelected && roomSpecificSelectedAreas.length > 0) {
+            // Only keep selected area layers active, set others to checked: false
+            const keys = ['walls', 'ceilings', 'baseboards', 'windows', 'doors', 'doorFrames', 'ext-siding', 'ext-brick-stain', 'ext-porch-floor', 'ext-soffits', 'ext-gutters', 'ext-fascia', 'ext-trims', 'ext-garage-door', 'ext-doors', 'ext-windows-fixed', 'ext-railings', 'ext-shutters', 'washing', 'stripping', 'reviving', 'sanding', 'staining'];
+            keys.forEach(k => {
+              const areaKey = `${room.id}::${k}`;
+              const isAreaSelected = !!selectedAreas[areaKey];
+              const subObj = (newRoom as any)[k];
+              if (subObj) {
+                (newRoom as any)[k] = {
+                  ...subObj,
+                  checked: isAreaSelected
+                };
+              }
+            });
+          }
+
+          duplicated.push(newRoom);
+        }
+      });
+      return duplicated;
+    });
+    
+    // clear selection
+    setSelectedRoomIds({});
+    setSelectedAreas({});
+    triggerNotification(`Duplicated selected item(s) successfully!`, 'success');
+  };
+
+  const handleBulkToggleOption = () => {
+    const hasSelectedRooms = Object.values(selectedRoomIds).some(Boolean);
+    const hasSelectedAreas = Object.values(selectedAreas).some(Boolean);
+    
+    if (!hasSelectedRooms && !hasSelectedAreas) {
+      triggerNotification('No rooms or area layers selected.', 'error');
+      return;
+    }
+
+    setRooms(prev => prev.map(room => {
+      let updatedRoom = { ...room };
+      
+      // 1. If the room itself is selected, toggle its option state
+      if (selectedRoomIds[room.id]) {
+        updatedRoom.isOption = !updatedRoom.isOption;
+      }
+      
+      // 2. If any areas in this room are selected, toggle their option state
+      const areaKeys = ['walls', 'ceilings', 'baseboards', 'windows', 'doors', 'doorFrames', 'ext-siding', 'ext-brick-stain', 'ext-porch-floor', 'ext-soffits', 'ext-gutters', 'ext-fascia', 'ext-trims', 'ext-garage-door', 'ext-doors', 'ext-windows-fixed', 'ext-railings', 'ext-shutters', 'washing', 'stripping', 'reviving', 'sanding', 'staining'];
+      areaKeys.forEach(k => {
+        const key = `${room.id}::${k}`;
+        if (selectedAreas[key]) {
+          const subObj = (updatedRoom as any)[k] || { checked: true, qty: 'auto', coats: 2, isOption: false };
+          (updatedRoom as any)[k] = {
+            ...subObj,
+            isOption: !subObj.isOption
+          };
+        }
+      });
+      
+      return updatedRoom;
+    }));
+
+    triggerNotification('Toggled option status for selection.', 'success');
+  };
+
+  const handleBulkDelete = () => {
+    const hasSelectedRooms = Object.values(selectedRoomIds).some(Boolean);
+    const hasSelectedAreas = Object.values(selectedAreas).some(Boolean);
+
+    if (!hasSelectedRooms && !hasSelectedAreas) {
+      triggerNotification('No rooms or area layers selected.', 'error');
+      return;
+    }
+
+    const confirmMsg = hasSelectedRooms 
+      ? `Are you sure you want to delete the selected rooms?`
+      : `Are you sure you want to remove the selected area layers from these rooms?`;
+
+    if (confirm(confirmMsg)) {
+      if (hasSelectedRooms) {
+        // Delete selected rooms completely
+        setRooms(prev => prev.filter(room => !selectedRoomIds[room.id]));
+        setSelectedRoomIds({});
+      }
+      
+      if (hasSelectedAreas) {
+        // Uncheck selected area layers
+        setRooms(prev => prev.map(room => {
+          let updatedRoom = { ...room };
+          const keys = ['walls', 'ceilings', 'baseboards', 'windows', 'doors', 'doorFrames', 'ext-siding', 'ext-brick-stain', 'ext-porch-floor', 'ext-soffits', 'ext-gutters', 'ext-fascia', 'ext-trims', 'ext-garage-door', 'ext-doors', 'ext-windows-fixed', 'ext-railings', 'ext-shutters', 'washing', 'stripping', 'reviving', 'sanding', 'staining'];
+          
+          keys.forEach(k => {
+            const areaKey = `${room.id}::${k}`;
+            if (selectedAreas[areaKey]) {
+              const subObj = (updatedRoom as any)[k];
+              if (subObj) {
+                (updatedRoom as any)[k] = {
+                  ...subObj,
+                  checked: false
+                };
+              }
+            }
+          });
+          return updatedRoom;
+        }));
+        setSelectedAreas({});
+      }
+      
+      triggerNotification('Deleted selected items successfully.', 'success');
+    }
+  };
+
+  const handleBulkSetCeilingHeight = (height: number) => {
+    const roomIds = getSelectedRoomIdsUnified();
+    if (roomIds.length === 0) {
+      triggerNotification('No rooms or area layers selected.', 'error');
+      return;
+    }
+
+    setRooms(prev => prev.map(room => {
+      if (roomIds.includes(room.id)) {
+        return {
+          ...room,
+          height
+        };
+      }
+      return room;
+    }));
+
+    triggerNotification(`Set ceiling height to ${height} ft for ${roomIds.length} room(s).`, 'success');
+  };
+
+  const handleBulkSetCoats = (coats: number) => {
+    const hasSelectedRooms = Object.values(selectedRoomIds).some(Boolean);
+    const hasSelectedAreas = Object.values(selectedAreas).some(Boolean);
+
+    if (!hasSelectedRooms && !hasSelectedAreas) {
+      triggerNotification('No rooms or area layers selected.', 'error');
+      return;
+    }
+
+    setRooms(prev => prev.map(room => {
+      let updatedRoom = { ...room };
+      const keys = ['walls', 'ceilings', 'baseboards', 'windows', 'doors', 'doorFrames', 'ext-siding', 'ext-brick-stain', 'ext-porch-floor', 'ext-soffits', 'ext-gutters', 'ext-fascia', 'ext-trims', 'ext-garage-door', 'ext-doors', 'ext-windows-fixed', 'ext-railings', 'ext-shutters', 'washing', 'stripping', 'reviving', 'sanding', 'staining'];
+      
+      const updatedLayers: any = {};
+      keys.forEach(k => {
+        const areaKey = `${room.id}::${k}`;
+        const subObj = (updatedRoom as any)[k];
+        
+        if (subObj) {
+          // If specific area is selected, set its coats
+          if (selectedAreas[areaKey]) {
+            updatedLayers[k] = {
+              ...subObj,
+              coats
+            };
+          } 
+          // If room itself is selected and no specific areas are selected, update all checked areas
+          else if (selectedRoomIds[room.id] && !hasSelectedAreas && subObj.checked) {
+            updatedLayers[k] = {
+              ...subObj,
+              coats
+            };
+          }
+        }
+      });
+      
+      return {
+        ...updatedRoom,
+        ...updatedLayers
+      };
+    }));
+
+    triggerNotification(`Set coats to ${coats} for selected items.`, 'success');
+  };
+
   // Helper formatting lists of selected areas inside the accordion
   const getRoomHighlightsText = (room: any) => {
     const list: string[] = [];
-    if (room.walls?.checked) list.push('Walls');
-    if (room.ceilings?.checked) list.push('Ceilings');
-    if (room.baseboards?.checked) list.push('Base');
-    if (room.windows?.checked) list.push(`Windows (${room.windows?.qty || 2})`);
-    if (room.doors?.checked) list.push(`Doors (${room.doors?.qty || 2})`);
-    if (room.doorFrames?.checked) list.push(`Frames (${room.doorFrames?.qty || 2})`);
+    if (room.walls?.checked !== false) {
+      const coats = room.walls?.coats !== undefined ? room.walls.coats : 2;
+      list.push(`Walls (${coats}c)`);
+    }
+    if (room.ceilings?.checked !== false) {
+      const coats = room.ceilings?.coats !== undefined ? room.ceilings.coats : 2;
+      list.push(`Ceilings (${coats}c)`);
+    }
+    if (room.baseboards?.checked !== false) {
+      const coats = room.baseboards?.coats !== undefined ? room.baseboards.coats : 2;
+      list.push(`Base (${coats}c)`);
+    }
+    if (room.windows?.checked !== false) {
+      const qty = room.windows?.qty !== undefined ? room.windows.qty : 2;
+      const coats = room.windows?.coats !== undefined ? room.windows.coats : 2;
+      list.push(`Windows (${qty} @ ${coats}c)`);
+    }
+    if (room.doors?.checked !== false) {
+      const qty = room.doors?.qty !== undefined ? room.doors.qty : 2;
+      const coats = room.doors?.coats !== undefined ? room.doors.coats : 2;
+      list.push(`Doors (${qty} @ ${coats}c)`);
+    }
+    if (room.doorFrames?.checked !== false) {
+      const qty = room.doorFrames?.qty !== undefined ? room.doorFrames.qty : 2;
+      const coats = room.doorFrames?.coats !== undefined ? room.doorFrames.coats : 2;
+      list.push(`Frames (${qty} @ ${coats}c)`);
+    }
+    
+    if (room.customAreas) {
+      room.customAreas.forEach((c: any) => {
+        if (c.checked !== false) {
+          const coats = c.coats || 2;
+          const qtyText = c.qty && c.qty !== 'auto' ? ` (${c.qty} @ ${coats}c)` : ` (${coats}c)`;
+          list.push(`${c.label}${qtyText}`);
+        }
+      });
+    }
     return list.join(' · ');
   };
 
@@ -1130,7 +2579,7 @@ export default function ProjectDetails({
       </AnimatePresence>
 
       {/* 3. SCROLLABLE CORE WORKSPACE FRAME */}
-      <div className="flex-grow p-6 space-y-6 overflow-y-auto max-w-full">
+      <div className="flex-grow p-6 space-y-6 overflow-y-auto max-w-full pb-32 md:pb-32">
 
         {/* METADATA QUICK ACTIONS ROW */}
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
@@ -1273,6 +2722,37 @@ export default function ProjectDetails({
           </div>
         )}
 
+        {/* STICKY ANCHOR NAVIGATION BAR */}
+        <div className="sticky top-[52px] z-30 bg-[#0c0c0c]/90 backdrop-blur-md border-y border-neutral-850 px-4 py-2.5 flex items-center justify-between overflow-x-auto scrollbar-none mb-6">
+          <div className="flex items-center gap-1.5 md:gap-3 overflow-x-auto scrollbar-none">
+            {[
+              { label: 'Room Specs', icon: Paintbrush, id: 'section-rooms' },
+              { label: 'Scope & Terms', icon: FileText, id: 'section-scope' },
+              { label: 'Pricing Widget', icon: DollarSign, id: 'section-pricing' },
+              { label: 'Proposal Preview', icon: Eye, id: 'section-preview' },
+              { label: 'Site Photos', icon: Camera, id: 'section-photos' },
+              { label: 'Acceptance', icon: CheckCircle2, id: 'section-acceptance' },
+            ].map((sec) => (
+              <button
+                key={sec.id}
+                onClick={() => {
+                  const el = document.getElementById(sec.id);
+                  if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }
+                }}
+                className="px-3 py-1.5 rounded-lg border border-neutral-850 bg-neutral-900/40 hover:bg-neutral-800 text-zinc-300 hover:text-white font-mono text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <sec.icon className="w-3.5 h-3.5 text-blue-400" />
+                {sec.label}
+              </button>
+            ))}
+          </div>
+          <span className="hidden md:inline text-[10px] text-zinc-500 font-mono uppercase tracking-wider font-bold">
+            Project Navigation
+          </span>
+        </div>
+
         {/* WORKSPACE MIDDLE GRIDS - 2 COLUMNS */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
@@ -1280,7 +2760,7 @@ export default function ProjectDetails({
           <div className="lg:col-span-7 space-y-6">
             
             {/* NEW ROOM CONFIG WORK CARD */}
-            <div className="bg-[#161616] border border-[#222222] rounded-2xl overflow-hidden text-left shadow-lg">
+            <div id="section-rooms" className="scroll-mt-24 bg-[#161616] border border-[#222222] rounded-2xl overflow-hidden text-left shadow-lg">
               
               {/* Header */}
               <div className="px-5 py-4 border-b border-[#222222] flex items-center justify-between">
@@ -1452,12 +2932,28 @@ export default function ProjectDetails({
 
             {/* ADD ROOM PRESETS BLOCK */}
             <div className="bg-[#161616] border border-[#222222] rounded-2xl p-5 text-left shadow-lg space-y-4">
-              <h3 className="font-medium text-xs text-white tracking-widest font-mono uppercase">
-                Add Room
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-xs text-white tracking-widest font-mono uppercase">
+                  Add Area / Preset
+                </h3>
+                {/* Internal sub-tabs for presets category */}
+                <div className="flex bg-neutral-950 p-0.5 rounded-lg border border-neutral-850 gap-0.5">
+                  {(['interior', 'exterior', 'deck'] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setPresetTab(t)}
+                      className={`px-2 py-0.5 text-[9px] uppercase font-mono rounded font-bold transition cursor-pointer ${
+                        presetTab === t ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
               
               <div className="flex flex-wrap gap-2">
-                {[
+                {presetTab === 'interior' && [
                   { name: 'Entrance', l: 15, w: 12 },
                   { name: 'Living Room', l: 18, w: 14 },
                   { name: 'Dining Room', l: 14, w: 12 },
@@ -1465,18 +2961,50 @@ export default function ProjectDetails({
                   { name: 'Master Bedroom', l: 18, w: 14 },
                   { name: 'Bedroom', l: 12, w: 12 },
                   { name: 'Hallway', l: 16, w: 6 },
-                  { name: 'Upper Hallway', l: 12, w: 6 },
                   { name: 'Stairwell', l: 10, w: 8 },
-                  { name: 'Powder Room', l: 7, w: 6 },
                   { name: 'Bathroom', l: 11, w: 8 },
-                  { name: 'Laundry Room', l: 8, w: 8 },
                   { name: 'Basement', l: 26, w: 20 },
                   { name: 'Office', l: 12, w: 12 },
                 ].map((preset) => (
                   <button
                     key={preset.name}
-                    onClick={() => handleAddRoomPreset(preset.name, preset.l, preset.w)}
-                    className="bg-neutral-900 border border-[#222222] hover:border-[#3a3a3a] hover:bg-neutral-850 px-3 py-1.5 text-[11px] font-bold font-mono rounded-lg transition text-zinc-300 cursor-pointer flex items-center gap-1 shrink-0"
+                    onClick={() => handleAddRoomPreset(preset.name, preset.l, preset.w, 'interior')}
+                    className="bg-neutral-900 border border-[#222222] hover:border-indigo-500/30 hover:bg-neutral-850 px-3 py-1.5 text-[11px] font-bold font-mono rounded-lg transition text-zinc-300 cursor-pointer flex items-center gap-1 shrink-0"
+                  >
+                    <span>+</span> {preset.name}
+                  </button>
+                ))}
+
+                {presetTab === 'exterior' && [
+                  { name: 'Front Siding', l: 40, w: 10 },
+                  { name: 'Rear Siding', l: 40, w: 10 },
+                  { name: 'Left Siding', l: 30, w: 10 },
+                  { name: 'Right Siding', l: 30, w: 10 },
+                  { name: 'Soffits & Fascia', l: 140, w: 1 },
+                  { name: 'Garage Doors Block', l: 20, w: 10 },
+                  { name: 'Main Entry Doors', l: 8, w: 5 },
+                  { name: 'Shutters Set', l: 10, w: 10 },
+                ].map((preset) => (
+                  <button
+                    key={preset.name}
+                    onClick={() => handleAddRoomPreset(preset.name, preset.l, preset.w, 'exterior')}
+                    className="bg-neutral-900 border border-[#222222] hover:border-amber-500/30 hover:bg-neutral-850 px-3 py-1.5 text-[11px] font-bold font-mono rounded-lg transition text-zinc-300 cursor-pointer flex items-center gap-1 shrink-0"
+                  >
+                    <span>+</span> {preset.name}
+                  </button>
+                ))}
+
+                {presetTab === 'deck' && [
+                  { name: 'Main Deck Floor', l: 20, w: 15 },
+                  { name: 'Upper Deck Level', l: 12, w: 10 },
+                  { name: 'Deck Steps & Stairs', l: 10, w: 6 },
+                  { name: 'Deck Balusters & Railings', l: 60, w: 1 },
+                  { name: 'Cedar Pergola', l: 12, w: 12 },
+                ].map((preset) => (
+                  <button
+                    key={preset.name}
+                    onClick={() => handleAddRoomPreset(preset.name, preset.l, preset.w, 'deck')}
+                    className="bg-neutral-900 border border-[#222222] hover:border-emerald-500/30 hover:bg-neutral-850 px-3 py-1.5 text-[11px] font-bold font-mono rounded-lg transition text-zinc-300 cursor-pointer flex items-center gap-1 shrink-0"
                   >
                     <span>+</span> {preset.name}
                   </button>
@@ -1484,8 +3012,8 @@ export default function ProjectDetails({
 
                 <button
                   onClick={() => {
-                    const customName = window.prompt('Enter custom room description:');
-                    if (customName) handleAddRoomPreset(customName, 12, 12);
+                    const customName = window.prompt(`Enter custom ${presetTab} area name:`);
+                    if (customName) handleAddRoomPreset(customName, 12, 12, presetTab);
                   }}
                   className="bg-transparent border border-dashed border-[#2d2d2d] hover:border-neutral-600 px-3 py-1.5 text-[11px] font-medium font-mono rounded-lg transition text-zinc-500 hover:text-zinc-300 cursor-pointer flex items-center gap-1 shrink-0"
                 >
@@ -1545,12 +3073,97 @@ export default function ProjectDetails({
 
                 {/* HST (13%) */}
                 <div className="bg-neutral-900/50 border border-neutral-850/60 p-3.5 rounded-xl">
-                  <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider font-mono block">HST</span>
+                  <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider font-mono block">Tax ({(taxRate * 100).toFixed(0)}%)</span>
                   <span className="text-sm font-bold text-zinc-300 font-mono block mt-1">
                     ${Math.round(liveSummary.hst).toLocaleString()}
                   </span>
                 </div>
 
+              </div>
+
+              {/* Dynamic Adjustments Panel */}
+              <div className="bg-neutral-900/40 border border-neutral-850/60 p-3 rounded-xl mt-3 space-y-3">
+                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider font-mono block">Dynamic Adjustments</span>
+                
+                <div className="grid grid-cols-2 gap-2.5">
+                  {/* Preset Discount Selector */}
+                  <div className="space-y-1 col-span-2">
+                    <label className="text-[9px] font-bold text-zinc-500 uppercase font-mono">Apply Discount Preset</label>
+                    <select
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (!val) return;
+                        const presets = proposalSettings.discountPresets || [
+                          { id: 'dp-1', name: 'Referral Special (10%)', amount: 10, type: 'percentage' },
+                          { id: 'dp-2', name: 'Spring Promo ($250 Off)', amount: 250, type: 'fixed' },
+                          { id: 'dp-3', name: 'Senior Discount (5%)', amount: 5, type: 'percentage' },
+                        ];
+                        const preset = presets.find(p => p.id === val);
+                        if (preset) {
+                          if (preset.type === 'percentage') {
+                            const subtotal = liveSummary.laborCost + liveSummary.materialCost;
+                            const calculated = Math.round(subtotal * (preset.amount / 100));
+                            setDiscount(calculated);
+                          } else {
+                            setDiscount(preset.amount);
+                          }
+                        }
+                        // Reset selection after applying
+                        e.target.value = '';
+                      }}
+                      className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-lg py-1.5 px-2 text-xs text-white outline-none cursor-pointer"
+                    >
+                      <option value="">-- Choose Preset Discount --</option>
+                      {(proposalSettings.discountPresets || [
+                        { id: 'dp-1', name: 'Referral Special (10%)', amount: 10, type: 'percentage' },
+                        { id: 'dp-2', name: 'Spring Promo ($250 Off)', amount: 250, type: 'fixed' },
+                        { id: 'dp-3', name: 'Senior Discount (5%)', amount: 5, type: 'percentage' },
+                      ]).map(preset => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.name} ({preset.type === 'percentage' ? `${preset.amount}%` : `$${preset.amount}`})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Discount input */}
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-zinc-500 uppercase font-mono">Discount ($)</label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600 text-xs">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={discount || ''}
+                        onChange={(e) => {
+                          const val = Math.max(0, parseFloat(e.target.value) || 0);
+                          setDiscount(val);
+                        }}
+                        placeholder="0"
+                        className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-lg py-1.5 pl-6 pr-2 text-xs text-white outline-none font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Tax Rate selector */}
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-zinc-500 uppercase font-mono">Tax Rate</label>
+                    <select
+                      value={taxRate}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setTaxRate(val);
+                      }}
+                      className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-lg py-1.5 px-2 text-xs text-white outline-none font-mono cursor-pointer"
+                    >
+                      <option value="0">Exempt (0%)</option>
+                      <option value="0.05">GST (5%)</option>
+                      <option value="0.08">HST (8%)</option>
+                      <option value="0.13">HST (13%)</option>
+                      <option value="0.15">HST (15%)</option>
+                    </select>
+                  </div>
+                </div>
               </div>
 
               {/* DETAILED COST SECTION LIST */}
@@ -1563,8 +3176,17 @@ export default function ProjectDetails({
                   </span>
                 </div>
 
+                {discount > 0 && (
+                  <div className="flex items-center justify-between text-emerald-500 font-medium">
+                    <span className="font-mono">Discount</span>
+                    <span className="font-mono font-bold">
+                      -${liveSummary.discount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between text-zinc-500">
-                  <span className="font-mono">HST (13%)</span>
+                  <span className="font-mono">HST ({(taxRate * 100).toFixed(0)}%)</span>
                   <span className="font-bold text-zinc-300 font-mono">
                     ${liveSummary.hst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
@@ -1596,7 +3218,7 @@ export default function ProjectDetails({
             </div>
 
             {/* PROPOSAL PHOTOS CARD */}
-            <div className="bg-[#161616] border border-[#222222] rounded-2xl p-5 text-left shadow-lg space-y-4">
+            <div id="section-photos" className="scroll-mt-24 bg-[#161616] border border-[#222222] rounded-2xl p-5 text-left shadow-lg space-y-4">
               <div className="flex items-center justify-between border-b border-neutral-800/60 pb-3">
                 <span className="text-zinc-400 font-bold text-xs uppercase tracking-widest font-mono flex items-center gap-2">
                   <Camera className="w-4 h-4 text-zinc-500" /> Proposal Photos ({photos.length})
@@ -1689,195 +3311,501 @@ export default function ProjectDetails({
             </span>
           </div>
 
-          <div className="divide-y divide-[#222222]">
+
+
+          <div className="space-y-6 text-left p-5">
             {rooms.length === 0 ? (
               <div className="p-8 text-center text-zinc-500 text-xs italic">
                 No rooms added. Click a folder preset button above to add paint categories.
               </div>
             ) : (
-              rooms.map((room, idx) => {
-                const isExpanded = !!expandedRoomIds[room.id];
-                const roomPrice = liveSummary.roomCosts[room.id] || 0;
-
-                const rWalls = (room as any).walls || { checked: true, qty: 'auto', coats: 2 };
-                const rCeilings = (room as any).ceilings || { checked: true, qty: 'auto', coats: 2 };
-                const rBaseboards = (room as any).baseboards || { checked: true, qty: 'auto', ...rWalls };
-                const rWindows = (room as any).windows || { checked: true, qty: 2, coats: 2 };
-                const rDoors = (room as any).doors || { checked: true, qty: 2, coats: 2 };
-                const rDoorFrames = (room as any).doorFrames || { checked: true, qty: 2, coats: 2 };
+              [
+                { id: 'interior', title: 'Interior Scope', bgClass: 'bg-indigo-950/10 border border-indigo-950 shadow-[0_4px_20px_rgba(99,102,241,0.03)]', textClass: 'text-indigo-400', barClass: 'bg-indigo-500' },
+                { id: 'exterior', title: 'Exterior Scope', bgClass: 'bg-amber-950/10 border border-amber-950 shadow-[0_4px_20px_rgba(245,158,11,0.03)]', textClass: 'text-amber-400', barClass: 'bg-amber-500' },
+                { id: 'deck', title: 'Deck & Staining Scope', bgClass: 'bg-emerald-950/10 border border-emerald-950 shadow-[0_4px_20px_rgba(16,185,129,0.03)]', textClass: 'text-emerald-400', barClass: 'bg-emerald-500' }
+              ].map(cat => {
+                const catRooms = rooms.filter(r => (r.category || 'interior') === cat.id);
+                if (catRooms.length === 0) return null;
 
                 return (
-                  <div 
-                    key={room.id} 
-                    className={`transition-all ${
-                      room.isOption 
-                        ? 'bg-yellow-950/5 border-2 border-yellow-500/40 shadow-[0_0_12px_rgba(234,179,8,0.12)] z-10 relative rounded-2xl my-2 overflow-hidden' 
-                        : 'bg-neutral-900/10'
-                    }`}
-                  >
-                    
-                    {/* ACCORDION BAR TITLE HEADER */}
-                    <div 
-                      onClick={() => toggleRoomExpand(room.id)}
-                      className="px-5 py-4 flex items-center justify-between hover:bg-neutral-850/40 cursor-pointer select-none transition-all group"
-                    >
-                      <div className="flex items-center gap-3 truncate">
-                        <div className={`p-1 hover:bg-neutral-800 rounded transition ${isExpanded ? 'rotate-95 text-blue-400' : 'text-zinc-500'}`}>
-                          <ChevronRight className="w-4 h-4" />
-                        </div>
-                        <div className="truncate">
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-xs font-bold text-white group-hover:text-blue-400 transition">{room.name}</h4>
-                            {room.isOption && (
-                              <span className="text-[9px] bg-yellow-950/80 text-yellow-500 border border-yellow-500/30 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                                Option
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-zinc-500 mt-0.5 truncate font-medium">
-                            {getRoomHighlightsText(room)}
-                          </p>
-                        </div>
+                  <div key={cat.id} className={`p-4 rounded-2xl ${cat.bgClass} space-y-4`}>
+                    <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-1.5 h-3.5 rounded-full ${cat.barClass}`} />
+                        <h3 className={`text-xs font-bold uppercase tracking-wider ${cat.textClass}`}>{cat.title}</h3>
+                        <span className="text-[10px] text-zinc-500 font-mono">({catRooms.length})</span>
                       </div>
-
-                      {/* Right values pricing / copy trash panel */}
-                      <div className="flex items-center gap-6 shrink-0">
-                        <span className="font-mono text-zinc-200 font-bold text-sm">
-                          ${roomPrice.toLocaleString()}
-                        </span>
-                        
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setRooms(prev => prev.map(r => r.id === room.id ? { ...r, isOption: !r.isOption } : r));
-                            }}
-                            className={`p-1 px-2.5 text-[10px] border rounded-lg transition flex items-center font-bold font-mono cursor-pointer ${
-                              room.isOption
-                                ? 'bg-yellow-950/80 border-yellow-500/50 text-yellow-400 shadow-[0_0_8px_rgba(234,179,8,0.25)]'
-                                : 'bg-neutral-900 border-neutral-800 text-zinc-400 hover:text-white hover:border-[#444]'
-                            }`}
-                            title={room.isOption ? "Active Option. Click to set as standard room." : "Set as Option"}
-                          >
-                            Option
-                          </button>
-
-                          <button
-                            onClick={(e) => handleCopyRoom(room, e)}
-                            className="p-1 px-2 text-[10px] bg-neutral-900 border border-neutral-800 text-zinc-400 hover:text-white hover:border-[#444] rounded-lg transition flex items-center gap-1.5 font-bold font-mono cursor-pointer"
-                            title="Clone specification layout"
-                          >
-                            <Copy className="w-3.5 h-3.5 text-zinc-500" />
-                          </button>
-                          
-                          <button
-                            onClick={(e) => handleDeleteRoom(room.id, e)}
-                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-950/20 rounded-lg transition cursor-pointer"
-                            title="Remove specs"
-                          >
-                            <Trash2 className="w-3.5 h-3.5 text-zinc-500" />
-                          </button>
-                        </div>
-                      </div>
+                      {selectMode && (
+                        <button
+                          type="button"
+                          onClick={() => handleSelectAllRoomsInCategory(cat.id, rooms)}
+                          className="px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 text-[9px] text-zinc-400 hover:text-white font-mono transition cursor-pointer font-bold animate-fade-in"
+                        >
+                          {catRooms.every(r => selectedRoomIds[r.id]) ? 'Deselect All' : 'Select All'}
+                        </button>
+                      )}
                     </div>
 
-                    {/* EXPANDABLE CORNER DIMENSIONS EDITOR SECTION */}
-                    {isExpanded && (
-                      <div className="p-5 bg-neutral-950/50 border-t border-neutral-850/60 text-xs text-[#a0a0a5] space-y-4 text-left animate-fade-in">
-                        
-                        {/* Numerical sizing dimensions inputs */}
-                        <div className="grid grid-cols-3 gap-3">
-                          
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider">Length (ft)</label>
-                            <input
-                              type="number"
-                              value={room.length}
-                              onChange={(e) => {
-                                const val = Number(e.target.value) || 0;
-                                setRooms(prev => prev.map(r => r.id === room.id ? { ...r, length: val } : r));
+                    <div className="space-y-3">
+                      {catRooms.map((room) => {
+                        const isExpanded = !!expandedRoomIds[room.id];
+                        const roomPrice = liveSummary.roomCosts[room.id] || 0;
+                        const isRoomSelected = !!selectedRoomIds[room.id];
+
+                        return (
+                          <div 
+                            key={room.id} 
+                            className={`transition-all rounded-2xl overflow-hidden border ${
+                              isRoomSelected && selectMode
+                                ? 'border-blue-500/80 bg-blue-950/15'
+                                : 'border-neutral-800/80 bg-neutral-900/60'
+                            }`}
+                          >
+                            
+                            {/* ACCORDION BAR TITLE HEADER */}
+                            <div 
+                              onClick={() => {
+                                if (selectMode) {
+                                  handleToggleRoomSelection(room.id);
+                                } else {
+                                  toggleRoomExpand(room.id);
+                                }
                               }}
-                              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none"
-                            />
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider">Width (ft)</label>
-                            <input
-                              type="number"
-                              value={room.width}
-                              onChange={(e) => {
-                                const val = Number(e.target.value) || 0;
-                                setRooms(prev => prev.map(r => r.id === room.id ? { ...r, width: val } : r));
-                              }}
-                              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none"
-                            />
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider">Ceiling Height (ft)</label>
-                            <input
-                              type="number"
-                              value={room.height}
-                              onChange={(e) => {
-                                const val = Number(e.target.value) || 0;
-                                setRooms(prev => prev.map(r => r.id === room.id ? { ...r, height: val } : r));
-                              }}
-                              className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none"
-                            />
-                          </div>
-
-                        </div>
-
-                        {/* Direct area checklist checkboxes inside expanded room */}
-                        <div className="space-y-2 pt-1">
-                          <span className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider block mb-1">
-                            Individual Area Layer Selectors
-                          </span>
-                          
-                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                            {[
-                              { label: 'Walls Siding', key: 'walls' },
-                              { label: 'Ceilings Flat', key: 'ceilings' },
-                              { label: 'Baseboards Trim', key: 'baseboards' },
-                              { label: 'Windows', key: 'windows' },
-                              { label: 'Doors', key: 'doors' },
-                              { label: 'Frames', key: 'doorFrames' },
-                            ].map((sub) => {
-                              const checkedState = (room as any)[sub.key]?.checked !== false;
-                              return (
-                                <button
-                                  key={sub.key}
-                                  onClick={() => {
-                                    setRooms(prev => prev.map(r => {
-                                      if (r.id === room.id) {
-                                        const subObj = (r as any)[sub.key] || { checked: true, qty: 1, coats: 2 };
-                                        return {
-                                          ...r,
-                                          [sub.key]: { ...subObj, checked: !checkedState }
-                                        };
+                              className="px-5 py-4 flex items-center justify-between hover:bg-neutral-850/40 cursor-pointer select-none transition-all group"
+                            >
+                              <div className="flex items-center gap-3 truncate">
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {selectMode && (
+                                    <input
+                                      type="checkbox"
+                                      checked={isRoomSelected}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={() => handleToggleRoomSelection(room.id)}
+                                      className="w-3.5 h-3.5 rounded border-neutral-700 bg-neutral-950 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer animate-fade-in"
+                                    />
+                                  )}
+                                  <div 
+                                    onClick={(e) => {
+                                      if (selectMode) {
+                                        e.stopPropagation();
+                                        toggleRoomExpand(room.id);
                                       }
-                                      return r;
-                                    }));
-                                  }}
-                                  className={`p-2.5 rounded-xl border text-left transition font-mono items-center gap-2 flex cursor-pointer select-none ${
-                                    checkedState 
-                                      ? 'bg-blue-600/10 border-blue-500/30 text-white font-bold' 
-                                      : 'bg-neutral-900 border-neutral-800 text-zinc-500 hover:border-neutral-700'
-                                  }`}
-                                >
-                                  <span className={`w-2 h-2 rounded-full ${checkedState ? 'bg-blue-400' : 'bg-neutral-800'}`} />
-                                  <span className="text-[11px] truncate">{sub.label}</span>
-                                </button>
-                              );
-                            })}
+                                    }}
+                                    className={`p-1 hover:bg-neutral-800 rounded transition ${isExpanded ? 'rotate-95 text-blue-400' : 'text-zinc-500'}`}
+                                  >
+                                    <ChevronRight className="w-4 h-4" />
+                                  </div>
+                                </div>
+                                <div className="truncate">
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="text-xs font-bold text-white group-hover:text-blue-400 transition">{room.name}</h4>
+                                    {room.isOption && (
+                                      <span className="text-[9px] bg-yellow-950/80 text-yellow-500 border border-yellow-500/30 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                                        Option
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-zinc-500 mt-0.5 truncate font-medium">
+                                    {getRoomHighlightsText(room)}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Right values pricing / copy trash panel */}
+                              <div className="flex items-center gap-6 shrink-0">
+                                <span className="font-mono text-zinc-200 font-bold text-sm">
+                                  ${roomPrice.toLocaleString()}
+                                </span>
+                                
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setRooms(prev => prev.map(r => r.id === room.id ? { ...r, isOption: !r.isOption } : r));
+                                    }}
+                                    className={`p-1 px-2.5 text-[10px] border rounded-lg transition flex items-center font-bold font-mono cursor-pointer ${
+                                      room.isOption
+                                        ? 'bg-yellow-950/80 border-yellow-500/50 text-yellow-400 shadow-[0_0_8px_rgba(234,179,8,0.25)]'
+                                        : 'bg-neutral-900 border-neutral-800 text-zinc-400 hover:text-white hover:border-[#444]'
+                                    }`}
+                                    title={room.isOption ? "Active Option. Click to set as standard room." : "Set as Option"}
+                                  >
+                                    Option
+                                  </button>
+
+                                  <button
+                                    onClick={(e) => handleCopyRoom(room, e)}
+                                    className="p-1 px-2.5 text-[10px] bg-neutral-900 border border-neutral-800 text-zinc-400 hover:text-white hover:border-[#444] rounded-lg transition flex items-center gap-1.5 font-bold font-mono cursor-pointer"
+                                    title="Clone specification layout"
+                                  >
+                                    <Copy className="w-3.5 h-3.5 text-zinc-500" />
+                                    <span>Duplicate</span>
+                                  </button>
+                                  
+                                  <button
+                                    onClick={(e) => handleDeleteRoom(room.id, e)}
+                                    className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-950/20 rounded-lg transition cursor-pointer"
+                                    title="Remove specs"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 text-zinc-500" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* EXPANDABLE CORNER DIMENSIONS EDITOR SECTION */}
+                            {isExpanded && (
+                              <div className="p-5 bg-neutral-950/50 border-t border-neutral-850/60 text-xs text-[#a0a0a5] space-y-4 text-left animate-fade-in">
+                                
+                                {/* Numerical sizing dimensions inputs */}
+                                <div className="grid grid-cols-3 gap-3">
+                                  
+                                  <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider">Length (ft)</label>
+                                    <input
+                                      type="number"
+                                      value={room.length}
+                                      onChange={(e) => {
+                                        const val = Number(e.target.value) || 0;
+                                        setRooms(prev => prev.map(r => r.id === room.id ? { ...r, length: val } : r));
+                                      }}
+                                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none"
+                                    />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider">Width (ft)</label>
+                                    <input
+                                      type="number"
+                                      value={room.width}
+                                      onChange={(e) => {
+                                        const val = Number(e.target.value) || 0;
+                                        setRooms(prev => prev.map(r => r.id === room.id ? { ...r, width: val } : r));
+                                      }}
+                                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none"
+                                    />
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider">Ceiling Height (ft)</label>
+                                    <input
+                                      type="number"
+                                      value={room.height}
+                                      onChange={(e) => {
+                                        const val = Number(e.target.value) || 0;
+                                        setRooms(prev => prev.map(r => r.id === room.id ? { ...r, height: val } : r));
+                                      }}
+                                      className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none"
+                                    />
+                                  </div>
+
+                                </div>
+
+                                {/* Direct area checklist checkboxes inside expanded room */}
+                                <div className="space-y-2 pt-1">
+                                  <span className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider block mb-1">
+                                    Individual Area Layer Selectors
+                                  </span>
+                                  
+                                  <div className="grid grid-cols-3 gap-2">
+                                    {(() => {
+                                      const category = room.category || 'interior';
+                                      let baseList = [];
+                                      if (category === 'exterior') {
+                                        baseList = [
+                                          { label: 'Siding Slabs', key: 'ext-siding', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                          { label: 'Brick Stain', key: 'ext-brick-stain', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                          { label: 'Porch Floor', key: 'ext-porch-floor', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                          { label: 'Soffits', key: 'ext-soffits', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                          { label: 'Gutters', key: 'ext-gutters', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                          { label: 'Fascia Boards', key: 'ext-fascia', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                          { label: 'Trims', key: 'ext-trims', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                          { label: 'Garage Doors', key: 'ext-garage-door', hasQty: true, defaultQty: 1, defaultCoats: 2 },
+                                          { label: 'Entry Doors', key: 'ext-doors', hasQty: true, defaultQty: 1, defaultCoats: 2 },
+                                          { label: 'Windows Fixed', key: 'ext-windows-fixed', hasQty: true, defaultQty: 2, defaultCoats: 2 },
+                                          { label: 'Railings', key: 'ext-railings', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                          { label: 'Shutters Set', key: 'ext-shutters', hasQty: true, defaultQty: 2, defaultCoats: 2 },
+                                        ];
+                                      } else if (category === 'deck') {
+                                        baseList = [
+                                          { label: 'Pressure Washing', key: 'washing', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
+                                          { label: 'Chemical Stripping', key: 'stripping', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
+                                          { label: 'Reviver Agent', key: 'reviving', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
+                                          { label: 'Orbital Sanding', key: 'sanding', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
+                                          { label: 'Premium Stain', key: 'staining', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                        ];
+                                      } else {
+                                        baseList = [
+                                          { label: 'Walls Siding', key: 'walls', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                          { label: 'Ceilings Flat', key: 'ceilings', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                          { label: 'Baseboards Trim', key: 'baseboards', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                          { label: 'Windows', key: 'windows', hasQty: true, defaultQty: 2, defaultCoats: 2 },
+                                          { label: 'Doors', key: 'doors', hasQty: true, defaultQty: 2, defaultCoats: 2 },
+                                          { label: 'Frames', key: 'doorFrames', hasQty: true, defaultQty: 2, defaultCoats: 2 },
+                                        ];
+                                      }
+                                      
+                                      const customAreas = (room as any).customAreas || [];
+                                      return [...baseList, ...customAreas];
+                                    })().map((sub) => {
+                                      const isCustom = sub.key.startsWith('custom-');
+                                      let checkedState = false;
+                                      let coats = sub.defaultCoats || 2;
+                                      let qty = sub.defaultQty || 'auto';
+                                      let isAreaOption = false;
+
+                                      if (isCustom) {
+                                        const customItem = ((room as any).customAreas || []).find((c: any) => c.key === sub.key);
+                                        if (customItem) {
+                                          checkedState = customItem.checked !== false;
+                                          coats = typeof customItem.coats === 'number' ? customItem.coats : 2;
+                                          qty = customItem.qty !== undefined ? customItem.qty : 'auto';
+                                          isAreaOption = !!customItem.isOption;
+                                        }
+                                      } else {
+                                        const areaData = (room as any)[sub.key] || { checked: false, qty: sub.defaultQty, coats: sub.defaultCoats, isOption: false };
+                                        checkedState = areaData.checked !== false;
+                                        coats = typeof areaData.coats === 'number' ? areaData.coats : sub.defaultCoats;
+                                        qty = areaData.qty !== undefined ? areaData.qty : sub.defaultQty;
+                                        isAreaOption = !!areaData.isOption;
+                                      }
+
+                                      const toggleChecked = () => {
+                                        setRooms(prev => prev.map(r => {
+                                          if (r.id === room.id) {
+                                            if (isCustom) {
+                                              const customAreas = (r as any).customAreas || [];
+                                              return {
+                                                ...r,
+                                                customAreas: customAreas.map((c: any) => c.key === sub.key ? { ...c, checked: !checkedState } : c)
+                                              };
+                                            }
+                                            const subObj = (r as any)[sub.key] || { checked: true, qty: sub.defaultQty, coats: sub.defaultCoats, isOption: false };
+                                            return {
+                                              ...r,
+                                              [sub.key]: { ...subObj, checked: !checkedState }
+                                            };
+                                          }
+                                          return r;
+                                        }));
+                                      };
+
+                                      const toggleAreaOption = (e: React.MouseEvent) => {
+                                        e.stopPropagation();
+                                        setRooms(prev => prev.map(r => {
+                                          if (r.id === room.id) {
+                                            if (isCustom) {
+                                              const customAreas = (r as any).customAreas || [];
+                                              return {
+                                                ...r,
+                                                customAreas: customAreas.map((c: any) => c.key === sub.key ? { ...c, isOption: !isAreaOption } : c)
+                                              };
+                                            }
+                                            const subObj = (r as any)[sub.key] || { checked: true, qty: sub.defaultQty, coats: sub.defaultCoats, isOption: false };
+                                            return {
+                                              ...r,
+                                              [sub.key]: { ...subObj, isOption: !isAreaOption }
+                                            };
+                                          }
+                                          return r;
+                                        }));
+                                      };
+
+                                      const updateCoats = (newCoats: number) => {
+                                        setRooms(prev => prev.map(r => {
+                                          if (r.id === room.id) {
+                                            if (isCustom) {
+                                              const customAreas = (r as any).customAreas || [];
+                                              return {
+                                                ...r,
+                                                customAreas: customAreas.map((c: any) => c.key === sub.key ? { ...c, coats: newCoats } : c)
+                                              };
+                                            }
+                                            const subObj = (r as any)[sub.key] || { checked: true, qty: sub.defaultQty, coats: sub.defaultCoats, isOption: false };
+                                            return {
+                                              ...r,
+                                              [sub.key]: { ...subObj, coats: newCoats }
+                                            };
+                                          }
+                                          return r;
+                                        }));
+                                      };
+
+                                      const updateQty = (newQty: number) => {
+                                        setRooms(prev => prev.map(r => {
+                                          if (r.id === room.id) {
+                                            if (isCustom) {
+                                              const customAreas = (r as any).customAreas || [];
+                                              return {
+                                                ...r,
+                                                customAreas: customAreas.map((c: any) => c.key === sub.key ? { ...c, qty: newQty } : c)
+                                              };
+                                            }
+                                            const subObj = (r as any)[sub.key] || { checked: true, qty: sub.defaultQty, coats: sub.defaultCoats, isOption: false };
+                                            return {
+                                              ...r,
+                                              [sub.key]: { ...subObj, qty: newQty }
+                                            };
+                                          }
+                                          return r;
+                                        }));
+                                      };
+
+                                      const isAreaSelected = !!selectedAreas[`${room.id}::${sub.key}`];
+
+                                      return (
+                                        <div
+                                          key={sub.key}
+                                          className={`rounded-xl border transition font-mono flex flex-col justify-between overflow-hidden relative ${
+                                            isAreaSelected && selectMode
+                                              ? 'bg-blue-950/25 border-blue-500 text-white shadow-[0_0_10px_rgba(59,130,246,0.25)] ring-1 ring-blue-500/20'
+                                              : checkedState 
+                                                ? isAreaOption
+                                                  ? 'bg-amber-950/20 border-amber-500/50 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.15)]'
+                                                  : 'bg-neutral-900/40 border-blue-500/30 text-white' 
+                                                : 'bg-neutral-950 border-neutral-850 text-zinc-500 hover:border-neutral-700'
+                                          }`}
+                                        >
+                                          {/* Header clickable to toggle checked state */}
+                                          <div className="w-full p-2 flex items-center justify-between gap-1.5 select-none text-left">
+                                            <div 
+                                              onClick={() => {
+                                                if (selectMode) {
+                                                  handleToggleAreaSelection(room.id, sub.key);
+                                                } else {
+                                                  toggleChecked();
+                                                }
+                                              }} 
+                                              className="flex items-center gap-2 flex-1 truncate cursor-pointer"
+                                            >
+                                              {selectMode ? (
+                                                <input
+                                                  type="checkbox"
+                                                  checked={isAreaSelected}
+                                                  onChange={() => handleToggleAreaSelection(room.id, sub.key)}
+                                                  onClick={(e) => e.stopPropagation()}
+                                                  className="w-3.5 h-3.5 rounded border-neutral-700 bg-neutral-950 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer shrink-0"
+                                                />
+                                              ) : (
+                                                <span className={`w-2 h-2 rounded-full shrink-0 ${checkedState ? 'bg-blue-400' : 'bg-neutral-800'}`} />
+                                              )}
+                                              <span className="text-[11px] font-bold truncate">{sub.label}</span>
+                                            </div>
+
+                                            <div className="flex items-center gap-1 shrink-0">
+                                              {/* Diamond Option Toggle */}
+                                              <button
+                                                type="button"
+                                                onClick={toggleAreaOption}
+                                                className="p-1 hover:bg-neutral-850 rounded transition cursor-pointer"
+                                                title={isAreaOption ? "Active Option. Click to make standard." : "Mark as Option"}
+                                              >
+                                                <Diamond className={`w-3 h-3 ${isAreaOption ? 'fill-amber-400 text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`} />
+                                              </button>
+
+                                              {/* Delete Custom Area Button */}
+                                              {isCustom && (
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setRooms(prev => prev.map(r => {
+                                                      if (r.id === room.id) {
+                                                        const customAreas = (r as any).customAreas || [];
+                                                        return {
+                                                          ...r,
+                                                          customAreas: customAreas.filter((c: any) => c.key !== sub.key)
+                                                        };
+                                                      }
+                                                      return r;
+                                                    }));
+                                                    triggerNotification(`Removed custom layer "${sub.label}"`);
+                                                  }}
+                                                  className="p-1 hover:bg-red-950/40 text-zinc-500 hover:text-red-400 rounded transition cursor-pointer"
+                                                  title="Delete this custom area layer"
+                                                >
+                                                  <Trash2 className="w-3 h-3" />
+                                                </button>
+                                              )}
+                                            </div>
+                                          </div>
+
+                                          {/* Compact Adjusters shown only if checked */}
+                                          {checkedState && (
+                                            <div className="px-2 pb-2 flex flex-col gap-1 text-[10px] border-t border-neutral-850 bg-black/10">
+                                              <div className="flex items-center justify-between text-zinc-400 mt-1">
+                                                <span className="text-zinc-500 text-[9px] uppercase tracking-wider">Coats:</span>
+                                                <div className="flex items-center gap-1 bg-neutral-950 border border-neutral-800 rounded px-1 py-0.2">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => updateCoats(Math.max(1, coats - 1))}
+                                                    className="w-3.5 h-3.5 hover:bg-neutral-800 hover:text-white rounded flex items-center justify-center cursor-pointer font-semibold"
+                                                  >
+                                                    -
+                                                  </button>
+                                                  <span className="w-4.5 text-center font-bold text-white font-mono text-[9px]">{coats}</span>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => updateCoats(Math.min(4, coats + 1))}
+                                                    className="w-3.5 h-3.5 hover:bg-neutral-800 hover:text-white rounded flex items-center justify-center cursor-pointer font-semibold"
+                                                  >
+                                                    +
+                                                  </button>
+                                                </div>
+                                              </div>
+
+                                              {sub.hasQty && (
+                                                <div className="flex items-center justify-between text-zinc-400 border-t border-neutral-800/20 pt-1">
+                                                  <span className="text-zinc-500 text-[9px] uppercase tracking-wider">Qty:</span>
+                                                  <div className="flex items-center gap-1 bg-neutral-950 border border-neutral-800 rounded px-1 py-0.2">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => updateQty(Math.max(0, (typeof qty === 'number' ? qty : 2) - 1))}
+                                                      className="w-3.5 h-3.5 hover:bg-neutral-800 hover:text-white rounded flex items-center justify-center cursor-pointer font-semibold"
+                                                    >
+                                                      -
+                                                    </button>
+                                                    <span className="w-4.5 text-center font-bold text-white font-mono text-[9px]">
+                                                      {qty === 'auto' ? 2 : qty}
+                                                    </span>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => updateQty((typeof qty === 'number' ? qty : 2) + 1)}
+                                                      className="w-3.5 h-3.5 hover:bg-neutral-800 hover:text-white rounded flex items-center justify-center cursor-pointer font-semibold"
+                                                    >
+                                                      +
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+
+                                {/* Add Area Button Trigger */}
+                                <div className="mt-4 pt-4 border-t border-neutral-850 flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => setAddingAreaRoomId(room.id)}
+                                    className="px-4 py-2 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 hover:border-neutral-700 text-white font-bold font-mono text-xs rounded-xl transition flex items-center gap-2 cursor-pointer select-none"
+                                  >
+                                    <Plus className="w-3.5 h-3.5 text-blue-400" />
+                                    <span>Add Custom / Preset Area</span>
+                                  </button>
+                                </div>
+
+                              </div>
+                            )}
+
                           </div>
-                        </div>
-
-                      </div>
-                    )}
-
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })
@@ -1887,7 +3815,7 @@ export default function ProjectDetails({
         </div>
 
         {/* PROPOSAL NOTES & CONTRACT TERMS */}
-        <div className="bg-[#161616] border border-[#222222] rounded-2xl overflow-hidden text-left shadow-lg">
+        <div id="section-scope" className="scroll-mt-24 bg-[#161616] border border-[#222222] rounded-2xl overflow-hidden text-left shadow-lg">
           <div className="px-5 py-4 border-b border-[#222222] flex items-center justify-between">
             <h3 className="font-mono font-bold text-xs text-white tracking-widest uppercase">
               Proposal Notes & Scope of Work
@@ -1957,11 +3885,122 @@ export default function ProjectDetails({
                 className="w-full bg-neutral-950 border border-purple-900/30 focus:border-purple-500/55 rounded-xl p-3.5 text-xs text-zinc-300 focus:outline-none transition leading-relaxed bg-purple-950/5"
               />
             </div>
+
+            {/* General Notes */}
+            <div className="space-y-2 md:col-span-2 border-t border-neutral-800 pt-4 mt-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-1">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono tracking-wider flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-pink-500 rounded-full" />
+                  General Notes (Shows on Proposal PDF)
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const saved = localStorage.getItem('proposal_settings');
+                      if (saved) {
+                        try {
+                          const parsed = JSON.parse(saved);
+                          if (parsed.interiorGeneralNotes) setGeneralNotes(parsed.interiorGeneralNotes);
+                        } catch (e) {}
+                      }
+                    }}
+                    className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                  >
+                    Load Interior Preset
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const saved = localStorage.getItem('proposal_settings');
+                      if (saved) {
+                        try {
+                          const parsed = JSON.parse(saved);
+                          if (parsed.exteriorGeneralNotes) setGeneralNotes(parsed.exteriorGeneralNotes);
+                        } catch (e) {}
+                      }
+                    }}
+                    className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                  >
+                    Load Exterior Preset
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const saved = localStorage.getItem('proposal_settings');
+                      if (saved) {
+                        try {
+                          const parsed = JSON.parse(saved);
+                          if (parsed.woodStainingGeneralNotes) setGeneralNotes(parsed.woodStainingGeneralNotes);
+                        } catch (e) {}
+                      }
+                    }}
+                    className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                  >
+                    Load Wood Preset
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const saved = localStorage.getItem('proposal_settings');
+                      if (saved) {
+                        try {
+                          const parsed = JSON.parse(saved);
+                          if (parsed.brickStainingGeneralNotes) setGeneralNotes(parsed.brickStainingGeneralNotes);
+                        } catch (e) {}
+                      }
+                    }}
+                    className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                  >
+                    Load Brick Preset
+                  </button>
+                </div>
+              </div>
+              <textarea
+                value={generalNotes}
+                onChange={(e) => setGeneralNotes(e.target.value)}
+                placeholder="General notes and warranty info..."
+                rows={4}
+                className="w-full bg-neutral-950 border border-neutral-800 focus:border-blue-500/55 rounded-xl p-3.5 text-xs text-zinc-300 focus:outline-none transition leading-relaxed"
+              />
+            </div>
+
+            {/* Terms and Conditions */}
+            <div className="space-y-2 md:col-span-2 border-t border-neutral-800 pt-4 mt-2">
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono tracking-wider flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-violet-500 rounded-full" />
+                  Terms & Conditions (Shows on Proposal PDF)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const saved = localStorage.getItem('proposal_settings');
+                    if (saved) {
+                      try {
+                        const parsed = JSON.parse(saved);
+                        if (parsed.termsAndConditions) setTermsAndConditions(parsed.termsAndConditions);
+                      } catch (e) {}
+                    }
+                  }}
+                  className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                >
+                  Load Terms Preset
+                </button>
+              </div>
+              <textarea
+                value={termsAndConditions}
+                onChange={(e) => setTermsAndConditions(e.target.value)}
+                placeholder="Contract terms and legal conditions..."
+                rows={5}
+                className="w-full bg-neutral-950 border border-neutral-800 focus:border-blue-500/55 rounded-xl p-3.5 text-xs text-zinc-300 focus:outline-none transition leading-relaxed"
+              />
+            </div>
           </div>
         </div>
 
         {/* 4.5 CLIENT-FACING PROPOSAL PDF PREVIEW & GMAIL DISPATCHER */}
-        <div className="mt-8 space-y-6">
+        <div id="section-preview" className="scroll-mt-24 mt-8 space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 text-left">
             <div>
               <h2 className="text-lg font-bold font-sans text-white tracking-tight flex items-center gap-2">
@@ -1991,6 +4030,10 @@ export default function ProjectDetails({
                     clientEmail,
                     projectDate,
                     proposalNo,
+                    generalNotes,
+                    termsAndConditions,
+                    signatureDataUrl: project.signatureDataUrl,
+                    installments: project.installments || installments,
                   });
                   if (blobUrl) {
                     const link = document.createElement('a');
@@ -2194,9 +4237,20 @@ export default function ProjectDetails({
                       <CheckCircle2 className="w-16 h-16" />
                     </div>
                     <p className="font-bold text-zinc-800">{signerName}</p>
-                    <div className="border-b border-dashed border-emerald-300 py-1 font-mono text-emerald-700 font-black text-sm italic tracking-wide">
-                      {signerName}
-                    </div>
+                    {project.signatureDataUrl ? (
+                      <div className="border border-emerald-200/60 bg-white p-1 rounded-lg h-12 flex items-center justify-center my-1 select-none pointer-events-none">
+                        <img 
+                          src={project.signatureDataUrl} 
+                          alt="Client Signature" 
+                          className="max-h-full max-w-full object-contain"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    ) : (
+                      <div className="border-b border-dashed border-emerald-300 py-1 font-mono text-emerald-700 font-black text-sm italic tracking-wide">
+                        {signerName}
+                      </div>
+                    )}
                     <p className="text-[10px] text-zinc-400 font-mono">
                       Signed as: {signerTitle} • Date: {signedDate}
                     </p>
@@ -2217,91 +4271,304 @@ export default function ProjectDetails({
 
           {/* WORK BENCH & GMAIL CONTROLS BELOW THE SIMULATED SHEET */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* LEFT PANEL: INTERACTIVE SIGNATURE BOX */}
-            <div className="bg-[#161616] border border-[#222222] rounded-2xl p-6 text-left space-y-4">
-              <h3 className="text-xs font-bold text-white uppercase font-mono tracking-widest flex items-center gap-1.5">
-                <CheckSquare className="w-4 h-4 text-emerald-500" /> Electronic Signature Control
-              </h3>
-              
+            {/* LEFT PANEL: CONTRACT ACCEPTANCE & LIVE BILLING */}
+            <div id="section-acceptance" className="scroll-mt-24 bg-[#161616] border border-[#222222] rounded-2xl p-6 text-left space-y-5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-white uppercase font-mono tracking-widest flex items-center gap-1.5">
+                  <CheckSquare className="w-4 h-4 text-emerald-500" /> Contract & Billing Control
+                </h3>
+                {clientSigned ? (
+                  <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded uppercase tracking-wider font-mono">
+                    Signed & Approved
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-zinc-800 text-zinc-500 text-[10px] font-bold rounded uppercase tracking-wider font-mono">
+                    Pending Approval
+                  </span>
+                )}
+              </div>
+
+              {/* Status Section */}
               {clientSigned ? (
-                <div className="space-y-3">
-                  <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl p-4 text-emerald-300 text-xs">
-                    <p className="font-bold">✓ Proposal Signed & Locked</p>
-                    <p className="mt-1">
-                      This estimate was approved and signed by <strong>{signerName}</strong> ({signerTitle}) on {signedDate}.
-                    </p>
+                <div className="bg-emerald-950/10 border border-emerald-500/20 rounded-xl p-4 space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                    <div className="text-xs">
+                      <p className="font-bold text-emerald-300">Contract Approved & Digitally Locked</p>
+                      <p className="text-zinc-400 mt-1 leading-relaxed">
+                        Approved by <strong>{signerName || 'Client'}</strong> ({signerTitle || 'Homeowner'}) on {signedDate || 'N/A'}.
+                      </p>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => {
-                      if (window.confirm('Are you sure you want to retract/reset this signature? This will unlock the proposal.')) {
-                        setClientSigned(false);
-                        localStorage.removeItem(`proposal-signed-${project.id}`);
-                        triggerNotification('Signature removed. Proposal unlocked.', 'success');
-                      }
-                    }}
-                    className="w-full py-2 bg-neutral-900 border border-neutral-850 hover:border-red-500/30 hover:bg-neutral-850 text-xs text-zinc-400 hover:text-red-400 rounded-xl transition cursor-pointer font-bold font-mono"
-                  >
-                    Reset / Unlock Proposal
-                  </button>
+                  
+                  <div className="flex flex-col sm:flex-row gap-2 pt-1.5">
+                    <button
+                      onClick={downloadProposalPDF}
+                      className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Download Signed Proposal
+                    </button>
+                    
+                    <button
+                      onClick={async () => {
+                        if (window.confirm('Are you sure you want to retract/reset this signature? This will unlock the proposal.')) {
+                          setClientSigned(false);
+                          localStorage.removeItem(`proposal-signed-${project.id}`);
+                          triggerNotification('Signature removed. Proposal unlocked.', 'success');
+                          
+                          const updated = {
+                            ...project,
+                            id: proposalNo,
+                            status: 'Draft' as const,
+                            rooms,
+                            clientSigned: false,
+                            signerName: '',
+                            signerTitle: '',
+                            signedDate: '',
+                          };
+                          await handleSaveBoth(updated, 'Draft');
+                        }
+                      }}
+                      className="py-2 px-3 bg-neutral-900 border border-neutral-850 hover:border-red-500/30 hover:bg-neutral-850 text-xs text-zinc-400 hover:text-red-400 rounded-xl transition cursor-pointer font-bold font-mono"
+                      title="Reset signature state"
+                    >
+                      Unlock
+                    </button>
+                  </div>
                 </div>
               ) : (
-                <div className="space-y-3 text-xs">
-                  <p className="text-zinc-400 leading-relaxed">
-                    Lock and approve this proposal instantly by typing the client's electronic signature parameters below:
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Signer Full Name</label>
-                      <input
-                        type="text"
-                        value={signerName}
-                        onChange={(e) => setSignerName(e.target.value)}
-                        placeholder="e.g. Ali Al-Nasih"
-                        className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-xl p-2.5 text-xs text-white outline-none font-mono"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Relationship / Title</label>
-                      <input
-                        type="text"
-                        value={signerTitle}
-                        onChange={(e) => setSignerTitle(e.target.value)}
-                        placeholder="e.g. Homeowner"
-                        className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-xl p-2.5 text-xs text-white outline-none font-mono"
-                      />
-                    </div>
+                <div className="bg-neutral-950/40 border border-neutral-850 rounded-xl p-4 space-y-3.5">
+                  <div className="text-xs space-y-1">
+                    <p className="font-bold text-zinc-300">Waiting for Client Acceptance</p>
+                    <p className="text-zinc-500 leading-relaxed">
+                      Send this proposal to the client using the Gmail dispatcher. They can review, authorize, and sign it online.
+                    </p>
                   </div>
-
-                  {signerName && (
-                    <div className="bg-neutral-950 p-3 rounded-xl border border-neutral-850">
-                      <span className="text-[9px] text-zinc-600 font-mono block mb-1">Live E-Signature Script Preview:</span>
-                      <div className="font-mono text-zinc-300 font-black italic text-lg tracking-wider border-b border-neutral-900 py-1 px-2 select-none">
-                        {signerName}
-                      </div>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => {
-                      if (!signerName.trim()) {
-                        triggerNotification('Please enter a Signer Name.', 'error');
-                        return;
-                      }
-                      const nowStr = new Date().toLocaleString();
-                      setClientSigned(true);
-                      setSignedDate(nowStr);
-                      localStorage.setItem(`proposal-signed-${project.id}`, 'true');
-                      localStorage.setItem(`signer-name-${project.id}`, signerName);
-                      localStorage.setItem(`signer-title-${project.id}`, signerTitle);
-                      localStorage.setItem(`signer-date-${project.id}`, nowStr);
-                      triggerNotification('Proposal approved and signed electronically!', 'success');
-                    }}
-                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-xs text-white rounded-xl transition cursor-pointer font-bold flex items-center justify-center gap-1.5"
-                  >
-                    <CheckCircle2 className="w-4 h-4" /> Sign & Accept Proposal
-                  </button>
+                  
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <button
+                      onClick={downloadProposalPDF}
+                      className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 font-bold text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Download Draft Proposal
+                    </button>
+                    
+                    <button
+                      onClick={async () => {
+                        const name = window.prompt("Enter signer full name to authorize offline:", clientName);
+                        if (name === null) return;
+                        if (!name.trim()) {
+                          triggerNotification("Please enter a signer name.", "error");
+                          return;
+                        }
+                        const title = window.prompt("Enter signer title / relation:", "Homeowner") || "Homeowner";
+                        const nowStr = new Date().toLocaleString();
+                        
+                        setClientSigned(true);
+                        setSignerName(name);
+                        setSignerTitle(title);
+                        setSignedDate(nowStr);
+                        
+                        localStorage.setItem(`proposal-signed-${project.id}`, 'true');
+                        localStorage.setItem(`signer-name-${project.id}`, name);
+                        localStorage.setItem(`signer-title-${project.id}`, title);
+                        localStorage.setItem(`signer-date-${project.id}`, nowStr);
+                        
+                        triggerNotification('Proposal marked approved offline!', 'success');
+                        
+                        const updated = {
+                          ...project,
+                          id: proposalNo,
+                          status: 'Approved' as const,
+                          rooms,
+                          clientSigned: true,
+                          signerName: name,
+                          signerTitle: title,
+                          signedDate: nowStr,
+                        };
+                        await handleSaveBoth(updated, 'Approved');
+                      }}
+                      className="flex-1 py-2 bg-emerald-600/15 hover:bg-emerald-600/25 border border-emerald-500/20 text-emerald-400 font-bold text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Authorize Offline
+                    </button>
+                  </div>
                 </div>
               )}
+
+              {/* Live Remaining Cost Section */}
+              <div className="border-t border-neutral-850 pt-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-zinc-400 uppercase font-mono tracking-wider flex items-center gap-1.5">
+                    <CreditCard className="w-3.5 h-3.5 text-blue-500" /> Live Financial Overview
+                  </h4>
+                  {clientSigned && (
+                    <span className="text-[10px] text-zinc-500 font-mono">
+                      Stripe Payments Integrated
+                    </span>
+                  )}
+                </div>
+
+                {(() => {
+                  const activeInstallments = installments || [];
+                  const grandTotal = liveSummary.total;
+
+                  return (
+                    <div className="space-y-4">
+                      {/* Bento Dashboard stats */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="bg-neutral-950 p-2.5 rounded-xl border border-neutral-850/60">
+                          <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider font-mono block">Proposal Total</span>
+                          <span className="text-xs font-bold text-zinc-200 font-mono block mt-0.5">
+                            ${grandTotal.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="bg-neutral-950 p-2.5 rounded-xl border border-neutral-850/60">
+                          <span className="text-[8px] text-emerald-500/80 font-bold uppercase tracking-wider font-mono block">Paid to Date</span>
+                          <span className="text-xs font-bold text-emerald-400 font-mono block mt-0.5">
+                            ${totalPaid.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="bg-neutral-950 p-2.5 rounded-xl border border-neutral-850/60">
+                          <span className="text-[8px] text-amber-500/80 font-bold uppercase tracking-wider font-mono block">Remaining Cost</span>
+                          <span className="text-xs font-bold text-amber-400 font-mono block mt-0.5">
+                            ${remainingCost.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Payment Schedule Table */}
+                      <div className="space-y-2">
+                        <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider font-mono block">Installments Breakdown</span>
+                        {activeInstallments.length === 0 ? (
+                          <div className="bg-neutral-950/30 border border-dashed border-neutral-850 p-4 rounded-xl text-center">
+                            <p className="text-[10px] text-zinc-500 leading-normal">
+                              No installments billed yet. First payment request can automatically be set to 30%.
+                            </p>
+                            <button
+                              onClick={() => {
+                                handleOpenInvoiceModalWithPreset(30, "Upfront Deposit (30%)");
+                              }}
+                              className="mt-2.5 px-3 py-1.5 bg-blue-600/10 hover:bg-blue-600/25 border border-blue-500/20 text-blue-400 text-[10px] font-bold rounded-lg transition cursor-pointer"
+                            >
+                              Initialize 30% Deposit
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+                            {activeInstallments.map((inst, idx) => {
+                              const isPaid = inst.status === 'Paid';
+                              const isRequested = inst.status === 'Requested';
+                              return (
+                                <div 
+                                  key={inst.id || idx}
+                                  className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border text-[11px] gap-2 ${
+                                    isPaid 
+                                      ? 'bg-emerald-950/10 border-emerald-500/20' 
+                                      : isRequested 
+                                        ? 'bg-amber-950/5 border-amber-500/15' 
+                                        : 'bg-neutral-950/40 border-neutral-850'
+                                  }`}
+                                >
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-bold text-zinc-300">{inst.name}</span>
+                                      <span className="text-[9px] text-zinc-500 font-mono">({inst.percentage}%)</span>
+                                    </div>
+                                    <span className="text-[9px] text-zinc-500 font-mono block">
+                                      {isPaid 
+                                        ? `Paid on ${inst.paidAt || 'N/A'}` 
+                                        : isRequested 
+                                          ? `Requested on ${inst.requestedAt || 'N/A'}` 
+                                          : 'Draft (unbilled)'
+                                      }
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+                                    <span className="font-mono font-bold text-zinc-300">${inst.amount.toLocaleString()}</span>
+                                    
+                                    <div className="flex items-center gap-1.5">
+                                      {isPaid ? (
+                                        <>
+                                          <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-bold rounded font-mono">
+                                            Paid
+                                          </span>
+                                          <button
+                                            onClick={() => handleOpenReceiptModal(inst.id)}
+                                            className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-zinc-300 text-[9px] font-bold rounded cursor-pointer transition flex items-center gap-1"
+                                            title="Send Receipt via Gmail"
+                                          >
+                                            <Mail className="w-2.5 h-2.5" /> Receipt
+                                          </button>
+                                          <button
+                                            onClick={() => downloadReceiptPDF(inst)}
+                                            className="px-2 py-0.5 bg-emerald-950/20 hover:bg-emerald-950/40 border border-emerald-800/30 text-emerald-400 text-[9px] font-bold rounded cursor-pointer transition flex items-center gap-1"
+                                            title="Download PDF Receipt"
+                                          >
+                                            <Download className="w-2.5 h-2.5" /> Download
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <div className="flex items-center gap-1">
+                                          {inst.stripeInvoiceUrl && (
+                                            <a 
+                                              href={inst.stripeInvoiceUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="px-2 py-0.5 bg-amber-500 hover:bg-amber-600 text-neutral-950 text-[9px] font-black rounded transition"
+                                            >
+                                              Stripe
+                                            </a>
+                                          )}
+                                          <button
+                                            onClick={() => handleOpenRequestModal(inst.id)}
+                                            className="px-2 py-0.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 text-[9px] font-bold rounded cursor-pointer transition flex items-center gap-1"
+                                            title="Send Payment Request Email"
+                                          >
+                                            <Send className="w-2.5 h-2.5" /> Send Request
+                                          </button>
+                                          <button
+                                            onClick={() => handleOpenReceiptModal(inst.id)}
+                                            className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-750 text-white text-[9px] font-bold rounded cursor-pointer transition flex items-center gap-1 shadow-sm"
+                                            title="Record Payment Received & Send Receipt"
+                                          >
+                                            <CheckCircle2 className="w-2.5 h-2.5" /> Payment Received
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          <button
+                            onClick={() => {
+                              const remainingPct = 100 - activeInstallments.reduce((sum, inst) => sum + inst.percentage, 0);
+                              const nextPct = remainingPct > 0 ? remainingPct : 10;
+                              handleOpenInvoiceModalWithPreset(nextPct, `Milestone Payment (${nextPct}%)`);
+                            }}
+                            className="w-full py-2 bg-neutral-900 border border-neutral-850 hover:bg-neutral-800 text-zinc-300 font-bold text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> Request Invoice
+                          </button>
+                          
+                          <button
+                            onClick={() => handleOpenReceiptModal()}
+                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/20"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Payment Received
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
 
             {/* RIGHT PANEL: GMAIL INVOICE & PROPOSAL DISPATCHER */}
@@ -2311,39 +4578,94 @@ export default function ProjectDetails({
               </h3>
 
               {!localToken ? (
-                <div className="bg-neutral-950 p-5 rounded-2xl border border-neutral-850 text-center space-y-3.5">
-                  <div className="w-10 h-10 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto">
-                    <Mail className="w-5 h-5 text-blue-400" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="font-bold text-xs text-white">Gmail Integration Disconnected</p>
-                    <p className="text-[11px] text-zinc-500 leading-normal max-w-xs mx-auto">
-                      Securely authorize your Google Workspace account to email professional PDF-style interactive estimates directly to clients.
-                    </p>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      try {
-                        const result = await googleSignIn();
-                        if (result) {
-                          setLocalToken(result.accessToken);
-                          triggerNotification('Connected to Google Account successfully!', 'success');
+                <div className="space-y-3.5 w-full">
+                  <div className="bg-neutral-950 p-5 rounded-2xl border border-neutral-850 text-center space-y-3.5">
+                    <div className="w-10 h-10 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto">
+                      <Mail className="w-5 h-5 text-blue-400" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="font-bold text-xs text-white">Gmail Integration Disconnected</p>
+                      <p className="text-[11px] text-zinc-500 leading-normal max-w-xs mx-auto">
+                        Securely authorize your Google Workspace account to email professional PDF-style interactive estimates directly to clients.
+                      </p>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        if (isAuthenticating) return;
+                        try {
+                          setIsAuthenticating(true);
+                          setGmailAuthError(null);
+                          const result = await googleSignIn();
+                          if (result) {
+                            setLocalToken(result.accessToken);
+                            triggerNotification('Connected to Google Account successfully!', 'success');
+                          }
+                        } catch (err: any) {
+                          const isPopupClosed = err?.message?.includes('popup-closed-by-user') || err?.code?.includes('popup-closed-by-user') || String(err).includes('popup-closed-by-user') ||
+                                                err?.message?.includes('cancelled-popup-request') || err?.code?.includes('cancelled-popup-request') || String(err).includes('cancelled-popup-request');
+                          if (isPopupClosed) {
+                            console.warn('Google authorization was closed or blocked by the user.');
+                          } else {
+                            console.error('Google authorization failed:', err);
+                          }
+                          const isUnauthorizedDomain = err?.message?.includes('unauthorized-domain') || err?.code?.includes('unauthorized-domain') || String(err).includes('unauthorized-domain');
+                          if (isUnauthorizedDomain) {
+                            setGmailAuthError('unauthorized-domain');
+                            triggerNotification('Domain not authorized in Firebase.', 'error');
+                          } else if (isPopupClosed) {
+                            setGmailAuthError('popup-blocked');
+                            triggerNotification('Sign-in popup blocked or closed.', 'error');
+                          } else {
+                            setGmailAuthError('generic');
+                            triggerNotification('Failed to authorize Google Account.', 'error');
+                          }
+                        } finally {
+                          setIsAuthenticating(false);
                         }
-                      } catch (err: any) {
-                        console.error('Google authorization failed:', err);
-                        triggerNotification('Failed to authorize Google Account.', 'error');
-                      }
-                    }}
-                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-xs text-white font-bold rounded-xl transition cursor-pointer flex items-center justify-center gap-2 mx-auto"
-                  >
-                    <svg className="w-4 h-4 fill-current" viewBox="0 0 48 48">
-                      <path d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" fill="#EA4335" />
-                      <path d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" fill="#4285F4" />
-                      <path d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" fill="#FBBC05" />
-                      <path d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" fill="#34A853" />
-                    </svg>
-                    <span>Connect Gmail Service</span>
-                  </button>
+                      }}
+                      disabled={isAuthenticating}
+                      className={`px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-xs text-white font-bold rounded-xl transition cursor-pointer flex items-center justify-center gap-2 mx-auto ${isAuthenticating ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {isAuthenticating ? (
+                        <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                      ) : (
+                        <svg className="w-4 h-4 fill-current" viewBox="0 0 48 48">
+                          <path d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" fill="#EA4335" />
+                          <path d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" fill="#4285F4" />
+                          <path d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" fill="#FBBC05" />
+                          <path d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" fill="#34A853" />
+                        </svg>
+                      )}
+                      <span>{isAuthenticating ? 'Connecting Google...' : 'Connect Gmail Service'}</span>
+                    </button>
+                  </div>
+
+                  {gmailAuthError && (
+                    <div className="p-3.5 bg-neutral-950 border border-neutral-850 rounded-xl text-left space-y-2">
+                      <div className="flex items-center gap-2 text-amber-500 font-bold text-[10px] font-mono tracking-wider">
+                        <ShieldAlert className="w-4 h-4 shrink-0" />
+                        {gmailAuthError === 'unauthorized-domain' 
+                          ? 'DOMAIN AUTHORIZATION REQUIRED' 
+                          : gmailAuthError === 'popup-blocked'
+                          ? 'SIGN-IN POPUP BLOCKED'
+                          : 'SIGN-IN FAILED'}
+                      </div>
+                      <p className="text-[11px] text-zinc-400 leading-normal">
+                        {gmailAuthError === 'unauthorized-domain' ? (
+                          <>
+                            This domain (<code className="text-white font-mono bg-neutral-900 px-1 py-0.5 rounded">{window.location.hostname}</code>) is not whitelisted in your Firebase console. 
+                            <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline inline-flex items-center gap-0.5 ml-1">
+                              Open Console <ExternalLink className="w-2.5 h-2.5" />
+                            </a> and add it under <strong className="text-zinc-300">Build &gt; Authentication &gt; Settings &gt; Authorized domains</strong>.
+                          </>
+                        ) : gmailAuthError === 'popup-blocked' ? (
+                          'Your browser blocked the Google Sign-In popup window. Please allow popups or open the app in a new standalone tab.'
+                        ) : (
+                          'Google authorization failed. Please check your network and Firebase configuration.'
+                        )}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-3.5 text-xs">
@@ -2396,8 +4718,8 @@ export default function ProjectDetails({
                   </div>
 
                   {gmailError && (
-                    <div className="bg-red-950/20 border border-red-900/40 rounded-xl p-3 text-red-400 font-mono text-[11px]">
-                      Error: {gmailError}
+                    <div className="bg-red-950/20 border border-red-900/40 rounded-xl p-3 text-red-400 font-mono text-[11px] leading-relaxed break-words">
+                      Error: {renderErrorWithLinks(gmailError)}
                     </div>
                   )}
 
@@ -2417,6 +4739,9 @@ export default function ProjectDetails({
                       setGmailSuccess(false);
                       setGmailError('');
                       try {
+                        // Fetch project photos as base64 email attachments
+                        const imageAttachments = await getPhotoEmailAttachments();
+
                         const roomsList = rooms.filter(r => !r.isOption).map(room => {
                           const price = liveSummary.roomCosts[room.id] || 0;
                           return `
@@ -2448,6 +4773,14 @@ export default function ProjectDetails({
                             <h2 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">PaintNav Proposal & Estimate</h2>
                             <p>Dear ${clientName},</p>
                             <p>${gmailMessage.replace(/\n/g, '<br/>')}</p>
+
+                            <div style="text-align: center; margin: 30px 0;">
+                              <a href="${window.location.origin}/?proposalId=${project.id}&action=sign" 
+                                 style="background-color: #2563eb; color: #ffffff !important; padding: 14px 28px; text-decoration: none; border-radius: 12px; font-weight: bold; display: inline-block; font-size: 15px; box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);"
+                                 target="_blank">
+                                ✍️ Review & Sign Proposal Online
+                              </a>
+                            </div>
                             
                             <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                               <h3 style="margin-top: 0; color: #0f172a;">Summary of Estimate #${proposalNo}</h3>
@@ -2510,6 +4843,10 @@ export default function ProjectDetails({
                           clientEmail,
                           projectDate,
                           proposalNo,
+                          generalNotes,
+                          termsAndConditions,
+                          signatureDataUrl: project.signatureDataUrl,
+                          installments: project.installments || installments,
                         });
 
                         await sendProposalEmail({
@@ -2519,6 +4856,7 @@ export default function ProjectDetails({
                           body: htmlBody,
                           pdfBase64: proposalPdfBase64,
                           pdfFilename: `Proposal_${proposalNo}.pdf`,
+                          attachments: imageAttachments,
                         });
 
                         setGmailSuccess(true);
@@ -2569,12 +4907,12 @@ export default function ProjectDetails({
 
             <div className="bg-neutral-950 p-3 rounded-xl border border-neutral-850 text-xs font-mono text-zinc-400 flex items-center justify-between select-all leading-none break-all pr-2">
               <span className="truncate select-all text-blue-400 pr-1 select-all">
-                https://paintnav.com/proposal/{proposalNo}/shared
+                {window.location.origin}/?proposalId={proposalNo}&action=sign
               </span>
               <button 
                 onClick={() => {
-                  navigator.clipboard.writeText(`https://paintnav.com/proposal/${proposalNo}/shared`);
-                  triggerNotification('Linkcopied to clipboard!');
+                  navigator.clipboard.writeText(`${window.location.origin}/?proposalId=${proposalNo}&action=sign`);
+                  triggerNotification('Link copied to clipboard!');
                 }}
                 className="px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 font-bold text-[10px] text-white rounded-lg cursor-pointer"
               >
@@ -2918,48 +5256,102 @@ export default function ProjectDetails({
             </div>
 
             {!localToken ? (
-              <div className="bg-neutral-950 p-5 rounded-xl border border-neutral-850 space-y-4 text-center">
-                <div className="space-y-1">
-                  <p className="font-bold text-xs text-zinc-200">Gmail Integration Not Connected</p>
-                  <p className="text-[11px] text-zinc-500 leading-normal max-w-sm mx-auto">
-                    Sign in with your Google Workspace account to securely send the generated proposal PDF attachment directly to <span className="text-blue-400 font-semibold">{clientEmail}</span>.
-                  </p>
-                </div>
-                
-                <button
-                  onClick={async () => {
-                    try {
-                      const result = await googleSignIn();
-                      if (result) {
-                        setLocalToken(result.accessToken);
-                        triggerNotification('Connected to Google Account successfully!', 'success');
-                      }
-                    } catch (err: any) {
-                      console.error('Google authorization failed:', err);
-                      triggerNotification('Failed to authorize Google Account.', 'error');
-                    }
-                  }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-xs text-white font-bold rounded-xl transition cursor-pointer flex items-center justify-center gap-2 mx-auto"
-                >
-                  <svg className="w-4 h-4 fill-current" viewBox="0 0 48 48">
-                    <path d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" fill="#EA4335" />
-                    <path d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" fill="#4285F4" />
-                    <path d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" fill="#FBBC05" />
-                    <path d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" fill="#34A853" />
-                  </svg>
-                  <span>Connect Google Account</span>
-                </button>
+              <div className="space-y-3.5 w-full">
+                <div className="bg-neutral-950 p-5 rounded-xl border border-neutral-850 space-y-4 text-center">
+                  <div className="space-y-1">
+                    <p className="font-bold text-xs text-zinc-200">Gmail Integration Not Connected</p>
+                    <p className="text-[11px] text-zinc-500 leading-normal max-w-sm mx-auto">
+                      Sign in with your Google Workspace account to securely send the generated proposal PDF attachment directly to <span className="text-blue-400 font-semibold">{clientEmail}</span>.
+                    </p>
+                  </div>
+                  
+                    <button
+                      onClick={async () => {
+                        if (isAuthenticating) return;
+                        try {
+                          setIsAuthenticating(true);
+                          setGmailAuthError(null);
+                          const result = await googleSignIn();
+                          if (result) {
+                            setLocalToken(result.accessToken);
+                            triggerNotification('Connected to Google Account successfully!', 'success');
+                          }
+                        } catch (err: any) {
+                          const isPopupClosed = err?.message?.includes('popup-closed-by-user') || err?.code?.includes('popup-closed-by-user') || String(err).includes('popup-closed-by-user') ||
+                                                err?.message?.includes('cancelled-popup-request') || err?.code?.includes('cancelled-popup-request') || String(err).includes('cancelled-popup-request');
+                          if (isPopupClosed) {
+                            console.warn('Google authorization was closed or blocked by the user.');
+                          } else {
+                            console.error('Google authorization failed:', err);
+                          }
+                          const isUnauthorizedDomain = err?.message?.includes('unauthorized-domain') || err?.code?.includes('unauthorized-domain') || String(err).includes('unauthorized-domain');
+                          if (isUnauthorizedDomain) {
+                            setGmailAuthError('unauthorized-domain');
+                            triggerNotification('Domain not authorized in Firebase.', 'error');
+                          } else if (isPopupClosed) {
+                            setGmailAuthError('popup-blocked');
+                            triggerNotification('Sign-in popup blocked or closed.', 'error');
+                          } else {
+                            setGmailAuthError('generic');
+                            triggerNotification('Failed to authorize Google Account.', 'error');
+                          }
+                        } finally {
+                          setIsAuthenticating(false);
+                        }
+                      }}
+                      disabled={isAuthenticating}
+                      className={`px-4 py-2 bg-blue-600 hover:bg-blue-700 text-xs text-white font-bold rounded-xl transition cursor-pointer flex items-center justify-center gap-2 mx-auto ${isAuthenticating ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {isAuthenticating ? (
+                        <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                      ) : (
+                        <svg className="w-4 h-4 fill-current" viewBox="0 0 48 48">
+                          <path d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" fill="#EA4335" />
+                          <path d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" fill="#4285F4" />
+                          <path d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" fill="#FBBC05" />
+                        </svg>
+                      )}
+                      <span>{isAuthenticating ? 'Connecting Google...' : 'Connect Google Service'}</span>
+                    </button>
+                  
+                  <div className="border-t border-neutral-850/60 pt-3 text-[10px] text-zinc-500">
+                    Or bypass email dispatch and update the project status directly:
+                  </div>
 
-                <div className="border-t border-neutral-850/60 pt-3 text-[10px] text-zinc-500">
-                  Or bypass email dispatch and update the project status directly:
+                  <button
+                    onClick={() => handleSendProposalAndEmail(false)}
+                    className="text-xs text-zinc-400 hover:text-white underline font-semibold transition cursor-pointer"
+                  >
+                    Mark as Sent Offline (Skip Email)
+                  </button>
                 </div>
 
-                <button
-                  onClick={() => handleSendProposalAndEmail(false)}
-                  className="text-xs text-zinc-400 hover:text-white underline font-semibold transition cursor-pointer"
-                >
-                  Mark as Sent Offline (Skip Email)
-                </button>
+                {gmailAuthError && (
+                  <div className="p-3.5 bg-neutral-950 border border-neutral-850 rounded-xl text-left space-y-2">
+                    <div className="flex items-center gap-2 text-amber-500 font-bold text-[10px] font-mono tracking-wider">
+                      <ShieldAlert className="w-4 h-4 shrink-0" />
+                      {gmailAuthError === 'unauthorized-domain' 
+                        ? 'DOMAIN AUTHORIZATION REQUIRED' 
+                        : gmailAuthError === 'popup-blocked'
+                        ? 'SIGN-IN POPUP BLOCKED'
+                        : 'SIGN-IN FAILED'}
+                    </div>
+                    <p className="text-[11px] text-zinc-400 leading-normal">
+                      {gmailAuthError === 'unauthorized-domain' ? (
+                        <>
+                          This domain (<code className="text-white font-mono bg-neutral-900 px-1 py-0.5 rounded">{window.location.hostname}</code>) is not whitelisted in your Firebase console. 
+                          <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline inline-flex items-center gap-0.5 ml-1">
+                            Open Console <ExternalLink className="w-2.5 h-2.5" />
+                          </a> and add it under <strong className="text-zinc-300">Build &gt; Authentication &gt; Settings &gt; Authorized domains</strong>.
+                        </>
+                      ) : gmailAuthError === 'popup-blocked' ? (
+                        'Your browser blocked the Google Sign-In popup window. Please allow popups or open the app in a new standalone tab.'
+                      ) : (
+                        'Google authorization failed. Please check your network and Firebase configuration.'
+                      )}
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-3.5 text-xs">
@@ -3003,8 +5395,8 @@ export default function ProjectDetails({
                 </div>
 
                 {gmailError && (
-                  <div className="bg-red-950/20 border border-red-900/40 rounded-xl p-3 text-red-400 font-mono text-[11px]">
-                    Error: {gmailError}
+                  <div className="bg-red-950/20 border border-red-900/40 rounded-xl p-3 text-red-400 font-mono text-[11px] leading-relaxed break-words">
+                    Error: {renderErrorWithLinks(gmailError)}
                   </div>
                 )}
 
@@ -3159,7 +5551,847 @@ export default function ProjectDetails({
         </div>
       )}
 
+      {/* CUSTOMIZABLE PERCENTAGE INVOICE DISPATCH POPUP / MODAL */}
+      {showCustomInvoiceModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-neutral-900 border border-[#2d2d2d] rounded-2xl w-full max-w-lg p-6 relative text-left shadow-2xl space-y-5"
+          >
+            <button
+              onClick={() => setShowCustomInvoiceModal(false)}
+              className="absolute right-4 top-4 text-zinc-400 hover:text-white transition cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 bg-blue-500/10 rounded-xl flex items-center justify-center">
+                <CreditCard className="w-5 h-5 text-blue-500" />
+              </div>
+              <div className="space-y-0.5">
+                <h3 className="text-xs font-bold text-white uppercase font-mono tracking-widest">
+                  Configure Installment Invoice
+                </h3>
+                <p className="text-[10px] text-zinc-400 font-mono">
+                  Billed against Grand Total of ${liveSummary.total.toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Form Fields */}
+            <div className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Invoice Name / Label</label>
+                <input
+                  type="text"
+                  value={customInvoiceName}
+                  onChange={(e) => setCustomInvoiceName(e.target.value)}
+                  placeholder="e.g. Upfront Deposit, Milestone 1, Final Bill"
+                  className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-xl p-2.5 text-xs text-white outline-none font-mono"
+                />
+              </div>
+
+              {/* Presets */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Quick Percentage Presets</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[20, 30, 50, 100].map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      onClick={() => {
+                        setCustomInvoicePercent(pct);
+                        const amt = Math.round(liveSummary.total * (pct / 100));
+                        setCustomInvoiceAmount(amt);
+                        let name = `${pct}% Installment`;
+                        if (pct === 30) name = "Upfront Deposit (30%)";
+                        if (pct === 100) name = "Full Amount Payment (100%)";
+                        setCustomInvoiceName(name);
+                      }}
+                      className={`py-1.5 px-2 rounded-lg text-[11px] font-bold font-mono transition border cursor-pointer text-center ${
+                        customInvoicePercent === pct
+                          ? 'bg-blue-600/15 border-blue-500/30 text-blue-400'
+                          : 'bg-neutral-950 border-neutral-850 hover:bg-neutral-850 text-zinc-400'
+                      }`}
+                    >
+                      {pct}%
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Dynamic Percent & Amount inputs */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Invoice Percentage (%)</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={customInvoicePercent}
+                      onChange={(e) => handleCustomInvoicePercentChange(Number(e.target.value))}
+                      className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-xl p-2.5 text-xs text-white outline-none font-mono pr-8"
+                    />
+                    <span className="absolute right-3.5 top-2.5 text-zinc-500 font-mono font-bold">%</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Invoice Dollar Amount ($)</label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-2.5 text-zinc-500 font-mono font-bold">$</span>
+                    <input
+                      type="number"
+                      value={customInvoiceAmount}
+                      onChange={(e) => handleCustomInvoiceAmountChange(Number(e.target.value))}
+                      className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-xl p-2.5 pl-8 text-xs text-white outline-none font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Scope/Room Specifications breakdown display */}
+              <div className="bg-neutral-950 p-3 rounded-xl border border-neutral-850/70 space-y-1.5">
+                <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider font-mono block">
+                  Configured Room Specifications Preview:
+                </span>
+                <div className="text-[10px] font-mono text-zinc-400 leading-relaxed max-h-[100px] overflow-y-auto whitespace-pre-wrap pr-1">
+                  {getRoomsBreakdownText()}
+                </div>
+                <p className="text-[9px] text-zinc-600 italic">
+                  Note: The room specifications will automatically be appended to this Stripe invoice and sent to the client.
+                </p>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowCustomInvoiceModal(false)}
+                className="flex-1 py-2.5 bg-neutral-800 hover:bg-neutral-750 text-xs text-zinc-300 font-bold rounded-xl transition cursor-pointer text-center"
+              >
+                Cancel
+              </button>
+              
+              <button
+                type="button"
+                onClick={handleDispatchCustomInvoice}
+                disabled={isSendingStripe}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/40 text-xs text-white font-bold rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {isSendingStripe ? (
+                  <>
+                    <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Sending Invoice...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" /> Dispatch via Stripe
+                  </>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* SEND PAYMENT REQUEST DIALOG */}
+      {showRequestModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-neutral-900 border border-[#2d2d2d] rounded-2xl w-full max-w-lg p-6 relative text-left shadow-2xl space-y-5"
+          >
+            <button
+              onClick={() => setShowRequestModal(false)}
+              className="absolute right-4 top-4 text-zinc-400 hover:text-white transition cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 bg-blue-500/10 rounded-xl flex items-center justify-center">
+                <Send className="w-5 h-5 text-blue-500" />
+              </div>
+              <div className="space-y-0.5">
+                <h3 className="text-xs font-bold text-white uppercase font-mono tracking-widest">
+                  Send Payment Request
+                </h3>
+                <p className="text-[11px] text-zinc-400">
+                  Dispatch a professional payment milestone request to your client via Gmail.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Recipient</span>
+                  <div className="p-2.5 bg-neutral-950 border border-neutral-850 rounded-xl text-zinc-300 font-mono truncate">
+                    {clientEmail || 'client@email.com'}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Status</span>
+                  <div className="p-2.5 bg-neutral-950 border border-neutral-850 rounded-xl text-amber-500 font-mono font-bold">
+                    Draft Milestone Request
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Email Subject</label>
+                <input
+                  type="text"
+                  value={requestSubject}
+                  onChange={(e) => setRequestSubject(e.target.value)}
+                  className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-xl p-2.5 text-xs text-white outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Email Message Body</label>
+                <textarea
+                  rows={8}
+                  value={requestMessage}
+                  onChange={(e) => setRequestMessage(e.target.value)}
+                  className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-xl p-3 text-xs text-white outline-none font-sans whitespace-pre-wrap leading-relaxed"
+                />
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowRequestModal(false)}
+                className="flex-1 py-2.5 bg-neutral-800 hover:bg-neutral-750 text-xs text-zinc-300 font-bold rounded-xl transition cursor-pointer text-center"
+              >
+                Cancel
+              </button>
+              
+              <button
+                type="button"
+                onClick={handleDispatchPaymentRequest}
+                disabled={isSendingRequest}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/40 text-xs text-white font-bold rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {isSendingRequest ? (
+                  <>
+                    <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Sending Request...
+                  </>
+                ) : (
+                  <>
+                    <Mail className="w-3.5 h-3.5" /> Dispatch via Gmail
+                  </>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* RECORD PAYMENT & SEND RECEIPT DIALOG WITH INSTALLMENTS OVERRIDE */}
+      {showReceiptModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-neutral-900 border border-[#2d2d2d] rounded-2xl w-full max-w-2xl p-6 relative text-left shadow-2xl my-8 space-y-5"
+          >
+            <button
+              onClick={() => setShowReceiptModal(false)}
+              className="absolute right-4 top-4 text-zinc-400 hover:text-white transition cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 bg-emerald-500/10 rounded-xl flex items-center justify-center">
+                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+              </div>
+              <div className="space-y-0.5">
+                <h3 className="text-xs font-bold text-white uppercase font-mono tracking-widest">
+                  Record Payment & Send Receipt
+                </h3>
+                <p className="text-[11px] text-zinc-400">
+                  Record payments, override or customize installment milestones in unison, and email an official receipt.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+              {/* LEFT COLUMN: OVERRIDE INSTALLMENTS (7 cols) */}
+              <div className="lg:col-span-7 space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-extrabold text-zinc-400 uppercase tracking-widest font-mono">
+                      Customizable Installments Schedule
+                    </span>
+                    <span className="text-[10px] font-mono text-zinc-500">
+                      Total: ${liveSummary.total.toLocaleString()}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
+                    {receiptInstallments.map((inst, index) => {
+                      const isPaid = inst.status === 'Paid';
+                      return (
+                        <div 
+                          key={inst.id || index} 
+                          className={`p-3.5 rounded-xl border space-y-2.5 transition-all ${
+                            isPaid ? 'bg-emerald-950/15 border-emerald-500/25' : 'bg-neutral-950 border-neutral-850'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            {/* Left: Checkbox to toggle Paid status */}
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                              <input 
+                                type="checkbox"
+                                checked={isPaid}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  const updated = receiptInstallments.map((item, idx) => {
+                                    if (idx === index) {
+                                      return {
+                                        ...item,
+                                        status: (checked ? 'Paid' : 'Requested') as any,
+                                        paidAt: checked ? new Date().toLocaleDateString() : undefined,
+                                        requestedAt: item.requestedAt || new Date().toLocaleDateString()
+                                      };
+                                    }
+                                    return item;
+                                  });
+                                  setReceiptInstallments(updated);
+                                  updateReceiptBodyWithInstallments(updated);
+                                }}
+                                className="w-4 h-4 rounded text-emerald-500 border-neutral-800 bg-neutral-900 focus:ring-emerald-500"
+                              />
+                              <span className="text-xs font-bold font-mono text-zinc-300">
+                                {isPaid ? '✓ Marked Paid' : 'Pending Payment'}
+                              </span>
+                            </label>
+
+                            {/* Right: delete button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = receiptInstallments.filter((_, idx) => idx !== index);
+                                setReceiptInstallments(updated);
+                                updateReceiptBodyWithInstallments(updated);
+                              }}
+                              className="text-zinc-500 hover:text-red-400 p-1 rounded hover:bg-neutral-900 transition cursor-pointer"
+                              title="Delete installment row"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          {/* Inputs: Name, Percent, Amount */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                            <div className="space-y-0.5">
+                              <span className="text-[9px] text-zinc-500 uppercase font-mono">Installment Name</span>
+                              <input 
+                                type="text"
+                                value={inst.name}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  const updated = receiptInstallments.map((item, idx) => {
+                                    if (idx === index) {
+                                      return { ...item, name: val };
+                                    }
+                                    return item;
+                                  });
+                                  setReceiptInstallments(updated);
+                                  updateReceiptBodyWithInstallments(updated);
+                                }}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none"
+                              />
+                            </div>
+
+                            <div className="space-y-0.5">
+                              <span className="text-[9px] text-zinc-500 uppercase font-mono">Percent (%)</span>
+                              <input 
+                                type="number"
+                                value={inst.percentage}
+                                onChange={(e) => {
+                                  const pct = Number(e.target.value);
+                                  const amt = Math.round(liveSummary.total * (pct / 100));
+                                  const updated = receiptInstallments.map((item, idx) => {
+                                    if (idx === index) {
+                                      return { ...item, percentage: pct, amount: amt };
+                                    }
+                                    return item;
+                                  });
+                                  setReceiptInstallments(updated);
+                                  updateReceiptBodyWithInstallments(updated);
+                                }}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none font-mono"
+                              />
+                            </div>
+
+                            <div className="space-y-0.5">
+                              <span className="text-[9px] text-zinc-500 uppercase font-mono">Amount ($)</span>
+                              <input 
+                                type="number"
+                                value={inst.amount}
+                                onChange={(e) => {
+                                  const amt = Number(e.target.value);
+                                  const pct = liveSummary.total > 0 ? Math.round((amt / liveSummary.total) * 100) : 0;
+                                  const updated = receiptInstallments.map((item, idx) => {
+                                    if (idx === index) {
+                                      return { ...item, percentage: pct, amount: amt };
+                                    }
+                                    return item;
+                                  });
+                                  setReceiptInstallments(updated);
+                                  updateReceiptBodyWithInstallments(updated);
+                                }}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none font-mono"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const remainingPct = 100 - receiptInstallments.reduce((sum, i) => sum + i.percentage, 0);
+                      const nextPct = remainingPct > 0 ? remainingPct : 10;
+                      const nextAmt = Math.round(liveSummary.total * (nextPct / 100));
+                      
+                      const newInst = {
+                        id: `inst-${Date.now()}`,
+                        name: `Milestone Payment (${nextPct}%)`,
+                        percentage: nextPct,
+                        amount: nextAmt,
+                        status: 'Requested' as const,
+                        requestedAt: new Date().toLocaleDateString()
+                      };
+
+                      const updated = [...receiptInstallments, newInst];
+                      setReceiptInstallments(updated);
+                      updateReceiptBodyWithInstallments(updated);
+                    }}
+                    className="w-full py-2 bg-neutral-950 hover:bg-neutral-900 border border-dashed border-neutral-800 text-zinc-400 font-bold text-xs rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Custom Installment Row
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Payment Method</span>
+                    <select
+                      value={receiptPaymentMethod}
+                      onChange={(e) => setReceiptPaymentMethod(e.target.value)}
+                      className="w-full bg-neutral-950 border border-neutral-850 rounded-xl p-2.5 text-xs text-white outline-none"
+                    >
+                      <option value="Stripe">Stripe (Online Card)</option>
+                      <option value="Cash">Cash</option>
+                      <option value="Check">Check / Draft</option>
+                      <option value="Bank Transfer">Bank Transfer / EFT</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Recipient Email</span>
+                    <div className="p-2.5 bg-neutral-950 border border-neutral-850 rounded-xl text-zinc-300 font-mono truncate">
+                      {clientEmail || 'client@email.com'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* RIGHT COLUMN: GMAIL DISPATCH PREVIEW (5 cols) */}
+              <div className="lg:col-span-5 space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Email Subject</label>
+                  <input
+                    type="text"
+                    value={receiptSubject}
+                    onChange={(e) => setReceiptSubject(e.target.value)}
+                    className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-xl p-2.5 text-xs text-white outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono">Email Message Body</label>
+                  <textarea
+                    rows={11}
+                    value={receiptMessage}
+                    onChange={(e) => setReceiptMessage(e.target.value)}
+                    className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-xl p-3 text-xs text-white outline-none font-sans whitespace-pre-wrap leading-relaxed"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowReceiptModal(false)}
+                className="flex-1 py-2.5 bg-neutral-800 hover:bg-neutral-750 text-xs text-zinc-300 font-bold rounded-xl transition cursor-pointer text-center"
+              >
+                Cancel
+              </button>
+              
+              <button
+                type="button"
+                onClick={handleDispatchReceiptAndRecordPayment}
+                disabled={isSendingReceipt}
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-600/40 text-xs text-white font-bold rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {isSendingReceipt ? (
+                  <>
+                    <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Saving & Sending...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Record & Send Receipt
+                  </>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* UNIFIED DESKTOP & MOBILE STICKY BOTTOM LIVE PRICE & SELECTION BAR */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-[#0c0c0c]/95 backdrop-blur-md border-t border-neutral-850 p-4 shadow-2xl safe-bottom transition-all duration-300 select-none">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
+          
+          {/* Left Panel: Pricing or Selection Stats, and the Select Toggle */}
+          <div className="flex items-center gap-4 justify-between md:justify-start">
+            {!selectMode ? (
+              <div className="flex items-center gap-4 text-left">
+                <div className="flex flex-col">
+                  <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider font-mono">Live Proposal Price</span>
+                  <span className="text-xl font-black text-white font-mono mt-0.5">
+                    ${liveSummary.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                {totalPaid > 0 && (
+                  <>
+                    <div className="h-7 w-[1px] bg-neutral-850" />
+                    <div className="flex flex-col">
+                      <span className="text-[9px] text-emerald-500 font-bold uppercase tracking-wider font-mono">Paid to Date</span>
+                      <span className="text-base font-bold text-emerald-400 font-mono mt-0.5">
+                        ${totalPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="h-7 w-[1px] bg-neutral-850" />
+                    <div className="flex flex-col">
+                      <span className="text-[9px] text-amber-500 font-bold uppercase tracking-wider font-mono">Remaining Balance</span>
+                      <span className="text-base font-bold text-amber-400 font-mono mt-0.5">
+                        ${remainingCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
+                <div className="flex flex-col text-left">
+                  <span className="text-[9px] text-blue-400 font-bold uppercase tracking-wider font-mono">Bulk Selection Active</span>
+                  <span className="text-xs font-bold text-zinc-200 font-mono mt-0.5">
+                    {(() => {
+                      const roomsCount = Object.values(selectedRoomIds).filter(Boolean).length;
+                      const areasCount = Object.values(selectedAreas).filter(Boolean).length;
+                      if (roomsCount === 0 && areasCount === 0) return 'Nothing selected';
+                      const parts = [];
+                      if (roomsCount > 0) parts.push(`${roomsCount} room${roomsCount > 1 ? 's' : ''}`);
+                      if (areasCount > 0) parts.push(`${areasCount} layer${areasCount > 1 ? 's' : ''}`);
+                      return parts.join(' & ');
+                    })()}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Select Toggle Button */}
+            <button
+              onClick={() => {
+                setSelectMode(!selectMode);
+                if (selectMode) {
+                  setSelectedRoomIds({});
+                  setSelectedAreas({});
+                }
+              }}
+              className={`px-3.5 py-2 rounded-xl border text-[11px] font-bold font-mono transition flex items-center gap-1.5 cursor-pointer select-none shrink-0 ${
+                selectMode
+                  ? 'bg-blue-600 border-blue-500 text-white shadow-[0_0_10px_rgba(59,130,246,0.3)] hover:bg-blue-500'
+                  : 'bg-neutral-900 border-neutral-800 text-zinc-400 hover:text-white hover:border-neutral-700'
+              }`}
+              title="Toggle selection mode for rooms and individual layers"
+            >
+              <CheckSquare className="w-4 h-4 shrink-0" />
+              <span>{selectMode ? 'Select On' : 'Select'}</span>
+            </button>
+          </div>
+
+          {/* Right Panel: Actions or Bulk Options */}
+          <div className="flex items-center gap-2 overflow-x-auto md:overflow-visible py-1 md:py-0 scrollbar-none select-none">
+            {!selectMode ? (
+              <div className="flex items-center gap-2 ml-auto">
+                <button
+                  onClick={() => handleSave()}
+                  className="bg-neutral-900 border border-neutral-800 hover:border-neutral-700 hover:bg-neutral-850 text-white font-bold font-mono text-[11px] px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="w-4.5 h-4.5 text-zinc-400" />
+                  Save
+                </button>
+                {btnConfig && (
+                  <button
+                    onClick={btnConfig.onClick}
+                    className={`${btnConfig.className} font-bold font-mono text-[11px] px-4 py-2.5 rounded-xl transition cursor-pointer flex items-center gap-1.5`}
+                  >
+                    {btnConfig.label}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 font-mono text-[10px]">
+                <button
+                  type="button"
+                  onClick={handleBulkDuplicate}
+                  className="px-3 py-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-850 text-zinc-300 hover:text-white font-semibold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  title="Duplicate selected rooms/areas"
+                >
+                  <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                  <span className="hidden sm:inline">Duplicate</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleBulkToggleOption}
+                  className="px-3 py-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-850 text-zinc-300 hover:text-white font-semibold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  title="Toggle option state for selected items"
+                >
+                  <Diamond className="w-3.5 h-3.5 text-zinc-400" />
+                  <span className="hidden sm:inline">Toggle Option</span>
+                </button>
+
+                {/* Bulk Set Ceiling Height dropdown */}
+                <div className="relative">
+                  <select
+                    onChange={(e) => {
+                      const h = parseFloat(e.target.value);
+                      if (h > 0) handleBulkSetCeilingHeight(h);
+                      e.target.value = "";
+                    }}
+                    className="bg-neutral-900 hover:bg-neutral-800 border border-neutral-850 text-zinc-300 hover:text-white rounded-xl px-2.5 py-2 outline-none cursor-pointer text-[10px] font-bold"
+                  >
+                    <option value="">Set Height...</option>
+                    <option value="8">8 ft</option>
+                    <option value="9">9 ft</option>
+                    <option value="10">10 ft</option>
+                    <option value="12">12 ft</option>
+                  </select>
+                </div>
+
+                {/* Bulk Set Coats dropdown */}
+                <div className="relative">
+                  <select
+                    onChange={(e) => {
+                      const coats = parseInt(e.target.value, 10);
+                      if (coats > 0) handleBulkSetCoats(coats);
+                      e.target.value = "";
+                    }}
+                    className="bg-neutral-900 hover:bg-neutral-800 border border-neutral-850 text-zinc-300 hover:text-white rounded-xl px-2.5 py-2 outline-none cursor-pointer text-[10px] font-bold"
+                  >
+                    <option value="">Set Coats...</option>
+                    <option value="1">1 Coat</option>
+                    <option value="2">2 Coats</option>
+                    <option value="3">3 Coats</option>
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleBulkDelete}
+                  className="px-3 py-2 bg-red-950/20 hover:bg-red-900/30 border border-red-950/40 text-red-400 hover:text-red-300 font-semibold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                  title="Delete/Remove selected items"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Delete</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRoomIds({});
+                    setSelectedAreas({});
+                  }}
+                  className="px-2.5 py-2 text-zinc-500 hover:text-zinc-300 font-semibold transition cursor-pointer"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+
+        </div>
+      </div>
+
     </div>
+    
+    {/* PRESET & CUSTOM AREA SELECTOR MODAL */}
+    {addingAreaRoomId && (
+      <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-3xl max-w-xl w-full p-6 relative shadow-2xl flex flex-col gap-6 animate-fade-in max-h-[90vh] overflow-y-auto text-left">
+          
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+            <div>
+              <h3 className="text-sm font-bold text-white font-mono uppercase tracking-wider">
+                Add Area Layer
+              </h3>
+              <p className="text-xs text-zinc-400 mt-1 font-sans">
+                Select a preset or create a custom area layer for {rooms.find(r => r.id === addingAreaRoomId)?.name || 'this room'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAddingAreaRoomId(null)}
+              className="p-1.5 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-lg transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Preset Options */}
+          <div className="space-y-3">
+            <span className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider block">
+              Popular Presets
+            </span>
+            <div className="grid grid-cols-2 gap-2.5">
+              {(() => {
+                const activeRoom = rooms.find(r => r.id === addingAreaRoomId);
+                const cat = activeRoom?.category || 'interior';
+                const presets = PRESET_AREAS[cat] || PRESET_AREAS.interior;
+                return presets.map((preset) => {
+                  const isSelectedInRoom = activeRoom?.customAreas?.some((c: any) => c.label.toLowerCase() === preset.label.toLowerCase());
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      disabled={isSelectedInRoom}
+                      onClick={() => {
+                        if (activeRoom) {
+                          handleAddArea(activeRoom, preset.label, preset.calcType, preset.defaultQty, preset.defaultCoats);
+                          setAddingAreaRoomId(null);
+                        }
+                      }}
+                      className={`p-3 text-left rounded-xl border transition flex flex-col justify-between h-20 ${
+                        isSelectedInRoom
+                          ? 'bg-zinc-950/40 border-zinc-850 text-zinc-600 cursor-not-allowed'
+                          : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 hover:border-zinc-700 text-zinc-200 cursor-pointer'
+                      }`}
+                    >
+                      <span className="text-xs font-bold font-sans truncate block w-full">{preset.label}</span>
+                      <span className="text-[9px] text-zinc-500 font-mono mt-1 uppercase block">
+                        {preset.calcType === 'wall' && 'Wall-like (SqFt)'}
+                        {preset.calcType === 'ceiling' && 'Ceiling-like (SqFt)'}
+                        {preset.calcType === 'perimeter' && 'Trim-like (Linear)'}
+                        {preset.calcType === 'item' && `Item-like (Qty: ${preset.defaultQty})`}
+                      </span>
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+          </div>
+
+          {/* Custom Input */}
+          <div className="border-t border-zinc-800 pt-5 space-y-4">
+            <span className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider block">
+              Or Create Custom Area
+            </span>
+            
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider block mb-1.5">
+                    Area Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Accent Column, Cabinet Trim..."
+                    id="custom-modal-name"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const btn = document.getElementById('custom-modal-add-btn');
+                        if (btn) btn.click();
+                      }
+                    }}
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider block mb-1.5">
+                    Calculation Method
+                  </label>
+                  <select
+                    id="custom-modal-calc"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none cursor-pointer"
+                  >
+                    <option value="wall">Wall-like (SqFt)</option>
+                    <option value="ceiling">Ceiling-like (SqFt)</option>
+                    <option value="perimeter">Trim-like (Linear)</option>
+                    <option value="item">Item-like (Qty)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  id="custom-modal-add-btn"
+                  type="button"
+                  onClick={() => {
+                    const activeRoom = rooms.find(r => r.id === addingAreaRoomId);
+                    const nameInput = document.getElementById('custom-modal-name') as HTMLInputElement;
+                    const calcSelect = document.getElementById('custom-modal-calc') as HTMLSelectElement;
+                    
+                    if (activeRoom && nameInput && nameInput.value.trim()) {
+                      const label = nameInput.value.trim();
+                      const calcType = calcSelect.value as 'wall' | 'ceiling' | 'perimeter' | 'item';
+                      handleAddArea(
+                        activeRoom,
+                        label,
+                        calcType,
+                        calcType === 'item' ? 1 : 'auto',
+                        2
+                      );
+                      setAddingAreaRoomId(null);
+                    } else {
+                      triggerNotification('Please enter a valid area name.', 'error');
+                    }
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold font-mono text-xs rounded-xl transition cursor-pointer select-none"
+                >
+                  Create Custom Area
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    )}
     </APIProvider>
   );
 }

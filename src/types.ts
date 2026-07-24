@@ -335,6 +335,22 @@ export interface DiscountPreset {
   type: 'fixed' | 'percentage';
 }
 
+export interface ScopePreset {
+  id: string;
+  category: 'inclusion' | 'exclusion' | 'special';
+  name: string;
+  text: string;
+}
+
+export interface ScopeAreaPreset {
+  id: string;
+  category: 'interior' | 'exterior' | 'deck';
+  label: string;
+  calcType: 'wall' | 'ceiling' | 'perimeter' | 'item';
+  defaultQty?: number | 'auto';
+  defaultCoats?: number;
+}
+
 export interface ProposalSettings {
   threeUniques: UniqueCard[];
   termsAndConditions?: string;
@@ -346,6 +362,8 @@ export interface ProposalSettings {
   productTypeColours?: ProductTypeColourDefaults;
   rates?: ProposalRates;
   discountPresets?: DiscountPreset[];
+  scopePresets?: ScopePreset[];
+  areaPresets?: ScopeAreaPreset[];
 }
 
 export interface LabourRate {
@@ -474,6 +492,47 @@ export const DEFAULT_PROPOSAL_SETTINGS: ProposalSettings = {
     { id: 'dp-1', name: 'Referral Special (10%)', amount: 10, type: 'percentage' },
     { id: 'dp-2', name: 'Spring Promo ($250 Off)', amount: 250, type: 'fixed' },
     { id: 'dp-3', name: 'Senior Discount (5%)', amount: 5, type: 'percentage' },
+  ],
+  scopePresets: [
+    { id: 'sp-1', category: 'inclusion', name: 'Interior Preset', text: '• Heavy-duty floor and furniture drop cloth protection\n• Patch minor nail holes and hairline cracks in drywall\n• Sand, spot prime, and apply 2 full coats of premium acrylic paint\n• Full job site cleanup and debris removal upon completion' },
+    { id: 'sp-2', category: 'inclusion', name: 'Exterior Preset', text: '• Complete pressure wash to remove dirt and chalking\n• Scrape peeling/flaking paint and wire brush loose areas\n• Prime bare wood surfaces with high-adhesion primer\n• Caulk open gaps around window/door trim\n• Apply 2 full coats of weather-resistant exterior paint' },
+    { id: 'sp-3', category: 'inclusion', name: 'Cabinet Preset', text: '• Label and remove cabinet doors and drawer fronts\n• Degrease, scuff-sand, and apply high-bonding primer\n• Spray-apply 2 coats of premium cabinet enamel\n• Re-install doors, drawers, and hardware' },
+    { id: 'sp-4', category: 'exclusion', name: 'Interior Exclusions', text: '• Drywall replacement or major structural repairs\n• Painting inside cabinets/closets unless specifically itemized\n• Repairing rotted framing or water-damaged substrate' },
+    { id: 'sp-5', category: 'exclusion', name: 'Exterior Exclusions', text: '• Replacement of rotted wood trim or fascia unless added as change order\n• Painting roof shingles or window glass\n• Pressure washing aged delicate cedar shakes' },
+    { id: 'sp-6', category: 'special', name: 'Occupied Home', text: '• Home will remain occupied during project. Crew will maintain clean walkways, minimize dust with HEPA vacuums, and store tools daily.' },
+    { id: 'sp-7', category: 'special', name: 'Weather Limits', text: '• Exterior painting requires temperatures above 10°C (50°F) and dry surface conditions. Rain delays will be rescheduled promptly.' },
+  ],
+  areaPresets: [
+    { id: 'ap-1', category: 'interior', label: 'Accent Wall', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-2', category: 'interior', label: 'Crown Moulding', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-3', category: 'interior', label: 'Chair Rail', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-4', category: 'interior', label: 'Wainscoting', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-5', category: 'interior', label: 'Baseboard Accent', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-6', category: 'interior', label: 'Accent Ceiling', calcType: 'ceiling', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-7', category: 'interior', label: 'Cabinets (Qty)', calcType: 'item', defaultQty: 10, defaultCoats: 2 },
+    { id: 'ap-8', category: 'interior', label: 'Closet Shelving', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-9', category: 'interior', label: 'Door Trim (Qty)', calcType: 'item', defaultQty: 2, defaultCoats: 2 },
+    { id: 'ap-10', category: 'interior', label: 'Fireplace Mantel', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { id: 'ap-11', category: 'interior', label: 'Stairs/Spindles', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { id: 'ap-12', category: 'interior', label: 'Radiators (Qty)', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { id: 'ap-13', category: 'deck', label: 'Deck Horizontal Surface', calcType: 'ceiling', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-14', category: 'deck', label: 'Fence', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-15', category: 'deck', label: 'Spindles and Railings', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-16', category: 'deck', label: 'Stairs', calcType: 'item', defaultQty: 5, defaultCoats: 2 },
+    { id: 'ap-17', category: 'deck', label: 'Deck', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-18', category: 'exterior', label: 'Whole House', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-19', category: 'exterior', label: 'Front side', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-20', category: 'exterior', label: 'Right side', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-21', category: 'exterior', label: 'Left side', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-22', category: 'exterior', label: 'Back side', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-23', category: 'exterior', label: 'doors', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { id: 'ap-24', category: 'exterior', label: 'Windows', calcType: 'item', defaultQty: 2, defaultCoats: 2 },
+    { id: 'ap-25', category: 'exterior', label: 'Fence', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-26', category: 'exterior', label: 'Shed', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { id: 'ap-27', category: 'exterior', label: 'Porch', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-28', category: 'exterior', label: 'Garage Doors', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { id: 'ap-29', category: 'exterior', label: 'Deck Horizontal Surface', calcType: 'ceiling', defaultQty: 'auto', defaultCoats: 2 },
+    { id: 'ap-30', category: 'exterior', label: 'Deck', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
   ]
 };
 

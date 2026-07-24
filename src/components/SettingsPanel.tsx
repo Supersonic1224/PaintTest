@@ -326,8 +326,10 @@ export default function SettingsPanel({
       let msg = err.message || 'Failed to sign in.';
       if (msg.toLowerCase().includes('email not confirmed')) {
         msg = 'Your email is not confirmed. Please check your email inbox (and spam folder) for the verification link sent by Supabase. Alternatively, you can disable "Confirm email" on your Supabase dashboard under Authentication > Providers > Email settings.';
+      } else if (sbPassword.trim() === 'capstone_painting') {
+        msg = 'Note: "capstone_painting" is the Master Team Password used for authorizing new team members in the Admin Portal, NOT your personal account login password. Please click "Don\'t have an account? Sign Up" below to register your account with your own password!';
       } else if (msg.toLowerCase().includes('invalid login credentials')) {
-        msg = 'Invalid login credentials. Make sure you have already signed up (using the "Don\'t have an account? Sign Up" link below) in this Supabase project. If you did sign up, verify your email/password or check if email verification is pending.';
+        msg = 'Invalid login credentials. Make sure you have already signed up (using the "Don\'t have an account? Sign Up" link below) for this Supabase project with your own custom password.';
       }
       setSbAuthMessage({ success: false, text: msg });
     } finally {
@@ -343,17 +345,30 @@ export default function SettingsPanel({
     setSbAuthLoading(true);
     setSbAuthMessage(null);
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email: sbEmail.trim(),
         password: sbPassword
       });
 
       if (error) throw error;
 
-      setSbAuthMessage({ 
-        success: true, 
-        text: 'Account created successfully! Check your inbox for verification (if enabled), then ask an administrator to add you.' 
-      });
+      if (data.user && data.user.identities && data.user.identities.length === 0) {
+        setSbAuthMessage({
+          success: false,
+          text: 'This email is ALREADY registered in Supabase! If you cannot log in, please check if your password is correct or if email verification is required.'
+        });
+      } else if (data.session) {
+        setSbAuthMessage({ 
+          success: true, 
+          text: 'Account created and signed in successfully!' 
+        });
+        setSbIsRegistering(false);
+      } else {
+        setSbAuthMessage({ 
+          success: true, 
+          text: 'Account created! 📧 IMPORTANT: Supabase sent a confirmation email to your inbox. You MUST click the link in your email to enable sign in, OR go to Supabase Dashboard > Authentication > Providers > Email and turn OFF "Confirm email".' 
+        });
+      }
       setSbEmail('');
       setSbPassword('');
       await onCheckAuth();
@@ -1221,6 +1236,18 @@ ON CONFLICT (email) DO NOTHING;`;
           {/* If NOT signed in: Show Email/Password Form */}
           {!supabaseUser && (
             <form onSubmit={sbIsRegistering ? handleSupabaseSignUp : handleSupabaseSignIn} className="space-y-3.5 pt-1">
+              <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 text-[10.5px] text-zinc-400 space-y-1 leading-relaxed">
+                <span className="font-bold text-emerald-400 block">💡 Supabase Login vs Team Authorization Password:</span>
+                <p>
+                  {sbIsRegistering 
+                    ? "Set ANY personal password you prefer to create your Supabase login account!" 
+                    : "Enter your personal email and custom password created during registration."}
+                </p>
+                <p className="text-[10px] text-zinc-500">
+                  *Note: <strong className="text-zinc-300 font-mono">capstone_painting</strong> is the master team key used in the Admin Portal to authorize team members, NOT your personal account login password.
+                </p>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider block">Email Address</label>
@@ -2336,6 +2363,205 @@ ON CONFLICT (email) DO NOTHING;`;
                     </div>
                   ))
                 )}
+              </div>
+            </div>
+
+            {/* SECTION 7: PROPOSAL SCOPE NOTE PRESETS */}
+            <div className="space-y-4 pt-6 border-t border-neutral-850">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h4 className="text-xs font-bold text-cyan-400 uppercase font-mono tracking-wider">7. Scope Note Presets (Inclusions, Exclusions, Special Conditions)</h4>
+                  <p className="text-zinc-500 text-[11px] mt-0.5">Manage custom quick-load presets for proposal inclusions, exclusions, and special conditions.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = proposalSettings.scopePresets || DEFAULT_PROPOSAL_SETTINGS.scopePresets || [];
+                    const newPreset = {
+                      id: `sp-${Date.now()}`,
+                      category: 'inclusion' as const,
+                      name: 'New Custom Scope Preset',
+                      text: '• Describe custom inclusion or exclusion details here...'
+                    };
+                    saveProposalSettings({
+                      ...proposalSettings,
+                      scopePresets: [...current, newPreset]
+                    });
+                  }}
+                  className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 text-cyan-400 hover:text-cyan-300 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer font-mono"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Scope Preset
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(proposalSettings.scopePresets || DEFAULT_PROPOSAL_SETTINGS.scopePresets || []).map((preset, idx) => {
+                  const currentList = proposalSettings.scopePresets || DEFAULT_PROPOSAL_SETTINGS.scopePresets || [];
+                  return (
+                    <div key={preset.id} className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <input
+                          type="text"
+                          value={preset.name}
+                          onChange={(e) => {
+                            const updated = [...currentList];
+                            updated[idx] = { ...preset, name: e.target.value };
+                            saveProposalSettings({ ...proposalSettings, scopePresets: updated });
+                          }}
+                          className="bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-sans font-bold flex-1"
+                          placeholder="Preset Button Label"
+                        />
+                        <select
+                          value={preset.category}
+                          onChange={(e) => {
+                            const updated = [...currentList];
+                            updated[idx] = { ...preset, category: e.target.value as any };
+                            saveProposalSettings({ ...proposalSettings, scopePresets: updated });
+                          }}
+                          className="bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-zinc-300 font-mono"
+                        >
+                          <option value="inclusion">Inclusion</option>
+                          <option value="exclusion">Exclusion</option>
+                          <option value="special">Special Condition</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = currentList.filter(p => p.id !== preset.id);
+                            saveProposalSettings({ ...proposalSettings, scopePresets: updated });
+                          }}
+                          className="p-1 bg-red-950/20 text-red-400 hover:bg-red-900/30 rounded border border-red-950/50 cursor-pointer transition"
+                          title="Delete Preset"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={preset.text}
+                        onChange={(e) => {
+                          const updated = [...currentList];
+                          updated[idx] = { ...preset, text: e.target.value };
+                          saveProposalSettings({ ...proposalSettings, scopePresets: updated });
+                        }}
+                        className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-zinc-300 focus:outline-none leading-relaxed font-sans"
+                        placeholder="Preset text payload..."
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* SECTION 8: AREA & SURFACE PRESETS */}
+            <div className="space-y-4 pt-6 border-t border-neutral-850">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h4 className="text-xs font-bold text-amber-400 uppercase font-mono tracking-wider">8. Area & Surface Layer Presets</h4>
+                  <p className="text-zinc-500 text-[11px] mt-0.5">Manage area options available under Interior, Exterior, and Deck configurations.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = proposalSettings.areaPresets || DEFAULT_PROPOSAL_SETTINGS.areaPresets || [];
+                    const newPreset = {
+                      id: `ap-${Date.now()}`,
+                      category: 'interior' as const,
+                      label: 'New Area Layer',
+                      calcType: 'wall' as const,
+                      defaultQty: 'auto' as const,
+                      defaultCoats: 2
+                    };
+                    saveProposalSettings({
+                      ...proposalSettings,
+                      areaPresets: [...current, newPreset]
+                    });
+                  }}
+                  className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 text-amber-400 hover:text-amber-300 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer font-mono"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Area Preset
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {(proposalSettings.areaPresets || DEFAULT_PROPOSAL_SETTINGS.areaPresets || []).map((preset, idx) => {
+                  const currentList = proposalSettings.areaPresets || DEFAULT_PROPOSAL_SETTINGS.areaPresets || [];
+                  return (
+                    <div key={preset.id} className="bg-neutral-950 p-3.5 border border-neutral-850 rounded-xl space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <select
+                          value={preset.category}
+                          onChange={(e) => {
+                            const updated = [...currentList];
+                            updated[idx] = { ...preset, category: e.target.value as any };
+                            saveProposalSettings({ ...proposalSettings, areaPresets: updated });
+                          }}
+                          className="bg-neutral-900 border border-neutral-800 rounded px-2 py-0.5 text-[10px] font-bold text-amber-400 uppercase font-mono"
+                        >
+                          <option value="interior">Interior</option>
+                          <option value="exterior">Exterior</option>
+                          <option value="deck">Deck</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = currentList.filter(p => p.id !== preset.id);
+                            saveProposalSettings({ ...proposalSettings, areaPresets: updated });
+                          }}
+                          className="p-1 bg-red-950/20 text-red-400 hover:bg-red-900/30 rounded border border-red-950/50 cursor-pointer transition"
+                          title="Delete Area Preset"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+
+                      <input
+                        type="text"
+                        value={preset.label}
+                        onChange={(e) => {
+                          const updated = [...currentList];
+                          updated[idx] = { ...preset, label: e.target.value };
+                          saveProposalSettings({ ...proposalSettings, areaPresets: updated });
+                        }}
+                        className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-medium"
+                        placeholder="Area Preset Label"
+                      />
+
+                      <div className="grid grid-cols-2 gap-2 text-[10px]">
+                        <div>
+                          <label className="text-zinc-500 font-mono block mb-0.5">Calc Type</label>
+                          <select
+                            value={preset.calcType}
+                            onChange={(e) => {
+                              const updated = [...currentList];
+                              updated[idx] = { ...preset, calcType: e.target.value as any };
+                              saveProposalSettings({ ...proposalSettings, areaPresets: updated });
+                            }}
+                            className="w-full bg-neutral-900 border border-neutral-800 rounded px-1.5 py-1 text-zinc-300 font-mono"
+                          >
+                            <option value="wall">Wall Sqft</option>
+                            <option value="ceiling">Ceiling Sqft</option>
+                            <option value="perimeter">Perimeter LF</option>
+                            <option value="item">Item Unit Qty</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-zinc-500 font-mono block mb-0.5">Coats</label>
+                          <input
+                            type="number"
+                            value={preset.defaultCoats || 2}
+                            onChange={(e) => {
+                              const updated = [...currentList];
+                              updated[idx] = { ...preset, defaultCoats: parseInt(e.target.value, 10) || 1 };
+                              saveProposalSettings({ ...proposalSettings, areaPresets: updated });
+                            }}
+                            className="w-full bg-neutral-900 border border-neutral-800 rounded px-1.5 py-1 text-zinc-300 font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>

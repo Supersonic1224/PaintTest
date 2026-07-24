@@ -33,7 +33,7 @@ provider.setCustomParameters({
 
 // Cache variables
 let isSigningIn = false;
-let cachedAccessToken: string | null = null;
+let cachedAccessToken: string | null = (typeof window !== 'undefined') ? localStorage.getItem('painter_crm_drive_token') : null;
 
 // Initialize Auth listener
 export const initAuth = (
@@ -42,17 +42,11 @@ export const initAuth = (
 ) => {
   return onAuthStateChanged(auth, async (user) => {
     if (user) {
-      if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else {
-        // If we don't have token but user is signed in, we might need a re-auth
-        // or wait for active sign-in. Let's make sure token exists.
-        if (!isSigningIn) {
-          if (onAuthFailure) onAuthFailure();
-        }
-      }
+      const activeToken = cachedAccessToken || localStorage.getItem('painter_crm_drive_token') || '';
+      if (onAuthSuccess) onAuthSuccess(user, activeToken);
     } else {
       cachedAccessToken = null;
+      if (typeof window !== 'undefined') localStorage.removeItem('painter_crm_drive_token');
       if (onAuthFailure) onAuthFailure();
     }
   });
@@ -66,12 +60,12 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     const credential = GoogleAuthProvider.credentialFromResult(result);
     const token = credential?.accessToken;
     
-    if (!token) {
-      throw new Error('Failed to retrieve Google Drive OAuth access token.');
+    if (token) {
+      cachedAccessToken = token;
+      if (typeof window !== 'undefined') localStorage.setItem('painter_crm_drive_token', token);
     }
     
-    cachedAccessToken = token;
-    return { user: result.user, accessToken: token };
+    return { user: result.user, accessToken: token || '' };
   } catch (error: any) {
     const isPopupClosed = error?.message?.includes('popup-closed-by-user') || error?.code?.includes('popup-closed-by-user') || String(error).includes('popup-closed-by-user') ||
                           error?.message?.includes('cancelled-popup-request') || error?.code?.includes('cancelled-popup-request') || String(error).includes('cancelled-popup-request');
@@ -87,14 +81,19 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
 };
 
 export const getAccessToken = (): string | null => {
-  return cachedAccessToken;
+  return cachedAccessToken || (typeof window !== 'undefined' ? localStorage.getItem('painter_crm_drive_token') : null);
 };
 
 export const setAccessToken = (token: string | null) => {
   cachedAccessToken = token;
+  if (typeof window !== 'undefined') {
+    if (token) localStorage.setItem('painter_crm_drive_token', token);
+    else localStorage.removeItem('painter_crm_drive_token');
+  }
 };
 
 export const googleSignOut = async () => {
   await signOut(auth);
   cachedAccessToken = null;
+  if (typeof window !== 'undefined') localStorage.removeItem('painter_crm_drive_token');
 };

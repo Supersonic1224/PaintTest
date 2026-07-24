@@ -197,8 +197,10 @@ export default function AdminPortal({
       let msg = err.message || 'Failed to sign in.';
       if (msg.toLowerCase().includes('email not confirmed')) {
         msg = 'Your email is not confirmed. Please check your email inbox (and spam folder) for the verification link sent by Supabase. Alternatively, you can disable "Confirm email" on your Supabase dashboard under Authentication > Providers > Email settings.';
+      } else if (sbPassword.trim() === 'capstone_painting') {
+        msg = 'Note: "capstone_painting" is the Master Team Password used for authorizing new team members in the Admin Portal, NOT your personal account login password. Please click "Don\'t have an account? Sign Up" below to register your account with your own password!';
       } else if (msg.toLowerCase().includes('invalid login credentials')) {
-        msg = 'Invalid login credentials. Make sure you have already signed up (using the "Don\'t have an account? Sign Up" link below) in this Supabase project. If you did sign up, verify your email/password or check if email verification is pending.';
+        msg = 'Invalid login credentials. Make sure you have already signed up (using the "Don\'t have an account? Sign Up" link below) for this Supabase project with your own custom password.';
       }
       setSbAuthMessage({ success: false, text: msg });
     } finally {
@@ -213,17 +215,30 @@ export default function AdminPortal({
     setSbAuthLoading(true);
     setSbAuthMessage(null);
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email: sbEmail.trim(),
         password: sbPassword
       });
 
       if (error) throw error;
 
-      setSbAuthMessage({ 
-        success: true, 
-        text: 'Account registered successfully! If you are the database owner, use the SQL instructions below to authorize yourself. Otherwise, ask an existing administrator to authorize your email.' 
-      });
+      if (data.user && data.user.identities && data.user.identities.length === 0) {
+        setSbAuthMessage({
+          success: false,
+          text: 'This email is ALREADY registered in Supabase! If you cannot log in, please check if your password is correct or if email verification is required.'
+        });
+      } else if (data.session) {
+        setSbAuthMessage({ 
+          success: true, 
+          text: 'Account registered and signed in successfully!' 
+        });
+        setSbIsRegistering(false);
+      } else {
+        setSbAuthMessage({ 
+          success: true, 
+          text: 'Account registered! 📧 IMPORTANT: Supabase sent a confirmation email to your inbox. You MUST click the link in your email to enable sign in, OR go to your Supabase Dashboard > Authentication > Providers > Email and turn OFF "Confirm email".' 
+        });
+      }
       setSbEmail('');
       setSbPassword('');
       await onCheckAuth();

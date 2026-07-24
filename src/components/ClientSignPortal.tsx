@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { ProjectDetails, ClientLead, RoomSpec } from '../types';
+import { ProjectDetails, ClientLead } from '../types';
 import { fetchSingleProjectFromFirestore, fetchSingleClientFromFirestore, updateProjectSignatureInFirestore } from '../firebaseService';
 import { fetchSingleProjectFromSupabase, fetchSingleClientFromSupabase, updateProjectSignatureInSupabase } from '../supabaseService';
 import { generateProposalPDF, generateReceiptPDF } from '../pdfGenerator';
@@ -11,16 +11,13 @@ import {
   Type, 
   Info, 
   AlertCircle, 
-  Calendar, 
   MapPin, 
   Mail, 
   Phone, 
-  ChevronRight, 
-  DollarSign, 
-  UserCheck, 
   ShieldCheck,
   Paintbrush,
-  Download
+  Download,
+  X
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -42,6 +39,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
   const [signMethod, setSignMethod] = useState<'draw' | 'type'>('draw');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isSignedSuccess, setIsSignedSuccess] = useState<boolean>(false);
+  const [isSignModalOpen, setIsSignModalOpen] = useState<boolean>(false);
 
   // Canvas Drawing Refs
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -99,21 +97,25 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
     loadPortalData();
   }, [proposalId]);
 
-  // Adjust canvas size for high-DPI screens on mount
+  // Adjust canvas size when signature modal is opened
   useEffect(() => {
-    if (canvasRef.current) {
-      const canvas = canvasRef.current;
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = 140; // Fixed visual height
-      
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
+    if (isSignModalOpen && signMethod === 'draw' && canvasRef.current) {
+      const timer = setTimeout(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width || 450;
+        canvas.height = 140;
+        
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+      }, 50);
+      return () => clearTimeout(timer);
     }
-  }, [loading, signMethod, isSignedSuccess]);
+  }, [isSignModalOpen, signMethod]);
 
   const downloadReceiptPDF = (inst: any) => {
     if (!project) return;
@@ -217,14 +219,14 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
       if (blobUrl) {
         const link = document.createElement('a');
         link.href = blobUrl;
-        link.download = `Progress_Invoice_${project.id || 'N/A'}.pdf`;
+        link.download = `Signed_Proposal_${project.id || 'N/A'}.pdf`;
         link.click();
       } else {
-        alert('Could not generate progress invoice PDF.');
+        alert('Could not generate proposal PDF.');
       }
     } catch (err) {
       console.error(err);
-      alert('Failed to generate progress invoice PDF.');
+      alert('Failed to generate proposal PDF.');
     }
   };
 
@@ -261,7 +263,6 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
     setIsDrawing(true);
     setCanvasHasContent(true);
     
-    // Prevent scrolling on mobile devices when signing
     if (e.cancelable) e.preventDefault();
   };
 
@@ -324,7 +325,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
         sigBase64 = canvasRef.current.toDataURL('image/png');
       }
 
-      // 1. Auto-launch Stripe invoice for 30% upfront deposit FIRST
+      // 1. Auto-launch Stripe invoice for 30% upfront deposit
       let stripeInvoiceId = undefined;
       let stripeInvoiceUrl = undefined;
       const total = project.summary.totalPrice || 0;
@@ -340,7 +341,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
           body: JSON.stringify({
             clientEmail: client?.email || 'aalnasih4846@gmail.com',
             clientName: client?.name || signerName.trim(),
-            amount: firstAmount, // 30% upfront deposit
+            amount: firstAmount,
             proposalNo: project.id,
             description: `PaintNav Upfront Deposit (30%) for Estimate #${project.id} - Proposal Signed & Approved`
           }),
@@ -354,7 +355,6 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
         console.error("Failed to dispatch Stripe invoice:", stripeErr);
       }
 
-      // Create Paint Scout-style installment tracking structure!
       const defaultInstallments = [
         {
           id: 'inst-1',
@@ -396,7 +396,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
         );
       }
 
-      // Update local state so UI reacts instantly
+      // Update local state
       const updatedProject = {
         ...project,
         clientSigned: true,
@@ -409,7 +409,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
       };
       setProject(updatedProject);
 
-      // 3. Generate the PDF of the signed proposal
+      // 3. Generate PDF and dispatch notification email
       try {
         const roomCosts: Record<string, number> = {};
         if (project.rooms && project.rooms.length > 0) {
@@ -462,7 +462,6 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
           signatureDataUrl: sigBase64,
         });
 
-        // Trigger email dispatch if contractorAccessToken is present
         if (project.contractorAccessToken) {
           const emailSubject = `Signed Proposal: ${project.title} (Proposal #${project.id})`;
           const emailBody = `
@@ -496,9 +495,10 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
           });
         }
       } catch (err) {
-        console.error("Failed to generate PDF or auto-send signed proposal email:", err);
+        console.error("Failed to generate PDF or send email:", err);
       }
 
+      setIsSignModalOpen(false);
       setIsSignedSuccess(true);
     } catch (err: any) {
       console.error('Signature submit error:', err);
@@ -540,7 +540,6 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
         return item;
       });
 
-      // Update database
       if (foundProvider === 'firestore') {
         await updateProjectSignatureInFirestore(
           project.id,
@@ -566,7 +565,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
         installments: nextInstallments
       });
 
-      alert('Simulated Stripe Payment Successful! Receipt has been updated.');
+      alert('Simulated Payment Successful! Receipt status updated.');
     } catch (err) {
       console.error(err);
       alert('Failed to process payment.');
@@ -576,9 +575,9 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
   // Compute estimate totals
   const getTotals = () => {
     if (!project) return { subtotal: 0, hst: 0, total: 0, deposit: 0, balance: 0 };
-    const subtotal = project.summary.totalPrice / 1.13; // Reconstruct subtotal
-    const hst = project.summary.totalPrice - subtotal;
-    const total = project.summary.totalPrice;
+    const total = project.summary.totalPrice || 0;
+    const subtotal = total / 1.13;
+    const hst = total - subtotal;
     const deposit = total * 0.30;
     const balance = total - deposit;
     return { subtotal, hst, total, deposit, balance };
@@ -588,7 +587,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
     return (
       <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center text-white p-4 font-sans">
         <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-zinc-400 text-sm font-mono animate-pulse">Loading Secure PaintNav Proposal Portal...</p>
+        <p className="text-zinc-400 text-sm font-mono animate-pulse">Loading Proposal Document...</p>
       </div>
     );
   }
@@ -598,18 +597,16 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
       <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center text-white p-6 font-sans">
         <div className="bg-red-950/20 border border-red-900/40 rounded-2xl p-6 max-w-md text-center space-y-4">
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto" />
-          <h2 className="text-lg font-bold text-red-400 font-display">Portal Access Blocked</h2>
+          <h2 className="text-lg font-bold text-red-400 font-display">Proposal Access Blocked</h2>
           <p className="text-zinc-400 text-sm leading-relaxed">{error || 'This estimate record could not be fetched.'}</p>
           <div className="pt-2">
-            {onBackToApp ? (
+            {onBackToApp && (
               <button 
                 onClick={onBackToApp}
                 className="px-5 py-2.5 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 text-white font-bold text-xs rounded-xl cursor-pointer"
               >
                 Go to PaintNav CRM
               </button>
-            ) : (
-              <p className="text-[11px] text-zinc-500">Please contact your professional contractor for assistance.</p>
             )}
           </div>
         </div>
@@ -620,107 +617,318 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
   const { subtotal, hst, total, deposit, balance } = getTotals();
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white flex flex-col font-sans select-none antialiased">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans select-none antialiased pb-16">
       {/* 1. SECURE PORTAL HEADER */}
-      <header className="bg-zinc-900/80 backdrop-blur-md border-b border-neutral-850/60 sticky top-0 z-40 px-4 md:px-8 py-4 flex items-center justify-between">
+      <header className="bg-zinc-900/90 backdrop-blur-md border-b border-neutral-850 sticky top-0 z-40 px-4 md:px-8 py-3.5 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/10">
             <Paintbrush className="w-4.5 h-4.5 text-white" />
           </div>
           <div>
             <h1 className="text-sm font-display font-black tracking-wider text-white flex items-center gap-1.5 leading-none">
-              PAINTNAV <span className="text-[9px] font-bold px-1.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded font-mono uppercase tracking-widest">E-Sign</span>
+              PAINTNAV <span className="text-[9px] font-bold px-1.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded font-mono uppercase tracking-widest">Client Portal</span>
             </h1>
-            <p className="text-[10px] text-zinc-500 mt-0.5 font-mono">Secure Homeowner Approval Terminal</p>
+            <p className="text-[10px] text-zinc-400 mt-0.5 font-mono">Proposal Review & E-Sign Approval</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold font-mono rounded-lg">
-            <ShieldCheck className="w-3.5 h-3.5" /> 256-Bit SSL Secured
+            <ShieldCheck className="w-3.5 h-3.5" /> 256-Bit SSL Encrypted
           </span>
+          <button
+            onClick={downloadFullInvoicePDF}
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-750 text-white font-bold text-[11px] font-mono rounded-lg transition border border-neutral-700 cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>DOWNLOAD PDF</span>
+          </button>
           {onBackToApp && (
             <button 
               onClick={onBackToApp}
-              className="px-3.5 py-1.5 bg-neutral-850 hover:bg-neutral-800 border border-neutral-750 text-white font-bold text-xs rounded-lg cursor-pointer transition"
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg cursor-pointer transition"
             >
-              Exit Portal
+              Back to App
             </button>
           )}
         </div>
       </header>
 
-      {/* 2. SUCCESS OVERLAY STATE */}
-      {isSignedSuccess ? (
-        <div className="flex-grow max-w-5xl w-full mx-auto p-4 md:p-8 grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-          {/* Left: Contract Status & Success Meta */}
-          <div className="md:col-span-5 space-y-6 bg-zinc-900 border border-neutral-850 p-6 rounded-2xl text-center md:text-left">
-            <motion.div 
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: 'spring', damping: 15 }}
-              className="w-16 h-16 rounded-full bg-emerald-500/10 border-2 border-emerald-500 flex items-center justify-center text-emerald-400 shadow-xl shadow-emerald-500/10 mx-auto md:mx-0"
-            >
-              <CheckCircle className="w-8 h-8 animate-pulse" />
-            </motion.div>
-            
-            <div className="space-y-2">
-              <h2 className="text-xl font-display font-black tracking-tight text-white">Proposal Signed & Approved!</h2>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Thank you! Your digital signature has been legally authorized and securely stored. A compiled PDF contract copy was dispatched to both parties.
+      {/* 2. MAIN PROPOSAL DOCUMENT PREVIEW SHEET */}
+      <main className="max-w-4xl w-full mx-auto px-4 sm:px-6 my-6">
+        <div className="bg-white text-zinc-900 rounded-2xl shadow-2xl overflow-hidden border border-zinc-200/80 text-left font-sans">
+          
+          {/* Document Header Banner */}
+          <div className="bg-slate-900 text-white p-6 sm:p-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6 border-b-4 border-blue-600">
+            <div>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white shadow-md shrink-0">
+                  <Paintbrush className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-display font-black tracking-tight text-white leading-tight">PAINTNAV PAINTING SERVICES</h2>
+                  <p className="text-xs text-blue-300 font-mono">Licensed & Insured Master Painters</p>
+                </div>
+              </div>
+              <p className="text-xs text-zinc-400 mt-3 max-w-md leading-relaxed">
+                Professional interior & exterior coating solutions. Providing quality workmanship, clear timelines, and long-lasting results.
               </p>
             </div>
 
-            <div className="bg-zinc-950 border border-neutral-850 rounded-xl p-4 text-left space-y-2.5 font-mono text-[10px] text-zinc-400">
-              <div className="flex justify-between border-b border-neutral-850/60 pb-2">
-                <span className="text-zinc-500">Proposal ID:</span>
-                <span className="text-white font-bold">#{project.id}</span>
-              </div>
-              <div className="flex justify-between border-b border-neutral-850/60 pb-2">
-                <span className="text-zinc-500">Legal Signer:</span>
-                <span className="text-white font-bold">{project.signerName || signerName}</span>
-              </div>
-              <div className="flex justify-between border-b border-neutral-850/60 pb-2">
-                <span className="text-zinc-500">Relation:</span>
-                <span className="text-white">{project.signerTitle || signerTitle || 'Homeowner'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-500">Timestamp:</span>
-                <span className="text-emerald-400 font-bold">{project.signedDate ? new Date(project.signedDate).toLocaleString() : new Date().toLocaleString()}</span>
-              </div>
-            </div>
-
-            <div className="pt-2 text-zinc-500 text-[10px] leading-relaxed">
-              You can bookmark this page to view real-time payment updates or pay outstanding balances.
+            <div className="text-left sm:text-right space-y-1 sm:border-l sm:border-slate-800 sm:pl-6">
+              <span className="inline-block px-3 py-1 bg-blue-500/20 text-blue-400 border border-blue-500/30 font-mono text-[11px] font-bold rounded-lg uppercase tracking-wider mb-1">
+                Official Proposal / Estimate
+              </span>
+              <h3 className="text-2xl font-mono font-bold text-white">#{project.id}</h3>
+              <p className="text-xs text-zinc-400 font-mono">Date: {new Date(project.createdAt).toLocaleDateString()}</p>
+              {isSignedSuccess ? (
+                <span className="inline-flex items-center gap-1 text-emerald-400 text-xs font-bold font-mono">
+                  <CheckCircle className="w-3.5 h-3.5" /> Approved & Executed
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-amber-400 text-xs font-bold font-mono">
+                  <AlertCircle className="w-3.5 h-3.5" /> Pending Signature
+                </span>
+              )}
             </div>
           </div>
 
-          {/* Right: Paint Scout-Style Installment & Receipt Dashboard */}
-          <div className="md:col-span-7 bg-zinc-900 border border-neutral-850 p-6 rounded-2xl space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-850/60 pb-4">
+          <div className="p-6 sm:p-10 md:p-12 space-y-8">
+            
+            {/* Client & Job Location Bar */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50 border border-slate-200 rounded-xl p-5 text-xs text-slate-700">
+              <div className="space-y-1.5">
+                <span className="text-[10px] font-bold font-mono uppercase tracking-wider text-slate-400 block">PREPARED FOR CLIENT:</span>
+                <p className="text-slate-900 font-bold text-sm font-display">{client?.name || project.clientName || 'Valued Client'}</p>
+                {client?.company && <p className="text-slate-600 font-medium">{client.company}</p>}
+                <p className="flex items-center gap-1.5 text-slate-600"><MapPin className="w-3.5 h-3.5 text-blue-600 shrink-0" /> {client?.address || project.address || 'Job Site Address'}</p>
+                <p className="flex items-center gap-1.5 text-slate-600"><Mail className="w-3.5 h-3.5 text-blue-600 shrink-0" /> {client?.email || project.clientEmail}</p>
+                {client?.phone && <p className="flex items-center gap-1.5 text-slate-600"><Phone className="w-3.5 h-3.5 text-blue-600 shrink-0" /> {client.phone}</p>}
+              </div>
+
+              <div className="space-y-1.5 md:border-l md:border-slate-200 md:pl-6">
+                <span className="text-[10px] font-bold font-mono uppercase tracking-wider text-slate-400 block">PROJECT TITLE & DESCRIPTION:</span>
+                <p className="text-slate-900 font-bold text-sm font-display">{project.title}</p>
+                <p className="text-slate-600 leading-relaxed text-xs">{project.description || 'Professional residential painting and surface refinishing.'}</p>
+              </div>
+            </div>
+
+            {/* Work Scope / Rooms & Surface Specifications */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-600" /> Coating Schedule & Work Breakdown
+                </h3>
+                <span className="text-[11px] text-slate-500 font-mono">{project.rooms?.length || 0} Rooms / Areas</span>
+              </div>
+
+              <div className="space-y-4">
+                {project.rooms && project.rooms.length > 0 ? (
+                  project.rooms.map((room) => (
+                    <div key={room.id} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                      <div className="bg-slate-100 px-4 py-2.5 flex items-center justify-between border-b border-slate-200 text-xs">
+                        <span className="font-bold text-slate-900 text-sm">
+                          {room.name} {room.isOption && <span className="text-[10px] bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded font-mono ml-1 font-semibold">Optional Scope</span>}
+                        </span>
+                        <span className="font-mono text-slate-500 text-[11px]">
+                          {room.length}' × {room.width}' × {room.height}' ft
+                        </span>
+                      </div>
+                      <div className="p-4">
+                        {room.paints && room.paints.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                            {room.paints.map((paint, idx) => (
+                              <div key={idx} className="bg-slate-50 p-3 rounded-lg border border-slate-200/80 space-y-1">
+                                <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 font-bold uppercase">
+                                  <span>{paint.surface || 'Surface'}</span>
+                                  <span>{paint.coats} Coat(s)</span>
+                                </div>
+                                <p className="font-bold text-slate-900 text-xs">{paint.brand} — {paint.colorName}</p>
+                                <div className="flex items-center gap-2 text-[11px] text-slate-600">
+                                  {paint.hex && <div className="w-3.5 h-3.5 rounded-full border border-slate-300 shadow-inner" style={{ backgroundColor: paint.hex }} />}
+                                  <span>{paint.finish} Finish</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-slate-500 text-xs italic">Standard wall preparation, priming, and finish coats included.</p>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-6 text-center border border-dashed border-slate-300 rounded-xl text-slate-500 text-xs italic">
+                    Standard full-service prep and painting scope included.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Inclusions & Exclusions */}
+            {(project.inclusions || project.exclusions) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {project.inclusions && (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-1.5 text-xs">
+                    <h4 className="font-bold text-emerald-800 text-[11px] font-mono uppercase tracking-wider">✓ Included Prep & Work Scope</h4>
+                    <p className="text-emerald-950 leading-relaxed whitespace-pre-line text-xs">{project.inclusions}</p>
+                  </div>
+                )}
+                {project.exclusions && (
+                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 space-y-1.5 text-xs">
+                    <h4 className="font-bold text-rose-800 text-[11px] font-mono uppercase tracking-wider">✕ Excluded Items</h4>
+                    <p className="text-rose-950 leading-relaxed whitespace-pre-line text-xs">{project.exclusions}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Special Conditions & General Notes */}
+            {(project.specialConditions || project.generalNotes) && (
+              <div className="space-y-3 bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs">
+                {project.specialConditions && (
+                  <div className="space-y-1">
+                    <h4 className="font-bold text-slate-800 text-[11px] font-mono uppercase tracking-wider">Special Job Conditions</h4>
+                    <p className="text-slate-700 leading-relaxed">{project.specialConditions}</p>
+                  </div>
+                )}
+                {project.generalNotes && (
+                  <div className="space-y-1 border-t border-slate-200 pt-2">
+                    <h4 className="font-bold text-slate-800 text-[11px] font-mono uppercase tracking-wider">General Warranty & Notes</h4>
+                    <p className="text-slate-700 leading-relaxed">{project.generalNotes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Investment Summary & Tax Breakdown Table */}
+            <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white">
+              <div className="bg-slate-900 text-white px-5 py-3 font-mono text-xs font-bold uppercase tracking-wider flex justify-between items-center">
+                <span>Investment & Pricing Summary</span>
+                <span>CAD / USD</span>
+              </div>
+              <div className="p-5 space-y-2 text-xs font-mono text-slate-700">
+                <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                  <span>Subtotal (Materials & Labor):</span>
+                  <span className="font-bold text-slate-900">${subtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                  <span>Sales Tax / HST (13%):</span>
+                  <span className="font-bold text-slate-900">${hst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between text-base font-bold text-slate-900 border-b-2 border-slate-900 pb-2 pt-1 font-display">
+                  <span>Grand Total Proposal Price:</span>
+                  <span className="text-blue-700 font-mono">${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 text-xs">
+                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg">
+                    <span className="text-[10px] text-amber-800 font-bold block uppercase font-mono">30% Upfront Deposit Required:</span>
+                    <span className="text-base font-bold text-amber-900 font-mono">${deposit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="bg-slate-100 border border-slate-200 p-3 rounded-lg">
+                    <span className="text-[10px] text-slate-600 font-bold block uppercase font-mono">70% Final Balance Upon Completion:</span>
+                    <span className="text-base font-bold text-slate-900 font-mono">${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Contract Terms & Conditions */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-slate-600 text-[11px] space-y-2">
+              <h4 className="font-bold text-slate-800 uppercase font-mono tracking-wider text-xs">Terms & Conditions of Contract</h4>
+              <p className="leading-relaxed whitespace-pre-line">{project.termsAndConditions || '1. A 30% deposit is required upon approval to secure scheduling. Balance is due immediately upon completion.\n2. Workmanship is backed by a 2-year warranty covering peeling and flaking.\n3. Digital signature constitutes a legally binding agreement.'}</p>
+            </div>
+
+            {/* BOTTOM SIGNATURE BLOCK / ACTION CALLOUT */}
+            <div className="border-t-2 border-slate-200 pt-8 mt-8">
+              {isSignedSuccess ? (
+                <div className="bg-emerald-50 border-2 border-emerald-500 rounded-2xl p-6 sm:p-8 text-center space-y-4 shadow-lg shadow-emerald-500/5">
+                  <div className="w-12 h-12 rounded-full bg-emerald-500 text-white flex items-center justify-center mx-auto shadow-md">
+                    <CheckCircle className="w-7 h-7" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-lg font-bold text-emerald-900 font-display">Proposal Formally Signed & Approved</h3>
+                    <p className="text-xs text-emerald-700">Digital authorization recorded and legally archived.</p>
+                  </div>
+
+                  <div className="max-w-md mx-auto bg-white border border-emerald-200 rounded-xl p-4 text-left font-mono text-xs text-slate-700 space-y-2">
+                    <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                      <span className="text-slate-400">Signer Name:</span>
+                      <span className="font-bold text-slate-900">{project.signerName || signerName}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                      <span className="text-slate-400">Relationship:</span>
+                      <span className="text-slate-900">{project.signerTitle || signerTitle || 'Homeowner'}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-slate-100 pb-1.5">
+                      <span className="text-slate-400">Date Executed:</span>
+                      <span className="text-emerald-700 font-bold">{project.signedDate ? new Date(project.signedDate).toLocaleString() : new Date().toLocaleString()}</span>
+                    </div>
+                    {project.signatureDataUrl && (
+                      <div className="pt-2 text-center">
+                        <span className="text-[9px] text-slate-400 uppercase font-mono block mb-1">DIGITAL SIGNATURE STAMP:</span>
+                        <img src={project.signatureDataUrl} alt="Signature" className="max-h-16 mx-auto border border-slate-200 rounded p-1 bg-white" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-gradient-to-r from-slate-900 via-zinc-900 to-slate-900 text-white rounded-2xl p-6 sm:p-8 text-center space-y-4 shadow-2xl border border-blue-600/40">
+                  <div className="space-y-1.5 max-w-xl mx-auto">
+                    <h3 className="text-xl font-display font-black text-white">Ready to Approve & Lock In Your Job?</h3>
+                    <p className="text-xs text-zinc-300 leading-relaxed">
+                      Review the complete proposal details above. Click below to open the secure e-signature window and accept the agreement.
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => setIsSignModalOpen(true)}
+                    className="px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-sm rounded-xl cursor-pointer shadow-xl shadow-blue-600/30 transition transform hover:-translate-y-0.5 border border-blue-400 uppercase tracking-wider"
+                  >
+                    ✍️ Click to Sign & Approve Proposal
+                  </button>
+                  
+                  <p className="text-[10px] text-zinc-400 font-mono">
+                    Encrypted with 256-Bit SSL • Enforceable Electronic Authorization
+                  </p>
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+
+        {/* 3. POST-SIGNING PAYMENT & RECEIPT DASHBOARD */}
+        {isSignedSuccess && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-8 bg-zinc-900 border border-neutral-800 p-6 rounded-2xl space-y-6 text-left"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-800 pb-4">
               <div>
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">Invoice Receipt & Payment Schedule</h3>
-                <p className="text-[11px] text-zinc-400 mt-1">
-                  Manage installment payments and review financial receipts below.
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">Payment Schedule & Deposit Receipts</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Manage installment payments and review financial receipts for Proposal #{project.id}.
                 </p>
               </div>
               <button
                 onClick={downloadFullInvoicePDF}
-                className="flex items-center justify-center gap-2 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] font-mono rounded-lg transition shadow-md shadow-blue-600/10 cursor-pointer border border-blue-500/30 shrink-0"
+                className="flex items-center justify-center gap-2 px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs font-mono rounded-lg transition shadow-md shadow-blue-600/10 cursor-pointer border border-blue-500/30 shrink-0"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>DOWNLOAD INVOICE</span>
+                <span>DOWNLOAD FULL CONTRACT PDF</span>
               </button>
             </div>
 
-            {/* Financial Health Summary */}
             {(() => {
               const activeInstallments = project.installments || [
                 {
                   id: 'inst-1',
                   name: 'Upfront Deposit (30%)',
                   percentage: 30,
-                  amount: Math.round((project.summary.totalPrice || 0) * 0.30),
+                  amount: Math.round(total * 0.30),
                   status: 'Requested' as const,
                   requestedAt: new Date().toLocaleDateString(),
                 },
@@ -728,7 +936,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
                   id: 'inst-2',
                   name: 'Final Balance (70%)',
                   percentage: 70,
-                  amount: (project.summary.totalPrice || 0) - Math.round((project.summary.totalPrice || 0) * 0.30),
+                  amount: total - Math.round(total * 0.30),
                   status: 'Draft' as const,
                 }
               ];
@@ -737,352 +945,154 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
                 .filter(inst => inst.status === 'Paid')
                 .reduce((sum, inst) => sum + inst.amount, 0);
 
-              const totalRequested = activeInstallments
-                .filter(inst => inst.status === 'Requested')
-                .reduce((sum, inst) => sum + inst.amount, 0);
-
-              const grandTotal = project.summary.totalPrice || 0;
-              const remainingBalance = Math.max(0, grandTotal - totalPaid);
+              const remainingBalance = Math.max(0, total - totalPaid);
 
               return (
-                <>
-                  {/* Bento Stats */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-zinc-950 border border-neutral-850/60 p-3.5 rounded-xl">
-                      <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider font-mono">Total Estimate</span>
-                      <span className="text-sm font-bold text-zinc-200 font-mono block mt-1">
-                        ${grandTotal.toLocaleString()}
-                      </span>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="bg-zinc-950 p-4 rounded-xl border border-neutral-800 space-y-1">
+                      <span className="text-[10px] text-zinc-400 font-mono uppercase block">Total Proposal</span>
+                      <p className="text-lg font-black font-mono text-white">${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     </div>
-                    <div className="bg-zinc-950 border border-neutral-850/60 p-3.5 rounded-xl">
-                      <span className="text-[9px] text-emerald-500/80 font-bold uppercase tracking-wider font-mono">Paid to Date</span>
-                      <span className="text-sm font-bold text-emerald-400 font-mono block mt-1">
-                        ${totalPaid.toLocaleString()}
-                      </span>
+                    <div className="bg-zinc-950 p-4 rounded-xl border border-neutral-800 space-y-1">
+                      <span className="text-[10px] text-emerald-400 font-mono uppercase block">Total Paid</span>
+                      <p className="text-lg font-black font-mono text-emerald-400">${totalPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     </div>
-                    <div className="bg-zinc-950 border border-neutral-850/60 p-3.5 rounded-xl">
-                      <span className="text-[9px] text-amber-500/80 font-bold uppercase tracking-wider font-mono">Remaining</span>
-                      <span className="text-sm font-bold text-amber-400 font-mono block mt-1">
-                        ${remainingBalance.toLocaleString()}
-                      </span>
+                    <div className="bg-zinc-950 p-4 rounded-xl border border-neutral-800 space-y-1">
+                      <span className="text-[10px] text-amber-400 font-mono uppercase block">Remaining Balance</span>
+                      <p className="text-lg font-black font-mono text-amber-400">${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     </div>
                   </div>
 
-                  {/* Progress Bar */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-[10px] font-mono text-zinc-400">
-                      <span>Progress Paid: {grandTotal > 0 ? Math.round((totalPaid / grandTotal) * 100) : 0}%</span>
-                      <span>{totalPaid === grandTotal ? 'Paid in Full' : `${grandTotal > 0 ? Math.round((remainingBalance / grandTotal) * 100) : 0}% Outstanding`}</span>
-                    </div>
-                    <div className="w-full h-2 bg-zinc-950 rounded-full overflow-hidden border border-neutral-850/40 flex">
-                      <div 
-                        style={{ width: `${grandTotal > 0 ? (totalPaid / grandTotal) * 100 : 0}%` }} 
-                        className="h-full bg-emerald-500 transition-all duration-500"
-                      />
-                      <div 
-                        style={{ width: `${grandTotal > 0 ? (totalRequested / grandTotal) * 100 : 0}%` }} 
-                        className="h-full bg-amber-500 transition-all duration-500"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Installments Table */}
-                  <div className="space-y-2.5">
-                    <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider font-mono">Installment Breakdown</span>
-                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                      {activeInstallments.map((inst, index) => {
-                        const isDraft = inst.status === 'Draft';
-                        const isRequested = inst.status === 'Requested';
-                        const isPaid = inst.status === 'Paid';
-
-                        return (
-                          <div 
-                            key={inst.id || index} 
-                            className={`flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-xl border transition ${
-                              isPaid 
-                                ? 'bg-emerald-950/10 border-emerald-500/20' 
-                                : isRequested 
-                                  ? 'bg-amber-950/10 border-amber-500/30' 
-                                  : 'bg-zinc-950/40 border-neutral-850'
-                            }`}
-                          >
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-bold text-white">{inst.name}</span>
-                                <span className="text-[10px] text-zinc-400 font-mono">({inst.percentage}%)</span>
-                              </div>
-                              <p className="text-[10px] text-zinc-500 font-mono">
-                                {isPaid 
-                                  ? `Receipt: Paid on ${inst.paidAt || 'N/A'}` 
-                                  : isRequested 
-                                    ? `Invoice requested on ${inst.requestedAt || 'N/A'}` 
-                                    : 'Upcoming installment (unbilled)'
-                                }
-                              </p>
-                            </div>
-
-                            <div className="flex items-center gap-3 mt-3 sm:mt-0 shrink-0">
-                              <span className="text-xs font-bold text-zinc-200 font-mono">${inst.amount.toLocaleString()}</span>
-                              
-                              {isPaid ? (
-                                <div className="flex items-center gap-1.5">
-                                  <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded">
-                                    Paid
-                                  </span>
-                                  <button
-                                    onClick={() => downloadReceiptPDF(inst)}
-                                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-semibold rounded-lg transition flex items-center gap-1 cursor-pointer"
-                                    title="Download receipt PDF"
-                                  >
-                                    <Download className="w-3 h-3" />
-                                    Receipt
-                                  </button>
-                                </div>
-                              ) : isRequested ? (
-                                <div className="flex items-center gap-1.5">
-                                  {inst.stripeInvoiceUrl ? (
-                                    <a
-                                      href={inst.stripeInvoiceUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-zinc-950 text-[10px] font-black rounded-lg transition"
-                                    >
-                                      Pay with Stripe
-                                    </a>
-                                  ) : (
-                                    <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded">
-                                      Requested
-                                    </span>
-                                  )}
-                                  <button
-                                    onClick={() => handleClientPayInstallmentDemo(inst.id)}
-                                    className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-white text-[10px] font-semibold rounded-lg transition"
-                                    title="Demo payment emulation"
-                                  >
-                                    Demo Pay
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="px-2 py-0.5 bg-zinc-800 text-zinc-500 text-[10px] font-bold rounded font-mono">
-                                  Draft
-                                </span>
-                              )}
-                            </div>
+                  <div className="space-y-2">
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-400 font-bold font-mono">Installments Schedule:</span>
+                    <div className="space-y-2">
+                      {activeInstallments.map((inst) => (
+                        <div key={inst.id} className="bg-zinc-950 p-4 rounded-xl border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                          <div>
+                            <p className="text-white font-bold">{inst.name}</p>
+                            <p className="text-zinc-400 font-mono text-[11px]">${inst.amount.toLocaleString()} ({inst.percentage}%)</p>
                           </div>
-                        );
-                      })}
+                          <div className="flex items-center gap-2">
+                            {inst.status === 'Paid' ? (
+                              <>
+                                <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold rounded-lg font-mono">
+                                  ✓ Paid ({inst.paidAt})
+                                </span>
+                                <button
+                                  onClick={() => downloadReceiptPDF(inst)}
+                                  className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-white text-[10px] font-semibold rounded-lg transition"
+                                >
+                                  Receipt PDF
+                                </button>
+                              </>
+                            ) : inst.status === 'Requested' ? (
+                              <div className="flex items-center gap-2">
+                                {inst.stripeInvoiceUrl ? (
+                                  <a
+                                    href={inst.stripeInvoiceUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-[11px] font-bold rounded-lg transition"
+                                  >
+                                    Pay with Stripe
+                                  </a>
+                                ) : (
+                                  <span className="px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold rounded-lg font-mono">
+                                    Requested
+                                  </span>
+                                )}
+                                <button
+                                  onClick={() => handleClientPayInstallmentDemo(inst.id)}
+                                  className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white text-[11px] font-semibold rounded-lg transition font-mono"
+                                >
+                                  Demo Pay
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="px-2.5 py-1 bg-zinc-800 text-zinc-500 text-[10px] font-bold rounded-lg font-mono">
+                                Draft
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </>
+                </div>
               );
             })()}
-          </div>
-        </div>
-      ) : (
-        /* 3. ACTIVE REVIEW AND SIGNING LAYOUT */
-        <main className="flex-grow max-w-7xl w-full mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          
-          {/* LEFT: CONTRACT VIEW BOARD (COL-7) */}
-          <section className="lg:col-span-7 bg-zinc-900 border border-neutral-850/60 rounded-2xl overflow-hidden shadow-xl">
-            {/* Lead Meta Banner */}
-            <div className="bg-gradient-to-r from-neutral-900 to-zinc-900 px-6 py-5 border-b border-neutral-850/60">
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-                <span className="px-2.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-full font-mono text-[10px] font-bold">
-                  Estimate Reference #{project.id}
-                </span>
-                <div className="text-[11px] text-zinc-500 flex items-center gap-1.5 font-mono">
-                  <Calendar className="w-3.5 h-3.5" /> Est: {new Date(project.createdAt).toLocaleDateString()}
-                </div>
-              </div>
-              <h2 className="text-lg font-display font-black text-white truncate">{project.title}</h2>
-              <p className="text-xs text-zinc-400 leading-relaxed mt-1">{project.description}</p>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-3 pt-3 border-t border-neutral-800">
-                <p className="text-[10px] text-zinc-500">
-                  Review contract details. You can also export/print a draft copy.
-                </p>
-                <button
-                  onClick={downloadFullInvoicePDF}
-                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-[10px] font-mono rounded-lg transition border border-neutral-750 cursor-pointer shrink-0"
-                >
-                  <Download className="w-3 h-3" />
-                  <span>DOWNLOAD PROPOSAL</span>
-                </button>
-              </div>
-            </div>
+          </motion.div>
+        )}
+      </main>
 
-            {/* Client Info Grid */}
-            {client && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 px-6 py-4 bg-zinc-900/40 border-b border-neutral-850/60 text-xs text-zinc-400">
-                <div className="space-y-2">
-                  <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold font-mono">Service Recipient</span>
-                  <div className="space-y-1">
-                    <p className="text-white font-bold font-mono text-sm">{client.name}</p>
-                    {client.company && <p className="text-zinc-300 font-semibold">{client.company}</p>}
-                    <p className="flex items-center gap-1.5 text-zinc-400"><MapPin className="w-3.5 h-3.5 shrink-0" /> {client.address}</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold font-mono">Contact Coordinates</span>
-                  <div className="space-y-1">
-                    <p className="flex items-center gap-1.5"><Mail className="w-3.5 h-3.5" /> {client.email}</p>
-                    <p className="flex items-center gap-1.5"><Phone className="w-3.5 h-3.5" /> {client.phone}</p>
-                  </div>
-                </div>
-              </div>
-            )}
+      {/* 4. SIGNATURE POPUP MODAL */}
+      {isSignModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-zinc-900 border border-neutral-800 text-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 relative my-auto animate-in fade-in zoom-in-95 text-left">
+            
+            {/* Modal Close Button */}
+            <button
+              onClick={() => setIsSignModalOpen(false)}
+              className="absolute top-4 right-4 text-zinc-400 hover:text-white p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
 
-            {/* Contract Body Details */}
-            <div className="p-6 space-y-6 max-h-[500px] overflow-y-auto custom-scrollbar text-xs">
-              
-              {/* Itemized Paint Scope */}
-              <div className="space-y-3">
-                <h3 className="text-[10px] uppercase font-mono tracking-wider text-zinc-500 font-black flex items-center gap-1.5">
-                  <FileText className="w-4 h-4 text-blue-500" /> Professional Coating Scope
-                </h3>
-                
-                <div className="space-y-3">
-                  {project.rooms && project.rooms.length > 0 ? (
-                    project.rooms.map((room) => (
-                      <div key={room.id} className="bg-zinc-950 rounded-xl border border-neutral-850 p-4 space-y-2">
-                        <div className="flex items-center justify-between border-b border-neutral-900 pb-2">
-                          <span className="font-bold text-white text-xs">{room.name} {room.isOption && <span className="text-[10px] text-amber-400 ml-1 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">Option Item</span>}</span>
-                          <span className="font-mono text-zinc-500 text-[10px]">L: {room.length}' × W: {room.width}' × H: {room.height}'</span>
-                        </div>
-                        {room.paints && room.paints.length > 0 ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-zinc-400">
-                            {room.paints.map((paint, index) => (
-                              <div key={index} className="bg-neutral-900/40 p-2.5 rounded-lg border border-neutral-850/40 space-y-1">
-                                <span className="text-[10px] font-bold text-zinc-500 uppercase font-mono">{paint.surface || 'Surface Coating'}</span>
-                                <p className="text-white font-bold">{paint.brand} - {paint.colorName}</p>
-                                <div className="flex items-center gap-2 text-[10px]">
-                                  {paint.hex && <div className="w-3 h-3 rounded-full border border-neutral-700 shrink-0" style={{ backgroundColor: paint.hex }} />}
-                                  <span>{paint.finish} Finish • {paint.coats} Coats</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-zinc-600 text-[11px] italic">No surface paint formulas configured.</p>
-                        )}
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center p-6 bg-zinc-950 rounded-xl border border-neutral-850 text-zinc-500 italic">
-                      No distinct room coatings configured.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Inclusions, Exclusions & Special Terms */}
-              {(project.inclusions || project.exclusions || project.specialConditions) && (
-                <div className="grid grid-cols-1 gap-3 pt-2">
-                  {project.inclusions && (
-                    <div className="bg-emerald-950/10 border border-emerald-900/20 p-4 rounded-xl space-y-1">
-                      <h4 className="font-bold text-emerald-400 text-[10px] uppercase tracking-wider font-mono">Inclusions / In-Scope prep</h4>
-                      <p className="text-zinc-400 text-[11px] leading-relaxed whitespace-pre-line">{project.inclusions}</p>
-                    </div>
-                  )}
-                  {project.exclusions && (
-                    <div className="bg-red-950/10 border border-red-900/20 p-4 rounded-xl space-y-1">
-                      <h4 className="font-bold text-red-400 text-[10px] uppercase tracking-wider font-mono">Exclusions / Out-of-Scope</h4>
-                      <p className="text-zinc-400 text-[11px] leading-relaxed whitespace-pre-line">{project.exclusions}</p>
-                    </div>
-                  )}
-                  {project.specialConditions && (
-                    <div className="bg-zinc-950 border border-neutral-850 p-4 rounded-xl space-y-1">
-                      <h4 className="font-bold text-zinc-400 text-[10px] uppercase tracking-wider font-mono">Special Weather/Site Conditions</h4>
-                      <p className="text-zinc-400 text-[11px] leading-relaxed whitespace-pre-line">{project.specialConditions}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Standard Legal Terms & Conditions */}
-              <div className="bg-zinc-950 border border-neutral-850 p-4 rounded-xl space-y-1.5 text-zinc-500 text-[10px]">
-                <h4 className="font-bold text-zinc-400 uppercase tracking-wider font-mono">Contract Terms & Conditions</h4>
-                <p className="leading-relaxed">
-                  1. Payments are due within 7 days of invoice submission unless stipulated otherwise. A 30% deposit is required before scheduling mobilization.
-                  <br />
-                  2. All materials specified will be applied according to professional standard practices. Contractor represents full liability coverage and painter certifications.
-                  <br />
-                  3. By adding your digital electronic signature, both parties agree to execute this agreement digitally, representing fully enforceable parameters.
-                </p>
-              </div>
-
-            </div>
-
-            {/* Pricing Total Summary Board */}
-            <div className="bg-neutral-900 px-6 py-4 border-t border-neutral-850/60 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-              <div className="space-y-0.5">
-                <span className="text-[10px] text-zinc-500 uppercase font-bold font-mono">Contract Total</span>
-                <p className="text-lg font-black text-white font-mono flex items-center leading-none">
-                  <DollarSign className="w-4 h-4 text-zinc-400 -mr-0.5" />{total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-              </div>
-              <div className="space-y-0.5">
-                <span className="text-[10px] text-zinc-500 uppercase font-bold font-mono">HST tax (13%)</span>
-                <p className="text-zinc-300 font-bold font-mono">${hst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              </div>
-              <div className="space-y-0.5">
-                <span className="text-[10px] text-zinc-500 uppercase font-bold font-mono">30% Deposit Due</span>
-                <p className="text-amber-400 font-black font-mono">${deposit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              </div>
-              <div className="space-y-0.5">
-                <span className="text-[10px] text-zinc-500 uppercase font-bold font-mono">Final Balance</span>
-                <p className="text-zinc-400 font-semibold font-mono">${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              </div>
-            </div>
-          </section>
-
-          {/* RIGHT: SIGNATURE AND ACTION CAPTURE CARD (COL-5) */}
-          <section className="lg:col-span-5 bg-zinc-900 border border-neutral-850/60 rounded-2xl p-6 space-y-5 shadow-xl">
-            <div className="space-y-1.5">
-              <h3 className="font-display font-black text-base text-white flex items-center gap-1.5">
-                <UserCheck className="w-5 h-5 text-blue-500" /> Digital Authorization Lock
+            {/* Modal Header */}
+            <div className="space-y-1 border-b border-neutral-800 pb-4">
+              <h3 className="text-lg font-display font-black text-white flex items-center gap-2">
+                ✍️ Sign & Approve Proposal
               </h3>
-              <p className="text-zinc-400 text-xs leading-relaxed">
-                Provide your legal electronic signature details below. This will validate and lock the contract directly into the company database system.
+              <p className="text-xs text-zinc-400 font-mono">
+                Proposal #{project.id} — Total Investment: ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
 
             {/* Form Fields */}
             <div className="space-y-3.5">
               <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-zinc-500 font-mono tracking-wider">Authorized Signer Full Name</label>
+                <label className="text-[10px] uppercase font-bold text-zinc-400 font-mono tracking-wider">
+                  Authorized Signer Full Name <span className="text-red-400">*</span>
+                </label>
                 <input
                   type="text"
                   value={signerName}
                   onChange={(e) => setSignerName(e.target.value)}
-                  placeholder="Enter your full name"
-                  className="w-full bg-zinc-950 border border-neutral-850 focus:border-blue-500 rounded-xl p-3 text-xs text-white outline-none font-mono"
+                  placeholder="e.g. John Smith"
+                  className="w-full bg-zinc-950 border border-neutral-800 focus:border-blue-500 rounded-xl p-3 text-xs text-white outline-none font-mono"
+                  autoFocus
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-bold text-zinc-500 font-mono tracking-wider">Relationship / Title</label>
+                <label className="text-[10px] uppercase font-bold text-zinc-400 font-mono tracking-wider">
+                  Relationship / Title
+                </label>
                 <input
                   type="text"
                   value={signerTitle}
                   onChange={(e) => setSignerTitle(e.target.value)}
                   placeholder="e.g. Homeowner, Spouse, Property Manager"
-                  className="w-full bg-zinc-950 border border-neutral-850 focus:border-blue-500 rounded-xl p-3 text-xs text-white outline-none font-mono"
+                  className="w-full bg-zinc-950 border border-neutral-800 focus:border-blue-500 rounded-xl p-3 text-xs text-white outline-none font-mono"
                 />
               </div>
             </div>
 
-            {/* Signature Area Tabs */}
-            <div className="space-y-3.5">
-              <div className="flex bg-zinc-950 p-1 rounded-xl border border-neutral-850/60">
+            {/* Signature Draw / Type Selector */}
+            <div className="space-y-3">
+              <div className="flex bg-zinc-950 p-1 rounded-xl border border-neutral-800">
                 <button
+                  type="button"
                   onClick={() => setSignMethod('draw')}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold font-mono cursor-pointer flex items-center justify-center gap-1.5 transition ${signMethod === 'draw' ? 'bg-neutral-900 text-white shadow-md border border-neutral-800' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold font-mono cursor-pointer flex items-center justify-center gap-1.5 transition ${signMethod === 'draw' ? 'bg-neutral-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
                 >
                   <PenTool className="w-3.5 h-3.5" /> Draw Signature
                 </button>
                 <button
+                  type="button"
                   onClick={() => setSignMethod('type')}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold font-mono cursor-pointer flex items-center justify-center gap-1.5 transition ${signMethod === 'type' ? 'bg-neutral-900 text-white shadow-md border border-neutral-800' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-bold font-mono cursor-pointer flex items-center justify-center gap-1.5 transition ${signMethod === 'type' ? 'bg-neutral-800 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
                 >
                   <Type className="w-3.5 h-3.5" /> Type Script
                 </button>
@@ -1090,7 +1100,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
 
               {signMethod === 'draw' ? (
                 <div className="space-y-2">
-                  <div className="bg-white rounded-xl border-2 border-neutral-800 overflow-hidden relative">
+                  <div className="bg-white rounded-xl border-2 border-neutral-700 overflow-hidden relative">
                     <canvas
                       ref={canvasRef}
                       onMouseDown={startDrawing}
@@ -1102,61 +1112,61 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
                       onTouchEnd={stopDrawing}
                       className="w-full bg-white block cursor-crosshair touch-none"
                     />
-                    
                     <button
+                      type="button"
                       onClick={clearCanvas}
-                      className="absolute right-3 bottom-3 px-2 py-1 bg-zinc-100 hover:bg-zinc-200 border border-zinc-300 text-[10px] text-zinc-700 font-bold font-mono rounded cursor-pointer shadow-sm transition"
+                      className="absolute right-2.5 bottom-2.5 px-2 py-1 bg-zinc-100 hover:bg-zinc-200 border border-zinc-300 text-[10px] text-zinc-700 font-bold font-mono rounded cursor-pointer shadow-sm transition"
                     >
                       Clear Canvas
                     </button>
                   </div>
-                  <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1">
-                    <Info className="w-3 h-3 shrink-0" /> Use your mouse or finger to sign inside the canvas area.
+                  <span className="text-[10px] text-zinc-400 font-mono flex items-center gap-1">
+                    <Info className="w-3 h-3 shrink-0 text-blue-400" /> Sign with mouse cursor or finger inside canvas.
                   </span>
                 </div>
               ) : (
-                <div className="bg-zinc-950 p-4 rounded-xl border border-neutral-850 space-y-1.5 min-h-[140px] flex flex-col justify-center">
-                  <span className="text-[9px] text-zinc-600 font-mono block">LIVE DIGITAL SCRIPT PREVIEW:</span>
-                  <div className="font-mono text-zinc-300 font-black italic text-2xl tracking-wider py-2 select-none border-b border-neutral-900 overflow-hidden truncate">
+                <div className="bg-zinc-950 p-4 rounded-xl border border-neutral-800 space-y-1 min-h-[120px] flex flex-col justify-center">
+                  <span className="text-[9px] text-zinc-500 font-mono block">DIGITAL SCRIPT STAMP PREVIEW:</span>
+                  <div className="font-mono text-blue-400 font-black italic text-2xl tracking-wider py-2 select-none border-b border-neutral-800 overflow-hidden truncate">
                     {signerName || 'Signature Script'}
                   </div>
-                  <span className="text-[10px] text-zinc-500 font-mono">
-                    System will automatically transform your typed name into an official digital signature authorization stamp.
-                  </span>
                 </div>
               )}
             </div>
 
-            {/* Legal Acknowledgment */}
-            <div className="bg-zinc-950/40 p-4 rounded-xl border border-neutral-850 text-[10px] text-zinc-500 leading-relaxed space-y-1">
-              <span className="font-bold text-zinc-400 font-mono uppercase block tracking-wider">Uniform Electronic Transactions</span>
-              <p>
-                By clicking "Sign & Approve Proposal", I acknowledge that this electronic signature represents a legally binding execution of this painting services contract, equivalent to an ink-on-paper signature.
-              </p>
+            <div className="bg-zinc-950 p-3 rounded-xl border border-neutral-850 text-[10px] text-zinc-400 leading-relaxed">
+              By clicking "Submit Signature & Accept Proposal", I agree that this electronic signature is legally binding and enforces the contract terms outlined in Proposal #{project.id}.
             </div>
 
-            {/* Submit Actions */}
-            <button
-              onClick={handleSubmitSignature}
-              disabled={isSubmitting || !signerName.trim() || (signMethod === 'draw' && !canvasHasContent)}
-              className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl cursor-pointer transition shadow-lg shadow-blue-600/10 disabled:opacity-50 disabled:cursor-not-allowed font-mono uppercase tracking-wider"
-            >
-              {isSubmitting ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                  Securing Contract...
-                </span>
-              ) : '✍️ Sign & Approve Proposal'}
-            </button>
-          </section>
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setIsSignModalOpen(false)}
+                className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-750 text-zinc-300 font-mono text-xs font-bold rounded-xl cursor-pointer transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmitSignature}
+                disabled={isSubmitting || !signerName.trim() || (signMethod === 'draw' && !canvasHasContent)}
+                className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-mono font-bold text-xs rounded-xl cursor-pointer transition shadow-lg shadow-blue-600/20 disabled:opacity-50 disabled:cursor-not-allowed uppercase tracking-wider"
+              >
+                {isSubmitting ? (
+                  <span className="flex items-center gap-2">
+                    <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Securing Signature...
+                  </span>
+                ) : (
+                  '✍️ Submit Signature & Accept Proposal'
+                )}
+              </button>
+            </div>
 
-        </main>
+          </div>
+        </div>
       )}
-
-      {/* FOOTER */}
-      <footer className="bg-zinc-900/40 border-t border-neutral-850/40 py-4 px-6 text-center text-[10px] text-zinc-600 font-mono mt-auto">
-        PaintNav CRM Secure Client Portal • Authorized Service Agreement Execution Suite • UTC 2026
-      </footer>
     </div>
   );
 }

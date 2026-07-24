@@ -80,18 +80,26 @@ const PRESET_AREAS: Record<'interior' | 'exterior' | 'deck', AreaPreset[]> = {
     { label: 'Radiators (Qty)', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
   ],
   exterior: [
-    { label: 'Accent Siding', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
-    { label: 'Deck/Porch Railing', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
-    { label: 'Pillars/Columns (Qty)', calcType: 'item', defaultQty: 2, defaultCoats: 2 },
-    { label: 'Cornerboards', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
-    { label: 'Foundation Wall', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
-    { label: 'Shed/Gazebo', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { label: 'Whole House', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Front side', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Right side', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Left side', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Back side', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'doors', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { label: 'Windows', calcType: 'item', defaultQty: 2, defaultCoats: 2 },
+    { label: 'Fence', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Shed', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { label: 'Porch', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Garage Doors', calcType: 'item', defaultQty: 1, defaultCoats: 2 },
+    { label: 'Deck Horizontal Surface', calcType: 'ceiling', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Deck', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
   ],
   deck: [
-    { label: 'Railing Spindles', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
-    { label: 'Under-decking', calcType: 'ceiling', defaultQty: 'auto', defaultCoats: 2 },
-    { label: 'Support Posts (Qty)', calcType: 'item', defaultQty: 4, defaultCoats: 2 },
-    { label: 'Stair Risers (Qty)', calcType: 'item', defaultQty: 5, defaultCoats: 2 },
+    { label: 'Deck Horizontal Surface', calcType: 'ceiling', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Fence', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Spindles and Railings', calcType: 'perimeter', defaultQty: 'auto', defaultCoats: 2 },
+    { label: 'Stairs', calcType: 'item', defaultQty: 5, defaultCoats: 2 },
+    { label: 'Deck', calcType: 'wall', defaultQty: 'auto', defaultCoats: 2 },
   ],
 };
 
@@ -487,6 +495,9 @@ export default function ProjectDetails({
   });
 
   // Active configurations in "NEW ROOM CONFIG" sidecard
+  const [cfgCategory, setCfgCategory] = useState<'interior' | 'exterior' | 'deck'>('interior');
+  const [cfgLength, setCfgLength] = useState<number>(12);
+  const [cfgWidth, setCfgWidth] = useState<number>(12);
   const [cfgCeilingHeight, setCfgCeilingHeight] = useState<number>(9);
   const [cfgWallPaint, setCfgWallPaint] = useState<string>('Standard');
   const [configChecked, setConfigChecked] = useState({
@@ -2052,7 +2063,7 @@ export default function ProjectDetails({
   };
 
   // Add room preset to project spec
-  const handleAddRoomPreset = (presetName: string, length = 12, width = 12, category: 'interior' | 'exterior' | 'deck' = 'interior') => {
+  const handleAddRoomPreset = (presetName: string, length = cfgLength, width = cfgWidth, category: 'interior' | 'exterior' | 'deck' = 'interior') => {
     const newId = 'room-' + Math.random().toString(36).substring(2, 9);
     
     // Copy configurations completely from sidesheet controls
@@ -2763,30 +2774,55 @@ export default function ProjectDetails({
             <div id="section-rooms" className="scroll-mt-24 bg-[#161616] border border-[#222222] rounded-2xl overflow-hidden text-left shadow-lg">
               
               {/* Header */}
-              <div className="px-5 py-4 border-b border-[#222222] flex items-center justify-between">
-                <h3 className="font-medium text-xs text-white tracking-widest font-mono uppercase">
-                  New Room Config
-                </h3>
+              <div className="px-5 py-4 border-b border-[#222222] flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <h3 className="font-medium text-xs text-white tracking-widest font-mono uppercase">
+                    New Room Config
+                  </h3>
+                  {/* Category switcher */}
+                  <div className="flex bg-neutral-950 p-0.5 rounded-lg border border-neutral-800 gap-0.5">
+                    {(['interior', 'exterior', 'deck'] as const).map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => {
+                          setCfgCategory(cat);
+                          setPresetTab(cat);
+                        }}
+                        className={`px-2.5 py-0.5 text-[9px] uppercase font-mono rounded font-bold transition cursor-pointer ${
+                          cfgCategory === cat 
+                            ? (cat === 'interior' ? 'bg-blue-600 text-white' : cat === 'exterior' ? 'bg-amber-600 text-white' : 'bg-emerald-600 text-white')
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        {cat === 'deck' ? 'Decks' : cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <span className="text-[10px] text-zinc-500 font-medium font-mono uppercase tracking-wider">
-                  Applied to new rooms only
+                  Applied to new {cfgCategory} entries
                 </span>
               </div>
 
               {/* Dimension Settings controls row */}
-              <div className="p-5 flex flex-wrap items-center gap-x-8 gap-y-4 border-b border-[#222222] bg-[#121212]/30 text-xs">
+              <div className="p-5 flex flex-wrap items-center gap-x-6 gap-y-4 border-b border-[#222222] bg-[#121212]/30 text-xs">
                 
-                <div className="flex items-center gap-3">
-                  <span className="text-zinc-400 font-medium font-mono">Ceiling</span>
+                {/* Length ft */}
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-400 font-medium font-mono">Length</span>
                   <div className="flex items-center bg-neutral-950 border border-[#222222] rounded-xl overflow-hidden px-1 py-0.5">
                     <button 
-                      onClick={() => setCfgCeilingHeight(prev => Math.max(8, prev - 1))}
+                      type="button"
+                      onClick={() => setCfgLength(prev => Math.max(1, prev - 1))}
                       className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-r border-[#222222] cursor-pointer"
                     >
                       -
                     </button>
-                    <span className="px-4 font-bold text-white font-mono">{cfgCeilingHeight} <span className="text-[10px] text-zinc-500 font-normal">ft</span></span>
+                    <span className="px-3 font-bold text-white font-mono">{cfgLength} <span className="text-[10px] text-zinc-500 font-normal">ft</span></span>
                     <button 
-                      onClick={() => setCfgCeilingHeight(prev => Math.min(16, prev + 1))}
+                      type="button"
+                      onClick={() => setCfgLength(prev => Math.min(200, prev + 1))}
                       className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-l border-[#222222] cursor-pointer"
                     >
                       +
@@ -2794,8 +2830,53 @@ export default function ProjectDetails({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <span className="text-zinc-400 font-medium font-mono">Wall Paint</span>
+                {/* Width ft */}
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-400 font-medium font-mono">Width</span>
+                  <div className="flex items-center bg-neutral-950 border border-[#222222] rounded-xl overflow-hidden px-1 py-0.5">
+                    <button 
+                      type="button"
+                      onClick={() => setCfgWidth(prev => Math.max(1, prev - 1))}
+                      className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-r border-[#222222] cursor-pointer"
+                    >
+                      -
+                    </button>
+                    <span className="px-3 font-bold text-white font-mono">{cfgWidth} <span className="text-[10px] text-zinc-500 font-normal">ft</span></span>
+                    <button 
+                      type="button"
+                      onClick={() => setCfgWidth(prev => Math.min(200, prev + 1))}
+                      className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-l border-[#222222] cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                {/* Height ft */}
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-400 font-medium font-mono">{cfgCategory === 'interior' ? 'Ceiling' : 'Height'}</span>
+                  <div className="flex items-center bg-neutral-950 border border-[#222222] rounded-xl overflow-hidden px-1 py-0.5">
+                    <button 
+                      type="button"
+                      onClick={() => setCfgCeilingHeight(prev => Math.max(6, prev - 1))}
+                      className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-r border-[#222222] cursor-pointer"
+                    >
+                      -
+                    </button>
+                    <span className="px-3 font-bold text-white font-mono">{cfgCeilingHeight} <span className="text-[10px] text-zinc-500 font-normal">ft</span></span>
+                    <button 
+                      type="button"
+                      onClick={() => setCfgCeilingHeight(prev => Math.min(30, prev + 1))}
+                      className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-l border-[#222222] cursor-pointer"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                {/* Wall Paint / Coating */}
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-400 font-medium font-mono">Paint</span>
                   <div className="relative">
                     <select
                       value={cfgWallPaint}
@@ -2816,23 +2897,43 @@ export default function ProjectDetails({
               {/* Area Specifications Table List */}
               <div className="px-5 py-4">
                 <div className="grid grid-cols-12 gap-2 text-[10px] text-zinc-500 font-bold uppercase tracking-wider font-mono border-b border-neutral-800 pb-2 mb-2">
-                  <div className="col-span-6 text-left">Area</div>
+                  <div className="col-span-6 text-left">Area ({cfgCategory.toUpperCase()})</div>
                   <div className="col-span-3 text-center">Qty</div>
                   <div className="col-span-3 text-right">Coats</div>
                 </div>
 
-                {/* Checklist Areas loop */}
+                {/* Checklist Areas loop based on category */}
                 <div className="space-y-1.5">
-                  {[
+                  {(cfgCategory === 'interior' ? [
                     { key: 'walls', label: 'Walls', isAuto: true },
                     { key: 'ceilings', label: 'Ceilings', isAuto: true },
                     { key: 'baseboards', label: 'Baseboards', isAuto: true },
                     { key: 'windows', label: 'Windows', isAuto: false },
                     { key: 'doors', label: 'Doors', isAuto: false },
                     { key: 'doorFrames', label: 'Door Frames', isAuto: false },
-                  ].map((item) => {
-                    const isChecked = (configChecked as any)[item.key];
-                    const qtyVal = (configQty as any)[item.key] || 0;
+                  ] : cfgCategory === 'deck' ? [
+                    { key: 'deck-horizontal', label: 'Deck Horizontal Surface', isAuto: true },
+                    { key: 'deck-fence', label: 'Fence', isAuto: true },
+                    { key: 'deck-spindles', label: 'Spindles and Railings', isAuto: true },
+                    { key: 'deck-stairs', label: 'Stairs', isAuto: false },
+                    { key: 'deck-body', label: 'Deck', isAuto: true },
+                  ] : [
+                    { key: 'ext-whole-house', label: 'Whole House', isAuto: true },
+                    { key: 'ext-front-side', label: 'Front side', isAuto: true },
+                    { key: 'ext-right-side', label: 'Right side', isAuto: true },
+                    { key: 'ext-left-side', label: 'Left side', isAuto: true },
+                    { key: 'ext-back-side', label: 'Back side', isAuto: true },
+                    { key: 'ext-doors', label: 'doors', isAuto: false },
+                    { key: 'ext-windows', label: 'Windows', isAuto: false },
+                    { key: 'ext-fence', label: 'Fence', isAuto: true },
+                    { key: 'ext-shed', label: 'Shed', isAuto: false },
+                    { key: 'ext-porch', label: 'Porch', isAuto: true },
+                    { key: 'ext-garage-doors', label: 'Garage Doors', isAuto: false },
+                    { key: 'ext-deck-horizontal', label: 'Deck Horizontal Surface', isAuto: true },
+                    { key: 'ext-deck', label: 'Deck', isAuto: true },
+                  ]).map((item) => {
+                    const isChecked = (configChecked as any)[item.key] ?? true;
+                    const qtyVal = (configQty as any)[item.key] || 1;
                     const coatsVal = (configCoats as any)[item.key] || 2;
 
                     return (
@@ -2871,7 +2972,7 @@ export default function ProjectDetails({
                               <span className="px-1.5 font-mono text-white">{qtyVal}</span>
                               <button 
                                 disabled={!isChecked}
-                                onClick={() => setConfigQty(prev => ({ ...prev, [item.key]: Math.min(10, qtyVal + 1) }))}
+                                onClick={() => setConfigQty(prev => ({ ...prev, [item.key]: Math.min(20, qtyVal + 1) }))}
                                 className="px-2 text-zinc-500 hover:text-white select-none disabled:opacity-30 cursor-pointer"
                               >
                                 +
@@ -2906,22 +3007,25 @@ export default function ProjectDetails({
                   })}
                 </div>
 
-                {/* Add Area dropdown select mimic */}
+                {/* Add Area dropdown select mimic using active category area presets */}
                 <div className="mt-3.5 relative">
                   <select
                     onChange={(e) => {
                       if (e.target.value) {
-                        triggerNotification(`Custom ${e.target.value} layer added to configurator.`);
+                        triggerNotification(`Added ${e.target.value} layer to ${cfgCategory} configuration.`);
                         e.target.value = '';
                       }
                     }}
                     className="w-full bg-neutral-950 border border-dashed border-[#2d2d2d] hover:border-neutral-700 text-zinc-400 font-bold text-xs py-2 px-4 rounded-xl focus:outline-none focus:ring-0 appearance-none text-left cursor-pointer transition flex items-center justify-between"
                   >
-                    <option value="">+ Add area...</option>
-                    <option value="Trim">Moulding / Trim Siding</option>
-                    <option value="Soffits">Soffits & Fascias</option>
-                    <option value="Closets">Closets & Built-ins</option>
-                    <option value="Railings">Balusters & Handrailings</option>
+                    <option value="">+ Add {cfgCategory} preset area...</option>
+                    {(proposalSettings.areaPresets || DEFAULT_PROPOSAL_SETTINGS.areaPresets || PRESET_AREAS[cfgCategory])
+                      .filter(ap => (ap as any).category ? (ap as any).category === cfgCategory : true)
+                      .map((ap, idx) => (
+                        <option key={(ap as any).id || `${ap.label}-${idx}`} value={ap.label}>
+                          {ap.label}
+                        </option>
+                      ))}
                   </select>
                   <ChevronDown className="w-4 h-4 text-zinc-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                 </div>
@@ -2941,12 +3045,15 @@ export default function ProjectDetails({
                   {(['interior', 'exterior', 'deck'] as const).map((t) => (
                     <button
                       key={t}
-                      onClick={() => setPresetTab(t)}
+                      onClick={() => {
+                        setPresetTab(t);
+                        setCfgCategory(t);
+                      }}
                       className={`px-2 py-0.5 text-[9px] uppercase font-mono rounded font-bold transition cursor-pointer ${
                         presetTab === t ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'
                       }`}
                     >
-                      {t}
+                      {t === 'deck' ? 'Decks' : t}
                     </button>
                   ))}
                 </div>
@@ -2965,9 +3072,9 @@ export default function ProjectDetails({
                   { name: 'Bathroom', l: 11, w: 8 },
                   { name: 'Basement', l: 26, w: 20 },
                   { name: 'Office', l: 12, w: 12 },
-                ].map((preset) => (
+                ].map((preset, idx) => (
                   <button
-                    key={preset.name}
+                    key={`${preset.name}-${idx}`}
                     onClick={() => handleAddRoomPreset(preset.name, preset.l, preset.w, 'interior')}
                     className="bg-neutral-900 border border-[#222222] hover:border-indigo-500/30 hover:bg-neutral-850 px-3 py-1.5 text-[11px] font-bold font-mono rounded-lg transition text-zinc-300 cursor-pointer flex items-center gap-1 shrink-0"
                   >
@@ -2976,17 +3083,22 @@ export default function ProjectDetails({
                 ))}
 
                 {presetTab === 'exterior' && [
-                  { name: 'Front Siding', l: 40, w: 10 },
-                  { name: 'Rear Siding', l: 40, w: 10 },
-                  { name: 'Left Siding', l: 30, w: 10 },
-                  { name: 'Right Siding', l: 30, w: 10 },
-                  { name: 'Soffits & Fascia', l: 140, w: 1 },
-                  { name: 'Garage Doors Block', l: 20, w: 10 },
-                  { name: 'Main Entry Doors', l: 8, w: 5 },
-                  { name: 'Shutters Set', l: 10, w: 10 },
-                ].map((preset) => (
+                  { name: 'Whole House', l: 40, w: 30 },
+                  { name: 'Front side', l: 40, w: 15 },
+                  { name: 'Right side', l: 30, w: 15 },
+                  { name: 'Left side', l: 30, w: 15 },
+                  { name: 'Back side', l: 40, w: 15 },
+                  { name: 'doors', l: 8, w: 4 },
+                  { name: 'Windows', l: 10, w: 5 },
+                  { name: 'Fence', l: 60, w: 6 },
+                  { name: 'Shed', l: 12, w: 10 },
+                  { name: 'Porch', l: 15, w: 10 },
+                  { name: 'Garage Doors', l: 16, w: 8 },
+                  { name: 'Deck Horizontal Surface', l: 20, w: 15 },
+                  { name: 'Deck', l: 20, w: 15 },
+                ].map((preset, idx) => (
                   <button
-                    key={preset.name}
+                    key={`${preset.name}-${idx}`}
                     onClick={() => handleAddRoomPreset(preset.name, preset.l, preset.w, 'exterior')}
                     className="bg-neutral-900 border border-[#222222] hover:border-amber-500/30 hover:bg-neutral-850 px-3 py-1.5 text-[11px] font-bold font-mono rounded-lg transition text-zinc-300 cursor-pointer flex items-center gap-1 shrink-0"
                   >
@@ -2995,14 +3107,14 @@ export default function ProjectDetails({
                 ))}
 
                 {presetTab === 'deck' && [
-                  { name: 'Main Deck Floor', l: 20, w: 15 },
-                  { name: 'Upper Deck Level', l: 12, w: 10 },
-                  { name: 'Deck Steps & Stairs', l: 10, w: 6 },
-                  { name: 'Deck Balusters & Railings', l: 60, w: 1 },
-                  { name: 'Cedar Pergola', l: 12, w: 12 },
-                ].map((preset) => (
+                  { name: 'Deck Horizontal Surface', l: 20, w: 15 },
+                  { name: 'Fence', l: 50, w: 6 },
+                  { name: 'Spindles and Railings', l: 40, w: 3 },
+                  { name: 'Stairs', l: 10, w: 6 },
+                  { name: 'Deck', l: 20, w: 15 },
+                ].map((preset, idx) => (
                   <button
-                    key={preset.name}
+                    key={`${preset.name}-${idx}`}
                     onClick={() => handleAddRoomPreset(preset.name, preset.l, preset.w, 'deck')}
                     className="bg-neutral-900 border border-[#222222] hover:border-emerald-500/30 hover:bg-neutral-850 px-3 py-1.5 text-[11px] font-bold font-mono rounded-lg transition text-zinc-300 cursor-pointer flex items-center gap-1 shrink-0"
                   >
@@ -3013,7 +3125,7 @@ export default function ProjectDetails({
                 <button
                   onClick={() => {
                     const customName = window.prompt(`Enter custom ${presetTab} area name:`);
-                    if (customName) handleAddRoomPreset(customName, 12, 12, presetTab);
+                    if (customName) handleAddRoomPreset(customName, cfgLength, cfgWidth, presetTab);
                   }}
                   className="bg-transparent border border-dashed border-[#2d2d2d] hover:border-neutral-600 px-3 py-1.5 text-[11px] font-medium font-mono rounded-lg transition text-zinc-500 hover:text-zinc-300 cursor-pointer flex items-center gap-1 shrink-0"
                 >
@@ -3828,10 +3940,29 @@ export default function ProjectDetails({
           <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Inclusions */}
             <div className="space-y-2">
-              <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono tracking-wider flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-                Inclusions (Shows on Proposal)
-              </label>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-1">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono tracking-wider flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                  Inclusions (Shows on Proposal)
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {(proposalSettings.scopePresets || DEFAULT_PROPOSAL_SETTINGS.scopePresets)
+                    .filter(sp => sp.type === 'inclusions')
+                    .map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setInclusions(preset.content);
+                          triggerNotification(`Loaded ${preset.title} preset!`, 'success');
+                        }}
+                        className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                      >
+                        {preset.title}
+                      </button>
+                    ))}
+                </div>
+              </div>
               <textarea
                 value={inclusions}
                 onChange={(e) => setInclusions(e.target.value)}
@@ -3843,10 +3974,29 @@ export default function ProjectDetails({
 
             {/* Exclusions */}
             <div className="space-y-2">
-              <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono tracking-wider flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-red-500 rounded-full" />
-                Exclusions (Shows on Proposal)
-              </label>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-1">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono tracking-wider flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-red-500 rounded-full" />
+                  Exclusions (Shows on Proposal)
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {(proposalSettings.scopePresets || DEFAULT_PROPOSAL_SETTINGS.scopePresets)
+                    .filter(sp => sp.type === 'exclusions')
+                    .map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setExclusions(preset.content);
+                          triggerNotification(`Loaded ${preset.title} preset!`, 'success');
+                        }}
+                        className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                      >
+                        {preset.title}
+                      </button>
+                    ))}
+                </div>
+              </div>
               <textarea
                 value={exclusions}
                 onChange={(e) => setExclusions(e.target.value)}
@@ -3858,10 +4008,29 @@ export default function ProjectDetails({
 
             {/* Special Conditions */}
             <div className="space-y-2">
-              <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono tracking-wider flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-amber-500 rounded-full" />
-                Special Conditions (Shows on Proposal)
-              </label>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-1">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono tracking-wider flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-amber-500 rounded-full" />
+                  Special Conditions (Shows on Proposal)
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {(proposalSettings.scopePresets || DEFAULT_PROPOSAL_SETTINGS.scopePresets)
+                    .filter(sp => sp.type === 'specialConditions')
+                    .map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          setSpecialConditions(preset.content);
+                          triggerNotification(`Loaded ${preset.title} preset!`, 'success');
+                        }}
+                        className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                      >
+                        {preset.title}
+                      </button>
+                    ))}
+                </div>
+              </div>
               <textarea
                 value={specialConditions}
                 onChange={(e) => setSpecialConditions(e.target.value)}
@@ -3897,13 +4066,9 @@ export default function ProjectDetails({
                   <button
                     type="button"
                     onClick={() => {
-                      const saved = localStorage.getItem('proposal_settings');
-                      if (saved) {
-                        try {
-                          const parsed = JSON.parse(saved);
-                          if (parsed.interiorGeneralNotes) setGeneralNotes(parsed.interiorGeneralNotes);
-                        } catch (e) {}
-                      }
+                      const text = proposalSettings.interiorGeneralNotes || DEFAULT_PROPOSAL_SETTINGS.interiorGeneralNotes || 'All interior surfaces will be fully prepared prior to painting. This includes filling nail holes, minor caulking, and dust protection for furniture and flooring. Premium quality materials will be used.';
+                      setGeneralNotes(text);
+                      triggerNotification('Loaded Interior General Notes preset!', 'success');
                     }}
                     className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
                   >
@@ -3912,13 +4077,9 @@ export default function ProjectDetails({
                   <button
                     type="button"
                     onClick={() => {
-                      const saved = localStorage.getItem('proposal_settings');
-                      if (saved) {
-                        try {
-                          const parsed = JSON.parse(saved);
-                          if (parsed.exteriorGeneralNotes) setGeneralNotes(parsed.exteriorGeneralNotes);
-                        } catch (e) {}
-                      }
+                      const text = proposalSettings.exteriorGeneralNotes || DEFAULT_PROPOSAL_SETTINGS.exteriorGeneralNotes || 'Exterior preparation includes pressure washing to remove dirt and loose paint, scraping peeling areas, priming bare wood, and caulking joints as specified. Premium weather-resistant paint will be applied.';
+                      setGeneralNotes(text);
+                      triggerNotification('Loaded Exterior General Notes preset!', 'success');
                     }}
                     className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
                   >
@@ -3927,13 +4088,9 @@ export default function ProjectDetails({
                   <button
                     type="button"
                     onClick={() => {
-                      const saved = localStorage.getItem('proposal_settings');
-                      if (saved) {
-                        try {
-                          const parsed = JSON.parse(saved);
-                          if (parsed.woodStainingGeneralNotes) setGeneralNotes(parsed.woodStainingGeneralNotes);
-                        } catch (e) {}
-                      }
+                      const text = proposalSettings.woodStainingGeneralNotes || DEFAULT_PROPOSAL_SETTINGS.woodStainingGeneralNotes || 'Wood surfaces will be thoroughly cleaned/stripped if needed. Staining will be applied in thin, even coats to preserve wood grain and protect from elements.';
+                      setGeneralNotes(text);
+                      triggerNotification('Loaded Wood Staining preset!', 'success');
                     }}
                     className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
                   >
@@ -3942,13 +4099,9 @@ export default function ProjectDetails({
                   <button
                     type="button"
                     onClick={() => {
-                      const saved = localStorage.getItem('proposal_settings');
-                      if (saved) {
-                        try {
-                          const parsed = JSON.parse(saved);
-                          if (parsed.brickStainingGeneralNotes) setGeneralNotes(parsed.brickStainingGeneralNotes);
-                        } catch (e) {}
-                      }
+                      const text = proposalSettings.brickStainingGeneralNotes || DEFAULT_PROPOSAL_SETTINGS.brickStainingGeneralNotes || 'Brick surfaces will be cleaned and masonry-grade staining or breathing silicate coatings will be applied to guarantee high durability without trapping moisture.';
+                      setGeneralNotes(text);
+                      triggerNotification('Loaded Brick Staining preset!', 'success');
                     }}
                     className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
                   >
@@ -3967,26 +4120,34 @@ export default function ProjectDetails({
 
             {/* Terms and Conditions */}
             <div className="space-y-2 md:col-span-2 border-t border-neutral-800 pt-4 mt-2">
-              <div className="flex justify-between items-center mb-1">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-1">
                 <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono tracking-wider flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 bg-violet-500 rounded-full" />
                   Terms & Conditions (Shows on Proposal PDF)
                 </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const saved = localStorage.getItem('proposal_settings');
-                    if (saved) {
-                      try {
-                        const parsed = JSON.parse(saved);
-                        if (parsed.termsAndConditions) setTermsAndConditions(parsed.termsAndConditions);
-                      } catch (e) {}
-                    }
-                  }}
-                  className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
-                >
-                  Load Terms Preset
-                </button>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = proposalSettings.termsAndConditions || DEFAULT_PROPOSAL_SETTINGS.termsAndConditions || '1. PAYMENT TERMS: A 30% deposit is required to schedule the project. Balance is due immediately upon completion of work.\n2. SCHEDULING: Weather permitting for exterior jobs. Any schedule delays will be communicated promptly.\n3. WARRANTY: We provide a 2-year warranty on workmanship. Warranty does not cover normal wear and tear, abuse, or structural settlement.';
+                      setTermsAndConditions(text);
+                      triggerNotification('Loaded Standard Terms preset!', 'success');
+                    }}
+                    className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                  >
+                    Load Residential Terms
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTermsAndConditions('1. PAYMENT TERMS: 30% deposit upon contract signing, 40% progress billing at mid-point, 30% balance upon substantial completion (Net 15).\n2. CHANGE ORDERS: Any scope additions or field changes must be signed in writing prior to execution.\n3. WARRANTY: 3-year limited warranty on commercial coating applications.');
+                      triggerNotification('Loaded Commercial Terms preset!', 'success');
+                    }}
+                    className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                  >
+                    Load Commercial Terms
+                  </button>
+                </div>
               </div>
               <textarea
                 value={termsAndConditions}
@@ -6281,12 +6442,13 @@ export default function ProjectDetails({
               {(() => {
                 const activeRoom = rooms.find(r => r.id === addingAreaRoomId);
                 const cat = activeRoom?.category || 'interior';
-                const presets = PRESET_AREAS[cat] || PRESET_AREAS.interior;
-                return presets.map((preset) => {
+                const customPresets = (proposalSettings.areaPresets || DEFAULT_PROPOSAL_SETTINGS.areaPresets || []).filter((ap: any) => ap.category ? ap.category === cat : true);
+                const presets = customPresets.length > 0 ? customPresets : (PRESET_AREAS[cat] || PRESET_AREAS.interior);
+                return presets.map((preset, idx) => {
                   const isSelectedInRoom = activeRoom?.customAreas?.some((c: any) => c.label.toLowerCase() === preset.label.toLowerCase());
                   return (
                     <button
-                      key={preset.label}
+                      key={(preset as any).id || `${preset.label}-${idx}`}
                       type="button"
                       disabled={isSelectedInRoom}
                       onClick={() => {

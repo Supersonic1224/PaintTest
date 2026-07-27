@@ -16,6 +16,14 @@ export interface RoomAreaConfig {
   isOption?: boolean;
 }
 
+export interface SurfaceTask {
+  id: string;
+  text: string;
+  completed: boolean;
+  surfaceCategory?: string; // e.g. 'Walls', 'Ceiling', 'Trim', 'General', 'Deck Prep'
+  isOption?: boolean;
+}
+
 export interface RoomSpec {
   id: string;
   name: string;
@@ -34,6 +42,8 @@ export interface RoomSpec {
   wallPaintType?: string;
   isOption?: boolean;
   category?: 'interior' | 'exterior' | 'deck';
+  groupName?: string;
+  surfaceTasks?: SurfaceTask[];
 }
 
 export interface EstimateSummary {
@@ -50,6 +60,7 @@ export interface ProjectTask {
   completed: boolean;
   assignedTo?: string;
   dueDate?: string;
+  isOption?: boolean;
 }
 
 export interface Installment {

@@ -1360,6 +1360,14 @@ export default function App() {
             <WorkOrdersList
               projects={displayProjects}
               clients={displayClients}
+              onSaveProject={handleSaveProject}
+              onSelectProjectForFullEdit={(projId) => {
+                const targetProj = projects.find(p => p.id === projId);
+                if (targetProj) {
+                  setSelectedProject(targetProj);
+                  setCurrentView('project-details');
+                }
+              }}
             />
           )}
 

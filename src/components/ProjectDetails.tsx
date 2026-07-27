@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ClientLead, ProjectDetails as ProjectType, RoomSpec, ProjectTask, PaintColor, ProposalSettings, DEFAULT_PROPOSAL_SETTINGS, Installment } from '../types';
+import { ClientLead, ProjectDetails as ProjectType, RoomSpec, ProjectTask, SurfaceTask, PaintColor, ProposalSettings, DEFAULT_PROPOSAL_SETTINGS, Installment } from '../types';
 import { googleSignIn, setAccessToken } from '../firebase';
 import { sendProposalEmail } from '../gmailService';
 import { generateProposalPDF, generateReceiptPDF } from '../pdfGenerator';
@@ -39,7 +39,13 @@ import {
   ShieldAlert,
   Globe,
   ExternalLink,
-  Diamond
+  Diamond,
+  FolderPlus,
+  Folder,
+  FolderOpen,
+  ListTodo,
+  Edit3,
+  Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -522,6 +528,23 @@ export default function ProjectDetails({
     doorFrames: 2,
   });
 
+  // Surface Category Tasks State
+  const [categoryTasks, setCategoryTasks] = useState<Record<'interior' | 'exterior' | 'deck', SurfaceTask[]>>({
+    interior: [],
+    exterior: [],
+    deck: [
+      { id: 'dt-1', text: 'Washing', completed: true, surfaceCategory: 'Deck Prep' },
+      { id: 'dt-2', text: 'Striping', completed: true, surfaceCategory: 'Deck Prep' },
+      { id: 'dt-3', text: 'Reviving', completed: true, surfaceCategory: 'Deck Prep' },
+      { id: 'dt-4', text: 'Sanding', completed: true, surfaceCategory: 'Deck Prep' },
+      { id: 'dt-5', text: 'Staining', completed: true, surfaceCategory: 'Deck Finishing' },
+    ],
+  });
+  const [newTaskInput, setNewTaskInput] = useState<string>('');
+  const [newTaskSurfaceCategory, setNewTaskSurfaceCategory] = useState<string>('Walls');
+  const [newTaskIsOption, setNewTaskIsOption] = useState<boolean>(false);
+  const [roomTaskIsOption, setRoomTaskIsOption] = useState<Record<string, boolean>>({});
+
   // Modals / Alerts feedback statuses
   const [showShareModal, setShowShareModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
@@ -536,6 +559,151 @@ export default function ProjectDetails({
     setExpandedRoomIds(prev => ({
       ...prev,
       [roomId]: !prev[roomId]
+    }));
+  };
+
+  // Selection feature & Room grouping state
+  const [groupInputName, setGroupInputName] = useState<string>('');
+
+  const handleToggleRoomSelection = (roomId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedRoomIds(prev => ({
+      ...prev,
+      [roomId]: !prev[roomId]
+    }));
+  };
+
+  const handleToggleAreaSelection = (roomId: string, areaKey: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const key = `${roomId}::${areaKey}`;
+    setSelectedAreas(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
+  const handleSelectAllRooms = () => {
+    const allIds = rooms.map(r => r.id);
+    const allSelected = allIds.length > 0 && allIds.every(id => selectedRoomIds[id]);
+    if (allSelected) {
+      setSelectedRoomIds({});
+    } else {
+      const next: Record<string, boolean> = {};
+      allIds.forEach(id => { next[id] = true; });
+      setSelectedRoomIds(next);
+    }
+  };
+
+  const handleSelectAllRoomsInCategory = (categoryId: string, roomsList: RoomSpec[]) => {
+    const catRoomIds = roomsList.filter(r => (r.category || 'interior') === categoryId).map(r => r.id);
+    const allCatSelected = catRoomIds.length > 0 && catRoomIds.every(id => selectedRoomIds[id]);
+    setSelectedRoomIds(prev => {
+      const next = { ...prev };
+      catRoomIds.forEach(id => {
+        next[id] = !allCatSelected;
+      });
+      return next;
+    });
+  };
+
+  // Group collapsing tracker
+  const [collapsedGroupNames, setCollapsedGroupNames] = useState<Record<string, boolean>>({});
+
+  const toggleGroupCollapse = (groupName: string) => {
+    setCollapsedGroupNames(prev => ({
+      ...prev,
+      [groupName]: !prev[groupName]
+    }));
+  };
+
+  const handleGroupSelectedRooms = (headingName: string) => {
+    const selectedIds = Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]);
+    if (selectedIds.length === 0) {
+      triggerNotification('Please select at least 1 room to group', 'error');
+      return;
+    }
+    if (!headingName.trim()) {
+      triggerNotification('Please enter a group heading name', 'error');
+      return;
+    }
+    const cleanHeading = headingName.trim();
+    setRooms(prev => prev.map(r => selectedIds.includes(r.id) ? { ...r, groupName: cleanHeading } : r));
+    triggerNotification(`Grouped ${selectedIds.length} room${selectedIds.length > 1 ? 's' : ''} under "${cleanHeading}"`);
+    setGroupInputName('');
+    setSelectedRoomIds({});
+  };
+
+  const handleUngroupRooms = (headingName: string) => {
+    setRooms(prev => prev.map(r => r.groupName === headingName ? { ...r, groupName: undefined } : r));
+    triggerNotification(`Ungrouped rooms from "${headingName}"`);
+  };
+
+  const handleRenameGroup = (oldHeading: string) => {
+    const newHeading = window.prompt(`Rename group "${oldHeading}" to:`, oldHeading);
+    if (newHeading && newHeading.trim() && newHeading.trim() !== oldHeading) {
+      setRooms(prev => prev.map(r => r.groupName === oldHeading ? { ...r, groupName: newHeading.trim() } : r));
+      triggerNotification(`Renamed group to "${newHeading.trim()}"`);
+    }
+  };
+
+  // Surface category tasks helpers
+  const DEFAULT_DECK_TASKS = [
+    { id: 'dt-1', text: 'Washing', completed: false, surfaceCategory: 'Deck Prep' },
+    { id: 'dt-2', text: 'Stripping', completed: false, surfaceCategory: 'Deck Prep' },
+    { id: 'dt-3', text: 'Reviving', completed: false, surfaceCategory: 'Deck Prep' },
+    { id: 'dt-4', text: 'Sanding', completed: false, surfaceCategory: 'Deck Prep' },
+    { id: 'dt-5', text: 'Staining', completed: false, surfaceCategory: 'Deck Finishing' },
+  ];
+
+  const getRoomTasks = (room: RoomSpec) => {
+    if (room.surfaceTasks && room.surfaceTasks.length > 0) {
+      return room.surfaceTasks;
+    }
+    if (room.category === 'deck') {
+      return DEFAULT_DECK_TASKS;
+    }
+    return [];
+  };
+
+  const handleToggleRoomTask = (roomId: string, taskId: string) => {
+    setRooms(prev => prev.map(r => {
+      if (r.id !== roomId) return r;
+      const currentTasks = getRoomTasks(r);
+      const updated = currentTasks.map(t => t.id === taskId ? { ...t, completed: !t.completed } : t);
+      return { ...r, surfaceTasks: updated };
+    }));
+  };
+
+  const handleToggleRoomTaskOption = (roomId: string, taskId: string) => {
+    setRooms(prev => prev.map(r => {
+      if (r.id !== roomId) return r;
+      const currentTasks = getRoomTasks(r);
+      const updated = currentTasks.map(t => t.id === taskId ? { ...t, isOption: !t.isOption } : t);
+      return { ...r, surfaceTasks: updated };
+    }));
+  };
+
+  const handleAddRoomTask = (roomId: string, text: string, category: string = 'General', isOption: boolean = false) => {
+    if (!text.trim()) return;
+    setRooms(prev => prev.map(r => {
+      if (r.id !== roomId) return r;
+      const currentTasks = getRoomTasks(r);
+      const newTask = {
+        id: 'st-' + Math.random().toString(36).substring(2, 9),
+        text: text.trim(),
+        completed: false,
+        surfaceCategory: category,
+        isOption
+      };
+      return { ...r, surfaceTasks: [...currentTasks, newTask] };
+    }));
+  };
+
+  const handleDeleteRoomTask = (roomId: string, taskId: string) => {
+    setRooms(prev => prev.map(r => {
+      if (r.id !== roomId) return r;
+      const currentTasks = getRoomTasks(r);
+      return { ...r, surfaceTasks: currentTasks.filter(t => t.id !== taskId) };
     }));
   };
 
@@ -1266,6 +1434,8 @@ export default function ProjectDetails({
     let totalHours = 0;
     let totalMaterials = 0;
     const roomCosts: Record<string, number> = {};
+    const roomHours: Record<string, number> = {};
+    const roomMaterials: Record<string, number> = {};
 
     rooms.forEach(room => {
       let rHours = 0;
@@ -1406,13 +1576,13 @@ export default function ProjectDetails({
           rMaterials += (cArea / r.stainingCoverage) * rStaining.coats * r.stainingMaterialCost;
         }
       } else {
-        // Extract specific selections
+        // Extract specific selections with proper default checked state matching UI
         const rWalls = (room as any).walls || { checked: true, qty: 'auto', coats: 2 };
         const rCeilings = (room as any).ceilings || { checked: true, qty: 'auto', coats: 2 };
         const rBaseboards = (room as any).baseboards || { checked: true, qty: 'auto', coats: 2 };
-        const rWindows = (room as any).windows || { checked: true, qty: 2, coats: 2 };
-        const rDoors = (room as any).doors || { checked: true, qty: 2, coats: 2 };
-        const rDoorFrames = (room as any).doorFrames || { checked: true, qty: 2, coats: 2 };
+        const rWindows = (room as any).windows || { checked: false, qty: 2, coats: 2 };
+        const rDoors = (room as any).doors || { checked: false, qty: 2, coats: 2 };
+        const rDoorFrames = (room as any).doorFrames || { checked: false, qty: 2, coats: 2 };
 
         // Walls
         if (rWalls.checked) {
@@ -1488,11 +1658,42 @@ export default function ProjectDetails({
         });
       }
 
+      // Surface Category Tasks Calculation
+      const roomTasks = room.surfaceTasks || [];
+      roomTasks.forEach((task) => {
+        if (!task.completed && !task.isOption) {
+          let tHours = 0.75;
+          let tMat = 12.00;
+
+          const textLower = (task.text || '').toLowerCase();
+          const catLower = (task.surfaceCategory || '').toLowerCase();
+
+          if (textLower.includes('wash') || textLower.includes('clean')) {
+            tHours = 0.5;
+            tMat = 8.00;
+          } else if (textLower.includes('patch') || textLower.includes('repair') || textLower.includes('drywall')) {
+            tHours = 1.0;
+            tMat = 15.00;
+          } else if (textLower.includes('prime') || textLower.includes('stain') || textLower.includes('strip')) {
+            tHours = 1.0;
+            tMat = 20.00;
+          } else if (textLower.includes('sand')) {
+            tHours = 0.5;
+            tMat = 10.00;
+          }
+
+          rHours += tHours;
+          rMaterials += tMat;
+        }
+      });
+
       // Calculate room subtotal
       const rLabor = rHours * hourlyLaborRate;
       const rTotal = rLabor + rMaterials;
       
       roomCosts[room.id] = Math.round(rTotal);
+      roomHours[room.id] = parseFloat(rHours.toFixed(1));
+      roomMaterials[room.id] = Math.round(rMaterials);
       
       if (!room.isOption) {
         totalHours += rHours;
@@ -1524,7 +1725,9 @@ export default function ProjectDetails({
       total: parseFloat(total.toFixed(2)),
       deposit: parseFloat(deposit.toFixed(2)),
       balance: parseFloat(balance.toFixed(2)),
-      roomCosts
+      roomCosts,
+      roomHours,
+      roomMaterials
     };
 
   }, [rooms, hourlyLaborRate, taxRate, discount]);
@@ -2106,6 +2309,13 @@ export default function ProjectDetails({
       'reviving': { checked: false, coats: 1, qty: 'auto' },
       'sanding': { checked: category === 'deck', coats: 1, qty: 'auto' },
       'staining': { checked: category === 'deck', coats: 2, qty: 'auto' },
+
+      // Pre-populate surface tasks from active category tasks
+      surfaceTasks: (categoryTasks[category] || []).map(t => ({
+        ...t,
+        id: `st-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        completed: t.completed !== false
+      }))
     } as any;
 
     setRooms(prev => [...prev, newRoom]);
@@ -2168,40 +2378,6 @@ export default function ProjectDetails({
     e.stopPropagation();
     setRooms(prev => prev.filter(r => r.id !== roomId));
     triggerNotification('Removed room spec.');
-  };
-
-  const handleToggleRoomSelection = (roomId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    setSelectedRoomIds(prev => ({
-      ...prev,
-      [roomId]: !prev[roomId]
-    }));
-  };
-
-  const handleToggleAreaSelection = (roomId: string, areaKey: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    const key = `${roomId}::${areaKey}`;
-    setSelectedAreas(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
-  };
-
-  const handleSelectAllRoomsInCategory = (catId: string, roomsList: typeof rooms) => {
-    const catRoomIds = roomsList.filter(r => (r.category || 'interior') === catId).map(r => r.id);
-    const allSelected = catRoomIds.every(id => selectedRoomIds[id]);
-    
-    setSelectedRoomIds(prev => {
-      const next = { ...prev };
-      catRoomIds.forEach(id => {
-        if (allSelected) {
-          delete next[id];
-        } else {
-          next[id] = true;
-        }
-      });
-      return next;
-    });
   };
 
   const getSelectedRoomIdsUnified = () => {
@@ -2432,17 +2608,17 @@ export default function ProjectDetails({
       const coats = room.baseboards?.coats !== undefined ? room.baseboards.coats : 2;
       list.push(`Base (${coats}c)`);
     }
-    if (room.windows?.checked !== false) {
+    if (room.windows?.checked === true) {
       const qty = room.windows?.qty !== undefined ? room.windows.qty : 2;
       const coats = room.windows?.coats !== undefined ? room.windows.coats : 2;
       list.push(`Windows (${qty} @ ${coats}c)`);
     }
-    if (room.doors?.checked !== false) {
+    if (room.doors?.checked === true) {
       const qty = room.doors?.qty !== undefined ? room.doors.qty : 2;
       const coats = room.doors?.coats !== undefined ? room.doors.coats : 2;
       list.push(`Doors (${qty} @ ${coats}c)`);
     }
-    if (room.doorFrames?.checked !== false) {
+    if (room.doorFrames?.checked === true) {
       const qty = room.doorFrames?.qty !== undefined ? room.doorFrames.qty : 2;
       const coats = room.doorFrames?.coats !== undefined ? room.doorFrames.coats : 2;
       list.push(`Frames (${qty} @ ${coats}c)`);
@@ -2457,7 +2633,15 @@ export default function ProjectDetails({
         }
       });
     }
-    return list.join(' · ');
+
+    if (room.surfaceTasks) {
+      const activeTasks = room.surfaceTasks.filter((t: any) => !t.completed);
+      if (activeTasks.length > 0) {
+        list.push(`${activeTasks.length} task${activeTasks.length > 1 ? 's' : ''}`);
+      }
+    }
+
+    return list.join(' · ') || 'No surfaces spec';
   };
 
   return (
@@ -2737,7 +2921,7 @@ export default function ProjectDetails({
         <div className="sticky top-[52px] z-30 bg-[#0c0c0c]/90 backdrop-blur-md border-y border-neutral-850 px-4 py-2.5 flex items-center justify-between overflow-x-auto scrollbar-none mb-6">
           <div className="flex items-center gap-1.5 md:gap-3 overflow-x-auto scrollbar-none">
             {[
-              { label: 'Room Specs', icon: Paintbrush, id: 'section-rooms' },
+              { label: 'Surface Category', icon: Paintbrush, id: 'section-rooms' },
               { label: 'Scope & Terms', icon: FileText, id: 'section-scope' },
               { label: 'Pricing Widget', icon: DollarSign, id: 'section-pricing' },
               { label: 'Proposal Preview', icon: Eye, id: 'section-preview' },
@@ -2770,14 +2954,14 @@ export default function ProjectDetails({
           {/* LEFT CHANNELS COLUMN: Configurations + Presets */}
           <div className="lg:col-span-7 space-y-6">
             
-            {/* NEW ROOM CONFIG WORK CARD */}
+            {/* SURFACE CATEGORY WORK CARD */}
             <div id="section-rooms" className="scroll-mt-24 bg-[#161616] border border-[#222222] rounded-2xl overflow-hidden text-left shadow-lg">
               
               {/* Header */}
               <div className="px-5 py-4 border-b border-[#222222] flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <h3 className="font-medium text-xs text-white tracking-widest font-mono uppercase">
-                    New Room Config
+                    Surface Category
                   </h3>
                   {/* Category switcher */}
                   <div className="flex bg-neutral-950 p-0.5 rounded-lg border border-neutral-800 gap-0.5">
@@ -2894,10 +3078,10 @@ export default function ProjectDetails({
 
               </div>
 
-              {/* Area Specifications Table List */}
+              {/* Surface Category Specifications Table List */}
               <div className="px-5 py-4">
                 <div className="grid grid-cols-12 gap-2 text-[10px] text-zinc-500 font-bold uppercase tracking-wider font-mono border-b border-neutral-800 pb-2 mb-2">
-                  <div className="col-span-6 text-left">Area ({cfgCategory.toUpperCase()})</div>
+                  <div className="col-span-6 text-left">Surface Category ({cfgCategory.toUpperCase()})</div>
                   <div className="col-span-3 text-center">Qty</div>
                   <div className="col-span-3 text-right">Coats</div>
                 </div>
@@ -3030,6 +3214,191 @@ export default function ProjectDetails({
                   <ChevronDown className="w-4 h-4 text-zinc-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                 </div>
 
+                {/* TASKS SECTION BELOW SURFACE CATEGORIES */}
+                <div className="mt-6 pt-5 border-t border-neutral-800 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <ListTodo className="w-4 h-4 text-blue-400" />
+                      <h4 className="font-mono font-bold text-xs text-white tracking-widest uppercase">
+                        Tasks ({cfgCategory.toUpperCase()})
+                      </h4>
+                      <span className="text-[10px] text-zinc-500 font-mono font-bold bg-neutral-950 px-2 py-0.5 rounded border border-neutral-800">
+                        {(categoryTasks[cfgCategory] || []).length} active
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-zinc-500 font-mono italic">
+                      {cfgCategory === 'deck' ? 'Pre-populated for decks' : 'Starts empty for ' + cfgCategory}
+                    </span>
+                  </div>
+
+                  {/* Tasks List */}
+                  <div className="space-y-2">
+                    {(categoryTasks[cfgCategory] || []).length === 0 ? (
+                      <div className="p-4 bg-neutral-950/60 border border-dashed border-neutral-800 rounded-xl text-center">
+                        <p className="text-xs text-zinc-500 font-mono">
+                          No tasks added for {cfgCategory} yet. Add surface tasks below (e.g. prep walls, sand ceiling, prime baseboards).
+                        </p>
+                      </div>
+                    ) : (
+                      (categoryTasks[cfgCategory] || []).map((task) => (
+                        <div
+                          key={task.id}
+                          className={`flex items-center justify-between p-2.5 rounded-xl border transition font-mono text-xs ${
+                            task.isOption
+                              ? 'bg-amber-950/25 border-amber-500/50 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.15)]'
+                              : 'bg-neutral-900/80 border-neutral-800 text-zinc-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={task.completed !== false}
+                              onChange={() => {
+                                setCategoryTasks(prev => ({
+                                  ...prev,
+                                  [cfgCategory]: prev[cfgCategory].map(t => t.id === task.id ? { ...t, completed: !t.completed } : t)
+                                }));
+                              }}
+                              className="w-4 h-4 rounded border-neutral-700 bg-neutral-950 text-blue-500 focus:ring-0 cursor-pointer"
+                            />
+                            <span className={`font-bold ${task.completed !== false ? '' : 'text-zinc-500 line-through'}`}>
+                              {task.text}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {task.surfaceCategory && (
+                              <span className="text-[10px] bg-blue-950/80 text-blue-300 border border-blue-800/60 px-2 py-0.5 rounded-md font-mono">
+                                {task.surfaceCategory}
+                              </span>
+                            )}
+
+                            {/* Option Toggle Button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCategoryTasks(prev => ({
+                                  ...prev,
+                                  [cfgCategory]: prev[cfgCategory].map(t => t.id === task.id ? { ...t, isOption: !t.isOption } : t)
+                                }));
+                              }}
+                              className={`px-2 py-0.5 text-[10px] font-bold font-mono rounded-lg border transition cursor-pointer flex items-center gap-1 ${
+                                task.isOption
+                                  ? 'bg-amber-950/90 border-amber-500 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.25)]'
+                                  : 'bg-neutral-950 border-neutral-800 text-zinc-400 hover:text-white hover:border-neutral-700'
+                              }`}
+                              title={task.isOption ? "Active Option. Click to make standard task." : "Mark task as Option"}
+                            >
+                              <Diamond className={`w-3 h-3 ${task.isOption ? 'fill-amber-400 text-amber-400' : 'text-zinc-500'}`} />
+                              <span>Option</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCategoryTasks(prev => ({
+                                  ...prev,
+                                  [cfgCategory]: prev[cfgCategory].filter(t => t.id !== task.id)
+                                }));
+                              }}
+                              className="p-1 text-zinc-500 hover:text-red-400 hover:bg-neutral-800 rounded transition cursor-pointer"
+                              title="Remove task"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Add Task Input Controls */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <input
+                      type="text"
+                      value={newTaskInput}
+                      onChange={(e) => setNewTaskInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (newTaskInput.trim()) {
+                            const tText = newTaskInput.trim();
+                            const newTaskObj: SurfaceTask = {
+                              id: `task-${Date.now()}`,
+                              text: tText,
+                              completed: true,
+                              surfaceCategory: newTaskSurfaceCategory,
+                              isOption: newTaskIsOption,
+                            };
+                            setCategoryTasks(prev => ({
+                              ...prev,
+                              [cfgCategory]: [...(prev[cfgCategory] || []), newTaskObj]
+                            }));
+                            setNewTaskInput('');
+                            triggerNotification(`Added task "${tText}" to ${cfgCategory}!`);
+                          }
+                        }
+                      }}
+                      placeholder="Add a new task (e.g. Washing, Sanding, Staining, Priming...)"
+                      className="flex-1 min-w-[180px] bg-neutral-950 border border-neutral-800 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-500 font-mono outline-none"
+                    />
+
+                    <select
+                      value={newTaskSurfaceCategory}
+                      onChange={(e) => setNewTaskSurfaceCategory(e.target.value)}
+                      className="bg-neutral-950 border border-neutral-800 rounded-xl px-2.5 py-2 text-xs text-zinc-300 font-mono outline-none cursor-pointer"
+                    >
+                      <option value="Walls">Walls</option>
+                      <option value="Ceiling">Ceiling</option>
+                      <option value="Baseboards">Baseboards</option>
+                      <option value="Trim / Doors">Trim / Doors</option>
+                      <option value="Deck Prep">Deck Prep</option>
+                      <option value="Deck Finish">Deck Finish</option>
+                      <option value="Siding / Exterior">Siding / Exterior</option>
+                      <option value="General">General</option>
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={() => setNewTaskIsOption(prev => !prev)}
+                      className={`px-3 py-2 text-xs font-bold font-mono rounded-xl border transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                        newTaskIsOption
+                          ? 'bg-amber-950/90 border-amber-500 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.25)]'
+                          : 'bg-neutral-950 border-neutral-800 text-zinc-400 hover:text-white'
+                      }`}
+                      title={newTaskIsOption ? "New task will be added as an Option" : "Click to mark new task as Option"}
+                    >
+                      <Diamond className={`w-3.5 h-3.5 ${newTaskIsOption ? 'fill-amber-400 text-amber-400' : 'text-zinc-500'}`} />
+                      <span>Option</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!newTaskInput.trim()) return;
+                        const tText = newTaskInput.trim();
+                        const newTaskObj: SurfaceTask = {
+                          id: `task-${Date.now()}`,
+                          text: tText,
+                          completed: true,
+                          surfaceCategory: newTaskSurfaceCategory,
+                          isOption: newTaskIsOption,
+                        };
+                        setCategoryTasks(prev => ({
+                          ...prev,
+                          [cfgCategory]: [...(prev[cfgCategory] || []), newTaskObj]
+                        }));
+                        setNewTaskInput('');
+                        triggerNotification(`Added task "${tText}" to ${cfgCategory}!`);
+                      }}
+                      className="px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Task</span>
+                    </button>
+                  </div>
+                </div>
+
               </div>
 
             </div>
@@ -3038,7 +3407,7 @@ export default function ProjectDetails({
             <div className="bg-[#161616] border border-[#222222] rounded-2xl p-5 text-left shadow-lg space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-medium text-xs text-white tracking-widest font-mono uppercase">
-                  Add Area / Preset
+                  Add Surface Category Preset
                 </h3>
                 {/* Internal sub-tabs for presets category */}
                 <div className="flex bg-neutral-950 p-0.5 rounded-lg border border-neutral-850 gap-0.5">
@@ -3414,14 +3783,138 @@ export default function ProjectDetails({
         {/* 4. BOTTOM SECTOR: ACTIVE CONFIGURED ROOMS ACCORDION SHEET */}
         <div className="bg-[#161616] border border-[#222222] rounded-2xl overflow-hidden text-left shadow-lg">
           
-          <div className="px-5 py-4 border-b border-[#222222] flex items-center justify-between">
-            <h3 className="font-mono font-bold text-xs text-white tracking-widest uppercase">
-              Configured Room Specs
-            </h3>
-            <span className="text-[10px] text-zinc-500 font-bold font-mono uppercase">
-              {rooms.length} Rooms active
-            </span>
+          <div className="px-5 py-4 border-b border-[#222222] flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-mono font-bold text-xs text-white tracking-widest uppercase flex items-center gap-2">
+                <Layers className="w-4 h-4 text-blue-400" />
+                <span>Configured Room Specs</span>
+              </h3>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                Organize rooms, customize surface categories, add surface category tasks, or group rooms into collapsible headings.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              {/* Select Feature / Group Rooms Mode Toggle Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const nextMode = !selectMode;
+                  setSelectMode(nextMode);
+                  if (!nextMode) {
+                    setSelectedRoomIds({});
+                  }
+                }}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-2 cursor-pointer shadow-md ${
+                  selectMode 
+                    ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/50 border border-blue-400' 
+                    : 'bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-zinc-200 hover:text-white'
+                }`}
+              >
+                <CheckSquare className="w-3.5 h-3.5 text-blue-300" />
+                <span>{selectMode ? 'Exit Selection Mode' : 'Select Feature / Group Rooms'}</span>
+              </button>
+
+              <span className="text-[10px] text-zinc-500 font-bold font-mono uppercase bg-neutral-950 border border-neutral-800 px-3 py-1.5 rounded-xl">
+                {rooms.length} Rooms active
+              </span>
+            </div>
           </div>
+
+          {/* SELECTION FEATURE & GROUPING CONTROL BAR */}
+          {(selectMode || Object.values(selectedRoomIds).some(Boolean)) && (
+            <div className="m-5 p-4 bg-gradient-to-r from-blue-950/60 to-indigo-950/40 border-2 border-blue-500/70 rounded-2xl space-y-3 animate-fade-in shadow-2xl">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-blue-800/60 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="p-1.5 bg-blue-900/80 border border-blue-700/80 rounded-xl text-blue-300 shadow">
+                    <FolderPlus className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono">
+                      Group Selected Rooms & Heading Creator
+                    </h4>
+                    <p className="text-[10px] text-blue-200/80 font-mono">
+                      {Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length} of {rooms.length} rooms currently selected
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectAllRooms}
+                    className="px-2.5 py-1 bg-blue-900/60 hover:bg-blue-800 border border-blue-700/80 text-blue-200 hover:text-white text-xs font-mono font-bold rounded-lg transition cursor-pointer"
+                  >
+                    {rooms.length > 0 && rooms.every(r => selectedRoomIds[r.id]) ? 'Deselect All Rooms' : 'Select All Rooms'}
+                  </button>
+
+                  {Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRoomIds({})}
+                      className="px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-zinc-400 hover:text-zinc-200 text-xs font-mono rounded-lg transition cursor-pointer"
+                    >
+                      Clear Selection
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Grouping Name Input & Action Buttons */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex-1 min-w-[260px] flex items-center gap-2">
+                  <label className="text-xs font-bold text-blue-300 font-mono whitespace-nowrap shrink-0">
+                    Group Heading:
+                  </label>
+                  <input
+                    type="text"
+                    value={groupInputName}
+                    onChange={(e) => setGroupInputName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleGroupSelectedRooms(groupInputName);
+                      }
+                    }}
+                    placeholder="Enter heading name (e.g. Main Level, Master Suite, Deck Area...)"
+                    className="flex-1 bg-neutral-950 border border-blue-600/60 focus:border-blue-400 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-500 font-mono outline-none shadow-inner"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleGroupSelectedRooms(groupInputName)}
+                  disabled={Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length === 0}
+                  className={`px-4 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 cursor-pointer shadow-lg ${
+                    Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length > 0
+                      ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/50 border border-blue-400'
+                      : 'bg-neutral-900 text-zinc-600 border border-neutral-800 cursor-not-allowed'
+                  }`}
+                >
+                  <FolderPlus className="w-4 h-4" />
+                  <span>Group Selected Rooms</span>
+                </button>
+
+                {Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const selectedIds = Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]);
+                      if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected room(s)?`)) {
+                        setRooms(prev => prev.filter(r => !selectedIds.includes(r.id)));
+                        setSelectedRoomIds({});
+                        triggerNotification(`Deleted ${selectedIds.length} room(s)`);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-800/80 text-red-300 hover:text-white text-xs font-mono font-bold rounded-xl transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete ({Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length})</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
 
 
@@ -3458,21 +3951,25 @@ export default function ProjectDetails({
                       )}
                     </div>
 
-                    <div className="space-y-3">
-                      {catRooms.map((room) => {
-                        const isExpanded = !!expandedRoomIds[room.id];
-                        const roomPrice = liveSummary.roomCosts[room.id] || 0;
-                        const isRoomSelected = !!selectedRoomIds[room.id];
+                    <div className="space-y-4">
+                      {(() => {
+                        const groupNames = Array.from(new Set(catRooms.map(r => r.groupName).filter(Boolean))) as string[];
+                        const ungroupedRooms = catRooms.filter(r => !r.groupName);
 
-                        return (
-                          <div 
-                            key={room.id} 
-                            className={`transition-all rounded-2xl overflow-hidden border ${
-                              isRoomSelected && selectMode
-                                ? 'border-blue-500/80 bg-blue-950/15'
-                                : 'border-neutral-800/80 bg-neutral-900/60'
-                            }`}
-                          >
+                        const renderRoomCardContent = (room: RoomSpec) => {
+                          const isExpanded = !!expandedRoomIds[room.id];
+                          const roomPrice = liveSummary.roomCosts[room.id] || 0;
+                          const isRoomSelected = !!selectedRoomIds[room.id];
+
+                          return (
+                            <div 
+                              key={room.id} 
+                              className={`transition-all rounded-2xl overflow-hidden border ${
+                                isRoomSelected && selectMode
+                                  ? 'border-blue-500/80 bg-blue-950/15'
+                                  : 'border-neutral-800/80 bg-neutral-900/60'
+                              }`}
+                            >
                             
                             {/* ACCORDION BAR TITLE HEADER */}
                             <div 
@@ -3509,8 +4006,14 @@ export default function ProjectDetails({
                                   </div>
                                 </div>
                                 <div className="truncate">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex flex-wrap items-center gap-2">
                                     <h4 className="text-xs font-bold text-white group-hover:text-blue-400 transition">{room.name}</h4>
+                                    {room.groupName && (
+                                      <span className="text-[10px] bg-blue-950/90 text-blue-300 border border-blue-700/60 font-bold px-2 py-0.5 rounded-full font-mono flex items-center gap-1 shadow-sm">
+                                        <Folder className="w-3 h-3 text-blue-400" />
+                                        <span>{room.groupName}</span>
+                                      </span>
+                                    )}
                                     {room.isOption && (
                                       <span className="text-[9px] bg-yellow-950/80 text-yellow-500 border border-yellow-500/30 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
                                         Option
@@ -3899,7 +4402,7 @@ export default function ProjectDetails({
                                   </div>
                                 </div>
 
-                                {/* Add Area Button Trigger */}
+                                {/* Add Surface Category Button Trigger */}
                                 <div className="mt-4 pt-4 border-t border-neutral-850 flex justify-end">
                                   <button
                                     type="button"
@@ -3907,8 +4410,152 @@ export default function ProjectDetails({
                                     className="px-4 py-2 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 hover:border-neutral-700 text-white font-bold font-mono text-xs rounded-xl transition flex items-center gap-2 cursor-pointer select-none"
                                   >
                                     <Plus className="w-3.5 h-3.5 text-blue-400" />
-                                    <span>Add Custom / Preset Area</span>
+                                    <span>Add Custom / Preset Surface Category</span>
                                   </button>
+                                </div>
+
+                                {/* TASK SECTION BELOW SURFACE CATEGORIES */}
+                                <div className="mt-5 pt-4 border-t border-neutral-800/80 space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      <ListTodo className="w-4 h-4 text-blue-400" />
+                                      <h5 className="text-xs font-bold text-white uppercase tracking-wider font-mono">
+                                        Surface Category Tasks
+                                      </h5>
+                                      <span className="text-[10px] text-zinc-500 font-mono">
+                                        ({getRoomTasks(room).filter(t => t.completed).length}/{getRoomTasks(room).length} done)
+                                      </span>
+                                    </div>
+                                    {room.category === 'deck' && getRoomTasks(room).length === 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setRooms(prev => prev.map(r => r.id === room.id ? { ...r, surfaceTasks: DEFAULT_DECK_TASKS } : r));
+                                        }}
+                                        className="text-[10px] text-emerald-400 hover:underline font-mono cursor-pointer"
+                                      >
+                                        + Load Default Deck Tasks
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Tasks List */}
+                                  <div className="space-y-1.5">
+                                    {getRoomTasks(room).length === 0 ? (
+                                      <p className="text-[11px] text-zinc-500 italic py-1">
+                                        No surface tasks added yet. Add tasks below for walls, ceilings, and other items.
+                                      </p>
+                                    ) : (
+                                      getRoomTasks(room).map(task => (
+                                        <div 
+                                          key={task.id} 
+                                          className={`flex items-center justify-between p-2 rounded-xl border text-xs font-mono transition ${
+                                            task.isOption
+                                              ? 'bg-amber-950/25 border-amber-500/50 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.15)]'
+                                              : task.completed
+                                                ? 'bg-neutral-950/60 border-neutral-850 text-zinc-500 line-through'
+                                                : 'bg-neutral-900/60 border-neutral-800 text-zinc-200'
+                                          }`}
+                                        >
+                                          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                                            <input
+                                              type="checkbox"
+                                              checked={task.completed}
+                                              onChange={() => handleToggleRoomTask(room.id, task.id)}
+                                              className="w-3.5 h-3.5 rounded border-neutral-700 bg-neutral-950 text-blue-500 focus:ring-0 cursor-pointer shrink-0"
+                                            />
+                                            <span className={`truncate ${task.completed ? 'line-through text-zinc-500' : ''}`}>{task.text}</span>
+                                            {task.surfaceCategory && (
+                                              <span className="text-[9px] bg-neutral-950 border border-neutral-800 text-zinc-400 px-1.5 py-0.5 rounded uppercase shrink-0">
+                                                {task.surfaceCategory}
+                                              </span>
+                                            )}
+                                            {task.isOption && (
+                                              <span className="text-[9px] bg-amber-950/90 text-amber-300 border border-amber-500/50 px-1.5 py-0.5 rounded uppercase font-bold shrink-0">
+                                                Option
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          <div className="flex items-center gap-1.5 shrink-0">
+                                            <button
+                                              type="button"
+                                              onClick={() => handleToggleRoomTaskOption(room.id, task.id)}
+                                              className={`px-2 py-0.5 text-[10px] font-bold font-mono rounded-md border transition cursor-pointer flex items-center gap-1 ${
+                                                task.isOption
+                                                  ? 'bg-amber-950/90 border-amber-500 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.25)]'
+                                                  : 'bg-neutral-950 border-neutral-800 text-zinc-400 hover:text-white'
+                                              }`}
+                                              title={task.isOption ? "Active Option. Click to make standard task." : "Mark task as Option"}
+                                            >
+                                              <Diamond className={`w-3 h-3 ${task.isOption ? 'fill-amber-400 text-amber-400' : 'text-zinc-500'}`} />
+                                              <span>Option</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={() => handleDeleteRoomTask(room.id, task.id)}
+                                              className="p-1 hover:text-red-400 text-zinc-600 transition shrink-0 cursor-pointer"
+                                              title="Delete task"
+                                            >
+                                              <Trash2 className="w-3 h-3" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))
+                                    )}
+                                  </div>
+
+                                  {/* Add Task Input Form */}
+                                  <div className="flex items-center gap-2 pt-1">
+                                    <input
+                                      type="text"
+                                      placeholder="Add task (e.g. Washing, Sanding, Prep drywall...)"
+                                      id={`new-task-input-${room.id}`}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          e.preventDefault();
+                                          const target = e.currentTarget;
+                                          if (target.value.trim()) {
+                                            handleAddRoomTask(room.id, target.value.trim(), 'General', roomTaskIsOption[room.id] || false);
+                                            target.value = '';
+                                          }
+                                        }
+                                      }}
+                                      className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-blue-500 font-mono"
+                                    />
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setRoomTaskIsOption(prev => ({ ...prev, [room.id]: !prev[room.id] }));
+                                      }}
+                                      className={`px-2.5 py-1.5 text-xs font-bold font-mono rounded-xl border transition cursor-pointer flex items-center gap-1 shrink-0 ${
+                                        roomTaskIsOption[room.id]
+                                          ? 'bg-amber-950/90 border-amber-500 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.25)]'
+                                          : 'bg-neutral-950 border-neutral-800 text-zinc-400 hover:text-white'
+                                      }`}
+                                      title={roomTaskIsOption[room.id] ? "New task will be added as Option" : "Click to mark new task as Option"}
+                                    >
+                                      <Diamond className={`w-3 h-3 ${roomTaskIsOption[room.id] ? 'fill-amber-400 text-amber-400' : 'text-zinc-500'}`} />
+                                      <span>Option</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const inputEl = document.getElementById(`new-task-input-${room.id}`) as HTMLInputElement;
+                                        if (inputEl && inputEl.value.trim()) {
+                                          handleAddRoomTask(room.id, inputEl.value.trim(), 'General', roomTaskIsOption[room.id] || false);
+                                          inputEl.value = '';
+                                        }
+                                      }}
+                                      className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 hover:text-white font-bold font-mono text-xs rounded-xl transition cursor-pointer flex items-center gap-1 shrink-0"
+                                    >
+                                      <Plus className="w-3 h-3" />
+                                      <span>Add Task</span>
+                                    </button>
+                                  </div>
                                 </div>
 
                               </div>
@@ -3916,7 +4563,120 @@ export default function ProjectDetails({
 
                           </div>
                         );
-                      })}
+                      };
+
+                        return (
+                          <>
+                            {/* Render Collapsible Room Groups First */}
+                            {groupNames.map(gName => {
+                              const gRooms = catRooms.filter(r => r.groupName === gName);
+                              const gTotalPrice = gRooms.reduce((sum, r) => sum + (liveSummary.roomCosts[r.id] || 0), 0);
+                              const gTotalHours = gRooms.reduce((sum, r) => sum + (liveSummary.roomHours[r.id] || 0), 0);
+                              const gTotalMaterials = gRooms.reduce((sum, r) => sum + (liveSummary.roomMaterials[r.id] || 0), 0);
+                              const isGroupCollapsed = !!collapsedGroupNames[gName];
+                              const allGroupRoomsSelected = gRooms.length > 0 && gRooms.every(r => selectedRoomIds[r.id]);
+
+                              return (
+                                <div key={gName} className="border-2 border-blue-500/50 bg-gradient-to-b from-blue-950/20 to-neutral-950/80 rounded-2xl overflow-hidden shadow-2xl space-y-2 mb-5">
+                                  {/* Group Header Bar */}
+                                  <div className="bg-blue-950/60 px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 border-b border-blue-800/60 select-none">
+                                    <div className="flex items-center gap-3 flex-1 min-w-[220px]">
+                                      {selectMode && (
+                                        <input
+                                          type="checkbox"
+                                          checked={allGroupRoomsSelected}
+                                          onChange={(e) => {
+                                            e.stopPropagation();
+                                            const next = { ...selectedRoomIds };
+                                            gRooms.forEach(r => { next[r.id] = !allGroupRoomsSelected; });
+                                            setSelectedRoomIds(next);
+                                          }}
+                                          className="w-4 h-4 rounded border-blue-600 bg-neutral-950 text-blue-500 focus:ring-0 cursor-pointer shrink-0"
+                                          title="Select all rooms in this group"
+                                        />
+                                      )}
+
+                                      <div 
+                                        onClick={() => toggleGroupCollapse(gName)} 
+                                        className="flex items-center gap-2.5 cursor-pointer group/g flex-1"
+                                      >
+                                        <div className="p-1.5 bg-blue-900/80 border border-blue-700/80 rounded-lg text-blue-300 group-hover/g:text-white transition">
+                                          {isGroupCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                        </div>
+                                        <Folder className="w-4 h-4 text-blue-400 shrink-0 fill-blue-500/20" />
+                                        <h4 className="font-bold text-sm sm:text-base text-white font-sans tracking-wide group-hover/g:text-blue-300 transition">
+                                          {gName}
+                                        </h4>
+                                        <span className="text-[10px] text-blue-300/90 font-mono font-bold bg-blue-900/50 px-2 py-0.5 rounded-full border border-blue-700/50">
+                                          {gRooms.length} room{gRooms.length > 1 ? 's' : ''}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Group Metrics Summary Badges */}
+                                    <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+                                      <div className="bg-neutral-950 border border-emerald-800/80 px-3 py-1 rounded-xl text-emerald-400 font-bold flex items-center gap-1.5 shadow-inner">
+                                        <span className="text-zinc-500 text-[10px] uppercase font-sans">Total Price:</span>
+                                        <span>${gTotalPrice.toLocaleString()}</span>
+                                      </div>
+
+                                      <div className="bg-neutral-950 border border-blue-800/80 px-3 py-1 rounded-xl text-blue-300 font-bold flex items-center gap-1.5 shadow-inner">
+                                        <Clock className="w-3.5 h-3.5 text-blue-400" />
+                                        <span className="text-zinc-500 text-[10px] uppercase font-sans">Time:</span>
+                                        <span>{gTotalHours.toFixed(1)} hrs</span>
+                                      </div>
+
+                                      <div className="bg-neutral-950 border border-amber-800/80 px-3 py-1 rounded-xl text-amber-300 font-bold flex items-center gap-1.5 shadow-inner">
+                                        <span className="text-zinc-500 text-[10px] uppercase font-sans">Materials:</span>
+                                        <span>${gTotalMaterials.toLocaleString()}</span>
+                                      </div>
+
+                                      {/* Group Action Buttons */}
+                                      <div className="flex items-center gap-1 pl-2 border-l border-blue-800/60">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleRenameGroup(gName);
+                                          }}
+                                          className="p-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-zinc-300 hover:text-white rounded-lg transition cursor-pointer"
+                                          title="Rename group heading"
+                                        >
+                                          <Edit3 className="w-3.5 h-3.5" />
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleUngroupRooms(gName);
+                                          }}
+                                          className="px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-zinc-300 hover:text-red-400 rounded-lg transition text-[11px] font-mono cursor-pointer"
+                                          title="Remove group heading from these rooms"
+                                        >
+                                          Ungroup
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Group Rooms List */}
+                                  {!isGroupCollapsed && (
+                                    <div className="p-3 space-y-3">
+                                      {gRooms.map(room => renderRoomCardContent(room))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+
+                            {/* Render Ungrouped Rooms */}
+                            <div className="space-y-3">
+                              {ungroupedRooms.map(room => renderRoomCardContent(room))}
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 );
@@ -6343,6 +7103,26 @@ export default function ProjectDetails({
                 >
                   <Diamond className="w-3.5 h-3.5 text-zinc-400" />
                   <span className="hidden sm:inline">Toggle Option</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const selectedIds = Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]);
+                    if (selectedIds.length === 0) {
+                      triggerNotification('Please select at least one room to group.', 'error');
+                      return;
+                    }
+                    const heading = window.prompt('Enter group heading (e.g. "Main Floor", "Master Suite", "Exterior Work"):');
+                    if (heading && heading.trim()) {
+                      handleGroupSelectedRooms(heading.trim());
+                    }
+                  }}
+                  className="px-3 py-2 bg-blue-900/60 hover:bg-blue-800 border border-blue-700/80 text-blue-200 hover:text-white font-semibold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Group selected rooms together under a heading"
+                >
+                  <FolderPlus className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Group Rooms</span>
                 </button>
 
                 {/* Bulk Set Ceiling Height dropdown */}

@@ -9,8 +9,18 @@ export function getSupabase(): ReturnType<typeof createClient> | null {
     return supabaseClient;
   }
 
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const supabaseUrl = 
+    import.meta.env.VITE_SUPABASE_URL || 
+    (import.meta.env as any).SUPABASE_URL || 
+    (import.meta.env as any).NEXT_PUBLIC_SUPABASE_URL ||
+    (typeof window !== 'undefined' ? localStorage.getItem('painter_crm_supabase_url') || localStorage.getItem('supabase_url') : '');
+
+  const supabaseAnonKey = 
+    import.meta.env.VITE_SUPABASE_ANON_KEY || 
+    (import.meta.env as any).SUPABASE_ANON_KEY || 
+    (import.meta.env as any).SUPABASE_KEY || 
+    (import.meta.env as any).NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    (typeof window !== 'undefined' ? localStorage.getItem('painter_crm_supabase_key') || localStorage.getItem('supabase_key') : '');
 
   if (
     !supabaseUrl || 

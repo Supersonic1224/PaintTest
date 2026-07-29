@@ -1,38 +1,192 @@
-import React, { useState, useMemo } from 'react';
-import { ProjectDetails, ClientLead, RoomSpec, SurfaceTask, ProjectTask, PaintColor } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { ProjectDetails, ClientLead, RoomSpec, SurfaceTask, ProjectTask } from '../types';
+import { generateWorkOrderPDF } from '../pdfGenerator';
 import { 
   Wrench, 
   CheckCircle, 
-  Circle, 
   ClipboardList, 
   X, 
   Printer, 
-  User, 
   Phone, 
   Mail, 
   MapPin, 
   Clock, 
   DollarSign, 
-  Package, 
   FileText,
   Layers,
-  ListTodo,
-  Building2,
   Check,
   ShieldCheck,
   Edit3,
   Plus,
   Trash2,
   Save,
-  PlusCircle,
-  Tag,
-  AlertCircle,
   Sparkles,
-  ChevronRight,
-  ExternalLink,
   Calculator,
-  Info
+  Download,
+  ShoppingCart,
+  Grid,
+  Info,
+  Building,
+  UserCheck
 } from 'lucide-react';
+
+export interface PainterShoppingItem {
+  key: string;
+  brand: string;
+  paintName: string;
+  colorName: string;
+  colorCode: string;
+  sheen: string;
+  surface: string;
+  assignedRooms: { name: string; sqft: number; coats: number }[];
+  totalSqFt: number;
+  totalCoats: number;
+  gallonsExact: number;
+  gallonsToBuy: number;
+  unitPrice: number;
+  estMaterialBudget: number;
+  estLaborHours: number;
+}
+
+export interface SiteProtocolItem {
+  id: string;
+  text: string;
+  completed: boolean;
+}
+
+function computeShoppingListForRooms(rooms: RoomSpec[]): PainterShoppingItem[] {
+  const map = new Map<string, PainterShoppingItem>();
+
+  rooms.forEach(r => {
+    if (r.isOption) return;
+    const l = Number(r.length) || 0;
+    const w = Number(r.width) || 0;
+    const h = Number(r.height) || 8;
+    const wallSqFt = r.wallsArea || (2 * h * (l + w));
+    const ceilingSqFt = r.ceilingArea || (l * w);
+    const trimLnft = 2 * (l + w);
+
+    // 1. Wall Paint
+    if (r.walls?.checked !== false && wallSqFt > 0) {
+      const paintSpec = r.wallPaintType || 'Benjamin Moore Regal Select Eggshell';
+      const wallCoats = r.walls?.coats || 2;
+      const explicitPaint = r.paints?.find(p => p.surface === 'walls' || !p.surface);
+      const colorName = explicitPaint?.colorName || 'Selected Color';
+      const colorCode = explicitPaint?.colorCode || 'SW/BM';
+      const brand = explicitPaint?.brand || (paintSpec.includes('Sherwin') ? 'Sherwin-Williams' : 'Benjamin Moore');
+      const sheen = explicitPaint?.finish || 'Eggshell';
+      const key = `${brand}::${paintSpec}::${colorName}::${colorCode}::${sheen}`;
+
+      let entry = map.get(key);
+      if (!entry) {
+        entry = {
+          key,
+          brand,
+          paintName: paintSpec,
+          colorName,
+          colorCode,
+          sheen,
+          surface: 'Walls',
+          assignedRooms: [],
+          totalSqFt: 0,
+          totalCoats: wallCoats,
+          gallonsExact: 0,
+          gallonsToBuy: 0,
+          unitPrice: 68,
+          estMaterialBudget: 0,
+          estLaborHours: 0
+        };
+        map.set(key, entry);
+      }
+      entry.assignedRooms.push({ name: r.name, sqft: wallSqFt, coats: wallCoats });
+      entry.totalSqFt += wallSqFt;
+    }
+
+    // 2. Ceiling Paint
+    if (r.ceilings?.checked && ceilingSqFt > 0) {
+      const explicitPaint = r.paints?.find(p => p.surface === 'ceiling');
+      const paintSpec = 'Benjamin Moore Waterborne Ceiling Paint Flat';
+      const ceilCoats = r.ceilings?.coats || 2;
+      const colorName = explicitPaint?.colorName || 'Chantilly Lace';
+      const colorCode = explicitPaint?.colorCode || 'OC-65';
+      const brand = explicitPaint?.brand || 'Benjamin Moore';
+      const sheen = 'Flat';
+      const key = `${brand}::${paintSpec}::${colorName}::${colorCode}::${sheen}`;
+
+      let entry = map.get(key);
+      if (!entry) {
+        entry = {
+          key,
+          brand,
+          paintName: paintSpec,
+          colorName,
+          colorCode,
+          sheen,
+          surface: 'Ceilings',
+          assignedRooms: [],
+          totalSqFt: 0,
+          totalCoats: ceilCoats,
+          gallonsExact: 0,
+          gallonsToBuy: 0,
+          unitPrice: 68,
+          estMaterialBudget: 0,
+          estLaborHours: 0
+        };
+        map.set(key, entry);
+      }
+      entry.assignedRooms.push({ name: r.name, sqft: ceilingSqFt, coats: ceilCoats });
+      entry.totalSqFt += ceilingSqFt;
+    }
+
+    // 3. Trim / Baseboards
+    if (r.baseboards?.checked && trimLnft > 0) {
+      const explicitPaint = r.paints?.find(p => p.surface === 'trim');
+      const paintSpec = 'Benjamin Moore ADVANCE Satin/Semi-Gloss';
+      const trimCoats = r.baseboards?.coats || 2;
+      const colorName = explicitPaint?.colorName || 'Simply White';
+      const colorCode = explicitPaint?.colorCode || 'OC-117';
+      const brand = explicitPaint?.brand || 'Benjamin Moore';
+      const sheen = 'Semi-Gloss';
+      const trimSqFt = trimLnft * 0.5;
+      const key = `${brand}::${paintSpec}::${colorName}::${colorCode}::${sheen}`;
+
+      let entry = map.get(key);
+      if (!entry) {
+        entry = {
+          key,
+          brand,
+          paintName: paintSpec,
+          colorName,
+          colorCode,
+          sheen,
+          surface: 'Trim & Baseboards',
+          assignedRooms: [],
+          totalSqFt: 0,
+          totalCoats: trimCoats,
+          gallonsExact: 0,
+          gallonsToBuy: 0,
+          unitPrice: 68,
+          estMaterialBudget: 0,
+          estLaborHours: 0
+        };
+        map.set(key, entry);
+      }
+      entry.assignedRooms.push({ name: r.name, sqft: Math.round(trimSqFt), coats: trimCoats });
+      entry.totalSqFt += trimSqFt;
+    }
+  });
+
+  const results = Array.from(map.values());
+  results.forEach(item => {
+    item.gallonsExact = Math.round(((item.totalSqFt * item.totalCoats) / 350) * 100) / 100;
+    item.gallonsToBuy = Math.max(1, Math.ceil(item.gallonsExact));
+    item.unitPrice = 68;
+    item.estMaterialBudget = Math.round(item.gallonsToBuy * item.unitPrice);
+    item.estLaborHours = Math.round((item.totalSqFt / 140) * 10) / 10;
+  });
+
+  return results;
+}
 
 interface WorkOrdersListProps {
   projects: ProjectDetails[];
@@ -45,46 +199,45 @@ export default function WorkOrdersList({
   projects,
   clients,
   onSaveProject,
-  onSelectProjectForFullEdit,
 }: WorkOrdersListProps) {
   const [selectedProject, setSelectedProject] = useState<ProjectDetails | null>(null);
-  
-  // EDITING MODAL STATE
-  const [editingProject, setEditingProject] = useState<ProjectDetails | null>(null);
-  const [editTab, setEditTab] = useState<'items' | 'financials' | 'products' | 'crew' | 'tasks'>('items');
+  const [selectedScopeFilter, setSelectedScopeFilter] = useState<'interior' | 'exterior' | 'deck'>('interior');
+  const [showCalculationRundown, setShowCalculationRundown] = useState<boolean>(true);
+  const [checkedShoppingItems, setCheckedShoppingItems] = useState<Record<string, boolean>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // DRAFT EDIT FIELDS
-  const [draftRooms, setDraftRooms] = useState<RoomSpec[]>([]);
-  const [draftLabor, setDraftLabor] = useState<number>(0);
-  const [draftMaterial, setDraftMaterial] = useState<number>(0);
-  const [draftTaxRate, setDraftTaxRate] = useState<number>(0.13);
-  const [draftDiscount, setDraftDiscount] = useState<number>(0);
-  const [draftTotalPrice, setDraftTotalPrice] = useState<number>(0);
-  const [draftTeamNotes, setDraftTeamNotes] = useState<string>('');
-  const [draftSpecialConditions, setDraftSpecialConditions] = useState<string>('');
-  const [draftDescription, setDraftDescription] = useState<string>('');
-  const [draftTasks, setDraftTasks] = useState<ProjectTask[]>([]);
+  // EDITABLE DOCUMENT STATE OVERRIDES
+  const [editableShoppingList, setEditableShoppingList] = useState<PainterShoppingItem[]>([]);
+  const [supervisorName, setSupervisorName] = useState<string>('Daniel Rust, Operations Owner');
+  const [supervisorPhone, setSupervisorPhone] = useState<string>('(226) 499-0079');
+  const [supervisorEmail, setSupervisorEmail] = useState<string>('daniel@capstonepainting.ca');
 
-  // FORM INPUTS FOR ADDING NEW SCOPE ITEM / OPTION
-  const [newItemName, setNewItemName] = useState<string>('');
-  const [newItemCategory, setNewItemCategory] = useState<'interior' | 'exterior' | 'deck'>('interior');
-  const [newItemIsOption, setNewItemIsOption] = useState<boolean>(false);
-  const [newItemLength, setNewItemLength] = useState<number>(12);
-  const [newItemWidth, setNewItemWidth] = useState<number>(10);
-  const [newItemHeight, setNewItemHeight] = useState<number>(8);
-  const [newItemWallPaint, setNewItemWallPaint] = useState<string>('Benjamin Moore Regal Select Eggshell');
+  const [companyName, setCompanyName] = useState<string>('Capstone Painting Inc.');
+  const [companyAddress, setCompanyAddress] = useState<string>('124 Commercial Street, Suite 200, Guelph, ON, N1C 0A2');
+  const [companyTaxInfo, setCompanyTaxInfo] = useState<string>('GST/HST: 79421 8295 RT0001');
 
-  // FORM INPUTS FOR ADDING NEW PRODUCT SPECIFICATION
-  const [newProdBrand, setNewProdBrand] = useState<string>('Benjamin Moore');
-  const [newProdName, setNewProdName] = useState<string>('');
-  const [newProdColorCode, setNewProdColorCode] = useState<string>('');
-  const [newProdFinish, setNewProdFinish] = useState<'Flat' | 'Eggshell' | 'Satin' | 'Semi-Gloss' | 'Gloss'>('Eggshell');
-  const [newProdDesc, setNewProdDesc] = useState<string>('');
+  const [clientName, setClientName] = useState<string>('');
+  const [clientPhone, setClientPhone] = useState<string>('');
+  const [clientEmail, setClientEmail] = useState<string>('');
+  const [clientAddress, setClientAddress] = useState<string>('');
 
-  // FORM INPUTS FOR ADDING NEW TASK
-  const [newTaskText, setNewTaskText] = useState<string>('');
-  const [newTaskIsOption, setNewTaskIsOption] = useState<boolean>(false);
+  const [projectDescription, setProjectDescription] = useState<string>('');
+  const [projectInclusions, setProjectInclusions] = useState<string>('');
+  const [projectExclusions, setProjectExclusions] = useState<string>('');
+  const [specialConditions, setSpecialConditions] = useState<string>('');
+  const [teamNotes, setTeamNotes] = useState<string>('');
+
+  const [laborRatePerHour, setLaborRatePerHour] = useState<number>(65);
+  const [sundriesPerRoom, setSundriesPerRoom] = useState<number>(12);
+  const [taxRatePercent, setTaxRatePercent] = useState<number>(13);
+  const [discountAmount, setDiscountAmount] = useState<number>(0);
+
+  const [siteProtocols, setSiteProtocols] = useState<SiteProtocolItem[]>([
+    { id: 'proto-1', text: 'Cover all floor surfaces and furniture with heavy-duty drop cloths and 3 mil poly sheeting.', completed: true },
+    { id: 'proto-2', text: 'Mask all trim, door casings, window frames, and light switch plates using Scotch Blue tape.', completed: true },
+    { id: 'proto-3', text: 'Clean brushes, rollers, and paint trays daily in designated garage or utility sink area.', completed: true },
+    { id: 'proto-4', text: 'Keep client pets safely inside specified rooms and ensure property entrance doors remain closed.', completed: true }
+  ]);
 
   const activeWorkJobs = useMemo(() => {
     return projects.filter(p => p.status === 'Approved' || p.status === 'Completed' || p.status === 'In Progress' || p.status === 'Sent' || p.status === 'Draft');
@@ -100,24 +253,59 @@ export default function WorkOrdersList({
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Start Editing a Work Order
-  const handleStartEditing = (proj: ProjectDetails) => {
-    setSelectedProject(null);
-    setEditingProject(proj);
-    setDraftRooms(proj.rooms ? JSON.parse(JSON.stringify(proj.rooms)) : []);
-    setDraftLabor(proj.summary?.laborCost || 0);
-    setDraftMaterial(proj.summary?.materialCost || 0);
-    setDraftTaxRate(proj.summary?.taxRate ?? 0.13);
-    setDraftDiscount(proj.summary?.discount || 0);
-    setDraftTotalPrice(proj.summary?.totalPrice || 0);
-    setDraftTeamNotes(proj.teamNotes || '');
-    setDraftSpecialConditions(proj.specialConditions || '');
-    setDraftDescription(proj.description || '');
-    setDraftTasks(proj.tasks ? JSON.parse(JSON.stringify(proj.tasks)) : []);
-    setEditTab('items');
-  };
+  // Available scope categories in selected project
+  const availableScopeCategories = useMemo(() => {
+    if (!selectedProject?.rooms || selectedProject.rooms.length === 0) return ['interior'] as ('interior' | 'exterior' | 'deck')[];
+    const set = new Set<'interior' | 'exterior' | 'deck'>();
+    selectedProject.rooms.forEach(r => {
+      const cat = (r.category || 'interior') as 'interior' | 'exterior' | 'deck';
+      set.add(cat);
+    });
+    const list = Array.from(set);
+    return list.length > 0 ? list : (['interior'] as ('interior' | 'exterior' | 'deck')[]);
+  }, [selectedProject]);
 
-  // Calculate detailed costs, hours, and area metrics for selected project
+  // Sync selected scope filter with available categories
+  useEffect(() => {
+    if (selectedProject && availableScopeCategories.length > 0) {
+      if (!availableScopeCategories.includes(selectedScopeFilter)) {
+        setSelectedScopeFilter(availableScopeCategories[0]);
+      }
+    }
+  }, [selectedProject, availableScopeCategories]);
+
+  // Initialize editable states whenever selectedProject changes
+  useEffect(() => {
+    if (selectedProject) {
+      const client = clients.find(c => c.id === selectedProject.clientId);
+      setClientName(client?.name || selectedProject.title || 'Valued Client');
+      setClientPhone(client?.phone || '(555) 000-0000');
+      setClientEmail(client?.email || 'client@example.com');
+      setClientAddress(client?.address || '123 Main Street, Guelph, ON');
+      setDiscountAmount(selectedProject.summary?.discount || 0);
+      setTaxRatePercent((selectedProject.summary?.taxRate ?? 0.13) * 100);
+
+      // Seed contract notes, inclusions, exclusions, and descriptions
+      setProjectDescription(selectedProject.description || 'Full surface prep, patching, and two full coats of premium paint specification.');
+      setProjectInclusions(selectedProject.inclusions || 'Includes 2 coats wall paint, baseboard trim masking, floor drop cloth covering, nail hole patching, and daily cleanup.');
+      setProjectExclusions(selectedProject.exclusions || 'Excludes major drywall sheet replacement, structural framing, exterior window staining, and unlisted basement spaces.');
+      setSpecialConditions(selectedProject.specialConditions || 'Lockbox Code #4821 at side door entrance. Keep client pets inside master bedroom.');
+      setTeamNotes(selectedProject.teamNotes || 'Clean brushes and paint trays daily in garage sink only. Ensure floor drop cloths are taped at baseboard edges.');
+
+      // Seed initial shopping list from rooms
+      const scopeRooms = (selectedProject.rooms || []).filter(r => (r.category || 'interior') === (selectedScopeFilter || 'interior'));
+      setEditableShoppingList(computeShoppingListForRooms(scopeRooms));
+    }
+  }, [selectedProject, selectedScopeFilter, clients]);
+
+  // Active rooms filtered by current scope category
+  const activeRoomsForScope = useMemo(() => {
+    if (!selectedProject) return [];
+    const rooms = selectedProject.rooms || [];
+    return rooms.filter(r => (r.category || 'interior') === selectedScopeFilter);
+  }, [selectedProject, selectedScopeFilter]);
+
+  // Calculate detailed metrics, hours, shopping list totals, and area totals
   const projectMetrics = useMemo(() => {
     if (!selectedProject) return { 
       laborCost: 0, 
@@ -126,25 +314,25 @@ export default function WorkOrdersList({
       subtotal: 0, 
       hst: 0, 
       totalCost: 0, 
-      productsList: [],
       wallArea: 0,
       ceilingArea: 0,
       floorArea: 0,
-      trimLnft: 0
+      trimLnft: 0,
+      sumPaintMaterial: 0,
+      sundriesBudget: 0
     };
 
-    const rooms = selectedProject.rooms || [];
+    const rooms = activeRoomsForScope;
     let wallArea = 0;
     let ceilingArea = 0;
     let floorArea = 0;
     let trimLnft = 0;
     let totalItemsQty = 0;
-    const productsSet = new Set<string>();
 
     rooms.forEach(r => {
-      const l = r.length || 0;
-      const w = r.width || 0;
-      const h = r.height || 8;
+      const l = Number(r.length) || 0;
+      const w = Number(r.width) || 0;
+      const h = Number(r.height) || 8;
 
       const roomWall = r.wallsArea || (2 * h * (l + w));
       const roomCeil = r.ceilingArea || (l * w);
@@ -159,30 +347,22 @@ export default function WorkOrdersList({
 
         if (r.windows?.checked) totalItemsQty += (typeof r.windows.qty === 'number' ? r.windows.qty : 2);
         if (r.doors?.checked) totalItemsQty += (typeof r.doors.qty === 'number' ? r.doors.qty : 2);
-        if (r.doorFrames?.checked) totalItemsQty += (typeof r.doorFrames.qty === 'number' ? r.doorFrames.qty : 2);
-      }
-
-      if (r.wallPaintType) productsSet.add(r.wallPaintType);
-
-      if (r.paints && r.paints.length > 0) {
-        r.paints.forEach(p => {
-          if (p.brand || p.colorName) {
-            productsSet.add(`${p.brand || 'Benjamin Moore'} ${p.colorName || ''} (${p.finish || 'Eggshell'})`.trim());
-          }
-        });
       }
     });
 
     const totalSqFt = wallArea + ceilingArea;
-    const laborCost = selectedProject.summary?.laborCost ?? Math.round((totalSqFt * 1.85) + (totalItemsQty * 45));
-    const materialCost = selectedProject.summary?.materialCost ?? Math.round((totalSqFt * 0.45) + (totalItemsQty * 12));
-    const totalHours = Math.max(8, Math.round((laborCost / 65) * 10) / 10);
-    const subtotal = laborCost + materialCost - (selectedProject.summary?.discount || 0);
-    const taxRate = selectedProject.summary?.taxRate ?? 0.13; // 13% HST
-    const hst = Math.round(subtotal * taxRate * 100) / 100;
-    const totalCost = selectedProject.summary?.totalPrice ?? Math.round(subtotal + hst);
+    
+    // Sum Paint Materials from the EDITABLE shopping list!
+    const sumPaintMaterial = editableShoppingList.reduce((acc, item) => acc + (Number(item.estMaterialBudget) || (Number(item.gallonsToBuy) * Number(item.unitPrice || 68))), 0);
+    const sundriesBudget = rooms.length * sundriesPerRoom;
+    const materialCost = Math.max(50, sumPaintMaterial + sundriesBudget);
 
-    const productsList = Array.from(productsSet);
+    const baseLabor = Math.round((totalSqFt * 1.85) + (totalItemsQty * 45));
+    const laborCost = Math.max(150, baseLabor);
+    const totalHours = Math.max(4, Math.round((laborCost / laborRatePerHour) * 10) / 10);
+    const subtotal = Math.max(0, laborCost + materialCost - discountAmount);
+    const hst = Math.round(subtotal * (taxRatePercent / 100) * 100) / 100;
+    const totalCost = Math.round(subtotal + hst);
 
     return {
       laborCost,
@@ -191,394 +371,324 @@ export default function WorkOrdersList({
       subtotal,
       hst,
       totalCost,
-      productsList,
       wallArea,
       ceilingArea,
       floorArea,
-      trimLnft
+      trimLnft,
+      sumPaintMaterial,
+      sundriesBudget
     };
-  }, [selectedProject]);
+  }, [selectedProject, activeRoomsForScope, editableShoppingList, laborRatePerHour, sundriesPerRoom, taxRatePercent, discountAmount]);
 
-  // Recalculate draft financials from draft rooms
-  const handleRecalculateDraftFinancials = () => {
-    let wallSqFt = 0;
-    let ceilingSqFt = 0;
-    draftRooms.forEach(r => {
-      if (!r.isOption) {
-        const l = Number(r.length) || 0;
-        const w = Number(r.width) || 0;
-        const h = Number(r.height) || 8;
-        wallSqFt += r.wallsArea || (2 * h * (l + w));
-        ceilingSqFt += r.ceilingArea || (l * w);
-      }
-    });
-    const totalSqFt = wallSqFt + ceilingSqFt;
-    const calcLabor = Math.round(totalSqFt * 1.85);
-    const calcMat = Math.round(totalSqFt * 0.45);
-    const subtotal = calcLabor + calcMat - (draftDiscount || 0);
-    const calcHst = Math.round(subtotal * draftTaxRate * 100) / 100;
-    const calcTotal = Math.round((subtotal + calcHst) * 100) / 100;
+  // IN-PLACE SHOPPING LIST EDITING HANDLERS
+  const handleUpdateShoppingItem = (index: number, updates: Partial<PainterShoppingItem>) => {
+    const list = [...editableShoppingList];
+    const target = list[index];
+    if (!target) return;
 
-    setDraftLabor(calcLabor);
-    setDraftMaterial(calcMat);
-    setDraftTotalPrice(calcTotal);
-    triggerToast('Financials recalculated based on scope dimensions!');
+    const updated = { ...target, ...updates };
+    const galToBuy = Number(updated.gallonsToBuy) || 1;
+    const unitP = Number(updated.unitPrice) || 68;
+    updated.estMaterialBudget = Math.round(galToBuy * unitP);
+
+    list[index] = updated;
+    setEditableShoppingList(list);
   };
 
-  // Add new scope item / option
-  const handleAddScopeItem = () => {
-    if (!newItemName.trim()) {
-      alert('Please enter a scope item name or title.');
-      return;
-    }
-    const l = Number(newItemLength) || 12;
-    const w = Number(newItemWidth) || 10;
-    const h = Number(newItemHeight) || 8;
-    const wallsArea = 2 * h * (l + w);
-    const ceilingArea = l * w;
+  const handleAddShoppingItem = () => {
+    const newItem: PainterShoppingItem = {
+      key: 'custom-paint-' + Date.now(),
+      brand: 'Benjamin Moore',
+      paintName: 'Regal Select Premium Interior',
+      colorName: 'Custom Paint Color',
+      colorCode: 'BM-101',
+      sheen: 'Eggshell',
+      surface: 'Walls',
+      assignedRooms: [{ name: 'Custom Specified Area', sqft: 350, coats: 2 }],
+      totalSqFt: 350,
+      totalCoats: 2,
+      gallonsExact: 1,
+      gallonsToBuy: 1,
+      unitPrice: 68,
+      estMaterialBudget: 68,
+      estLaborHours: 2.5
+    };
+    setEditableShoppingList([...editableShoppingList, newItem]);
+    triggerToast('Added new paint product specification to shopping list!');
+  };
 
+  const handleDeleteShoppingItem = (index: number) => {
+    const list = editableShoppingList.filter((_, i) => i !== index);
+    setEditableShoppingList(list);
+    triggerToast('Removed paint product from shopping list.');
+  };
+
+  // IN-PLACE ROOM EDITING HANDLERS
+  const handleUpdateRoomField = (roomIndex: number, updates: Partial<RoomSpec>) => {
+    if (!selectedProject) return;
+    const rooms = [...(selectedProject.rooms || [])];
+    const targetRoom = rooms[roomIndex];
+    if (!targetRoom) return;
+
+    const newRoom = { ...targetRoom, ...updates };
+    const l = Number(newRoom.length) || 0;
+    const w = Number(newRoom.width) || 0;
+    const h = Number(newRoom.height) || 8;
+    newRoom.wallsArea = 2 * h * (l + w);
+    newRoom.ceilingArea = l * w;
+
+    rooms[roomIndex] = newRoom;
+    setSelectedProject({ ...selectedProject, rooms });
+  };
+
+  const handleAddRoomToDocument = () => {
+    if (!selectedProject) return;
+    const newCat = selectedScopeFilter;
     const newRoom: RoomSpec = {
-      id: 'room-' + Math.random().toString(36).substr(2, 9),
-      name: newItemName.trim(),
-      category: newItemCategory,
-      isOption: newItemIsOption,
-      length: l,
-      width: w,
-      height: h,
-      wallsArea,
-      ceilingArea,
-      wallPaintType: newItemWallPaint,
+      id: 'room-' + Date.now(),
+      name: `New ${newCat.charAt(0).toUpperCase() + newCat.slice(1)} Area`,
+      category: newCat,
+      length: 12,
+      width: 10,
+      height: 8,
+      wallsArea: 352,
+      ceilingArea: 120,
+      wallPaintType: 'Benjamin Moore Regal Select Eggshell',
+      paints: [],
       walls: { checked: true, qty: 'auto', coats: 2 },
-      ceilings: { checked: false, qty: 'auto', coats: 2 },
-      baseboards: { checked: false, qty: 'auto', coats: 2 },
-      surfaceTasks: [
-        { id: 'st-1', text: 'Protect floors with clean drop cloths and plastic sheeting', completed: false },
-        { id: 'st-2', text: 'Patch drywall cracks/holes with compound and sand flush', completed: false },
-        { id: 'st-3', text: 'Apply 2 coats of premium low-VOC paint to specified surfaces', completed: false }
-      ],
-      paints: [
-        {
-          brand: 'Benjamin Moore',
-          colorName: newItemWallPaint,
-          colorCode: 'Custom',
-          hex: '#ffffff',
-          finish: 'Eggshell',
-          surface: 'walls',
-          coats: 2,
-          gallonsNeeded: Math.ceil(wallsArea / 350)
-        }
-      ]
+      ceilings: { checked: true, qty: 'auto', coats: 2 },
+      baseboards: { checked: true, qty: 'auto', coats: 2 },
+      windows: { checked: true, qty: 2, coats: 2 },
+      doors: { checked: true, qty: 1, coats: 2 }
     };
-
-    const updatedRooms = [...draftRooms, newRoom];
-    setDraftRooms(updatedRooms);
-    setNewItemName('');
-    setNewItemIsOption(false);
-    triggerToast(`Added "${newRoom.name}" ${newItemIsOption ? '(Option)' : ''} to work order scope!`);
-  };
-
-  // Add new product spec to draft room paints
-  const handleAddProductSpec = () => {
-    if (!newProdName.trim()) {
-      alert('Please enter a product or paint name.');
-      return;
-    }
-    if (draftRooms.length === 0) {
-      alert('Please create at least one scope item or room first to attach product specifications.');
-      return;
-    }
-    const updatedRooms = draftRooms.map((r, idx) => {
-      if (idx === 0) {
-        const paints = r.paints ? [...r.paints] : [];
-        paints.push({
-          brand: newProdBrand,
-          colorName: newProdName.trim(),
-          colorCode: newProdColorCode.trim() || 'Std',
-          hex: '#ffffff',
-          finish: newProdFinish,
-          surface: 'walls',
-          coats: 2,
-          gallonsNeeded: 2
-        });
-        return {
-          ...r,
-          paints,
-          wallPaintType: `${newProdBrand} ${newProdName.trim()} (${newProdFinish})`
-        };
-      }
-      return r;
+    setSelectedProject({
+      ...selectedProject,
+      rooms: [...(selectedProject.rooms || []), newRoom]
     });
-    setDraftRooms(updatedRooms);
-    setNewProdName('');
-    setNewProdColorCode('');
-    setNewProdDesc('');
-    triggerToast('Added product specification to work order materials list!');
+    triggerToast(`Added new area to ${newCat.toUpperCase()} work order!`);
   };
 
-  // Save all Work Order edits
-  const handleSaveWorkOrderEdits = () => {
-    if (!editingProject) return;
+  const handleDeleteRoomFromDocument = (roomIndex: number) => {
+    if (!selectedProject) return;
+    const rooms = (selectedProject.rooms || []).filter((_, i) => i !== roomIndex);
+    setSelectedProject({ ...selectedProject, rooms });
+    triggerToast('Removed area from work order scope.');
+  };
 
-    const updatedProject: ProjectDetails = {
-      ...editingProject,
-      rooms: draftRooms,
-      summary: {
-        laborCost: Number(draftLabor) || 0,
-        materialCost: Number(draftMaterial) || 0,
-        taxRate: Number(draftTaxRate) || 0.13,
-        discount: Number(draftDiscount) || 0,
-        totalPrice: Number(draftTotalPrice) || 0,
-      },
-      teamNotes: draftTeamNotes,
-      specialConditions: draftSpecialConditions,
-      description: draftDescription,
-      tasks: draftTasks,
-      updatedAt: new Date().toISOString(),
+  // IN-PLACE SITE PROTOCOLS HANDLERS
+  const handleUpdateProtocol = (id: string, updates: Partial<SiteProtocolItem>) => {
+    setSiteProtocols(siteProtocols.map(p => p.id === id ? { ...p, ...updates } : p));
+  };
+
+  const handleAddProtocol = () => {
+    const newProto: SiteProtocolItem = {
+      id: 'proto-' + Date.now(),
+      text: 'New custom jobsite protocol or crew safety requirement',
+      completed: true
     };
+    setSiteProtocols([...siteProtocols, newProto]);
+    triggerToast('Added new crew protocol item!');
+  };
 
+  const handleDeleteProtocol = (id: string) => {
+    setSiteProtocols(siteProtocols.filter(p => p.id !== id));
+  };
+
+  const handleSaveDocument = () => {
+    if (!selectedProject) return;
+    const updatedProject: ProjectDetails = {
+      ...selectedProject,
+      description: projectDescription,
+      inclusions: projectInclusions,
+      exclusions: projectExclusions,
+      specialConditions: specialConditions,
+      teamNotes: teamNotes,
+      summary: {
+        ...selectedProject.summary,
+        laborCost: projectMetrics.laborCost,
+        materialCost: projectMetrics.materialCost,
+        taxRate: taxRatePercent / 100,
+        discount: discountAmount,
+        totalPrice: projectMetrics.totalCost
+      }
+    };
     if (onSaveProject) {
       onSaveProject(updatedProject);
     }
-
-    if (selectedProject?.id === updatedProject.id) {
-      setSelectedProject(updatedProject);
-    }
-
-    setEditingProject(null);
-    triggerToast(`Work Order WO-#${updatedProject.id} updated and saved successfully!`);
+    setSelectedProject(updatedProject);
+    triggerToast(`Saved Work Order WO-#${selectedProject.id} changes!`);
   };
 
   return (
-    <div className="space-y-5 animate-fade-in text-left">
-      {/* Toast Notification Alert */}
+    <div className="space-y-6 text-left font-sans">
+      
+      {/* Toast Notification Banner */}
       {toastMessage && (
-        <div className="fixed top-5 right-5 z-50 bg-emerald-900 text-emerald-100 border border-emerald-700 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-2.5 font-mono text-xs animate-slide-in">
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-950 border border-emerald-700 text-emerald-200 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-mono animate-bounce">
           <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Print Style Injector */}
-      <style>{`
-        @media print {
-          body * {
-            visibility: hidden;
-          }
-          #official-work-order-document, #official-work-order-document * {
-            visibility: visible;
-          }
-          #official-work-order-document {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            margin: 0;
-            padding: 20px !important;
-            background: white !important;
-            color: black !important;
-            box-shadow: none !important;
-            border: none !important;
-          }
-          .no-print {
-            display: none !important;
-          }
-        }
-      `}</style>
-
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-neutral-800 pb-3">
-        <div>
-          <h2 className="text-sm font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
-            <Wrench className="w-4 h-4 text-blue-400" />
-            <span>Work Orders & Operational Schedules</span>
-          </h2>
-          <p className="text-xs text-zinc-500 mt-0.5">View, customize, add items, configure options, adjust prices, edit product descriptions, and print operational work order documents.</p>
-        </div>
-        <span className="text-zinc-400 text-xs font-mono font-bold px-3 py-1 bg-neutral-900 border border-neutral-800 rounded-xl shrink-0 self-start sm:self-auto">
-          {activeWorkJobs.length} Active Work Order{activeWorkJobs.length !== 1 ? 's' : ''}
-        </span>
-      </div>
-
-      {/* Grid of Work Order Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {activeWorkJobs.length === 0 ? (
-          <div className="col-span-2 py-16 text-center bg-neutral-900/60 border border-neutral-800 rounded-2xl text-zinc-500 font-medium h-52 flex flex-col justify-center items-center gap-2">
-            <ClipboardList className="w-10 h-10 text-zinc-600 mb-1" />
-            <p className="text-sm text-zinc-400 font-bold font-mono">No active work orders found</p>
-            <p className="text-xs text-zinc-600 max-w-md">Once proposals are drafted or accepted, operational work orders populate here for crew dispatch and editing.</p>
+      {/* Main Header & Job Counts */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#18181b] p-6 rounded-3xl border border-neutral-800 shadow-xl">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="p-2 bg-emerald-950 border border-emerald-800 text-emerald-400 rounded-xl">
+              <ClipboardList className="w-5 h-5" />
+            </span>
+            <h2 className="text-xl font-black text-white font-mono tracking-tight">
+              Work Orders & Painter Specifications
+            </h2>
           </div>
-        ) : (
-          activeWorkJobs.map(p => {
-            const client = clients.find(c => c.id === p.clientId);
-            const totalTasks = p.tasks.length;
-            const completedTasks = p.tasks.filter(t => t.completed).length;
-            const percentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 100;
-            const optionCount = (p.rooms || []).filter(r => r.isOption).length;
+          <p className="text-xs text-zinc-400 font-mono pl-10">
+            Click any Work Order to open the document editor. Edit rooms, paint specs, client details, crew instructions, and shopping lists directly on the page!
+          </p>
+        </div>
 
-            return (
-              <div 
-                key={p.id} 
-                className="bg-neutral-900/80 hover:bg-neutral-850/90 border border-neutral-800 hover:border-blue-500/60 rounded-2xl p-5 space-y-4 transition-all duration-200 group shadow-md hover:shadow-xl relative overflow-hidden"
-              >
-                <div className="flex items-start justify-between border-b border-neutral-800 pb-3 gap-2">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider font-mono bg-blue-950/80 border border-blue-800/60 px-2 py-0.5 rounded">
-                        WO-#{p.id}
-                      </span>
-                      <span className="text-[10px] text-emerald-400 font-bold font-mono uppercase bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded">
-                        {p.status === 'Approved' ? 'PAID / APPROVED' : p.status}
-                      </span>
-                      {optionCount > 0 && (
-                        <span className="text-[10px] text-amber-400 font-bold font-mono uppercase bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded flex items-center gap-1">
-                          <Tag className="w-3 h-3 text-amber-400" />
-                          <span>{optionCount} Option{optionCount > 1 ? 's' : ''}</span>
-                        </span>
-                      )}
-                    </div>
-                    <h4 className="text-base font-bold text-white group-hover:text-blue-400 transition mt-2">
-                      {client?.name || p.title}
-                    </h4>
-                    <p className="text-xs text-zinc-400 mt-0.5 truncate flex items-center gap-1 font-mono">
-                      <MapPin className="w-3 h-3 text-zinc-500 shrink-0" />
-                      <span>{client?.address || 'No physical site specified'}</span>
-                    </p>
-                  </div>
-
-                  {/* Edit Work Order Quick Button */}
-                  <div className="flex flex-col items-end gap-2 shrink-0">
-                    <span className="text-xs text-emerald-400 font-bold font-mono py-1 px-3 bg-emerald-950/40 border border-emerald-800/60 rounded-full">
-                      {percentage}%
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleStartEditing(p);
-                      }}
-                      className="p-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 hover:border-blue-500 text-blue-400 hover:text-white rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 cursor-pointer"
-                      title="Edit items, options, prices, and product descriptions"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>Edit WO</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Progress bar */}
-                <div className="space-y-1">
-                  <div className="text-[11px] text-zinc-400 flex items-center justify-between font-mono">
-                    <span>Task Completion</span>
-                    <span>{completedTasks}/{totalTasks} items</span>
-                  </div>
-                  <div className="w-full h-2 bg-neutral-950 border border-neutral-800 rounded-full overflow-hidden">
-                    <div className="bg-blue-500 h-full rounded-full transition-all duration-300" style={{ width: `${percentage}%` }} />
-                  </div>
-                </div>
-
-                {/* Scope & Options Summary */}
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex items-center justify-between text-[10px] text-zinc-500 font-bold uppercase tracking-wider font-mono">
-                    <span>Operational Scope Items</span>
-                    <span>{(p.rooms || []).length} Area{(p.rooms || []).length !== 1 ? 's' : ''}</span>
-                  </div>
-                  <div className="space-y-1.5 bg-neutral-950/60 border border-neutral-850 p-2.5 rounded-xl max-h-[120px] overflow-y-auto font-mono text-xs">
-                    {(p.rooms || []).length === 0 ? (
-                      <div className="text-[11px] italic text-zinc-500 py-1">
-                        No custom items configured. Click "Edit WO" to add items and options.
-                      </div>
-                    ) : (
-                      p.rooms.map(r => (
-                        <div key={r.id} className="flex items-center justify-between text-zinc-300 border-b border-neutral-850/60 pb-1 last:border-none">
-                          <span className="truncate flex items-center gap-1.5">
-                            <span className="text-zinc-500">&bull;</span>
-                            <span className={r.isOption ? 'text-amber-300 font-semibold' : ''}>{r.name}</span>
-                            {r.isOption && (
-                              <span className="text-[9px] bg-amber-950 text-amber-400 border border-amber-800 px-1.5 py-0.2 rounded uppercase">
-                                Option
-                              </span>
-                            )}
-                          </span>
-                          <span className="text-[10px] text-zinc-500 shrink-0 ml-2">
-                            {r.wallsArea || (2 * (r.height || 8) * ((r.length || 0) + (r.width || 0)))} sqft
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Card Footer prompt */}
-                <div className="pt-2 border-t border-neutral-800/80 flex items-center justify-between text-[11px] font-mono text-zinc-400 group-hover:text-blue-300 transition">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedProject(p)}
-                    className="flex items-center gap-1.5 hover:text-white transition cursor-pointer text-left"
-                  >
-                    <FileText className="w-3.5 h-3.5 text-blue-400" />
-                    <span>View Official Printable Document</span>
-                  </button>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleStartEditing(p)}
-                      className="text-xs text-blue-400 hover:text-blue-300 font-bold underline cursor-pointer"
-                    >
-                      Edit Order
-                    </button>
-                    <span className="text-zinc-600 group-hover:text-blue-400 font-bold">&rarr;</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        )}
+        <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 p-2 rounded-2xl shrink-0 font-mono text-xs">
+          <span className="text-zinc-400 font-bold px-2">Active Jobs:</span>
+          <span className="bg-emerald-950 text-emerald-400 border border-emerald-800 px-3 py-1 rounded-xl font-bold">
+            {activeWorkJobs.length} Approved Work Orders
+          </span>
+        </div>
       </div>
 
-      {/* EDIT WORK ORDER MODAL OVERLAY */}
-      {editingProject && (
-        <div className="fixed inset-0 z-[60] bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-6 overflow-y-auto animate-fade-in">
-          <div className="bg-[#18181b] border border-neutral-800 rounded-3xl max-w-4xl w-full max-h-[95vh] overflow-y-auto shadow-2xl text-left font-sans flex flex-col my-auto no-print text-xs">
-            
-            {/* Modal Control Header */}
-            <div className="sticky top-0 z-20 bg-[#111111] border-b border-neutral-800 p-4 sm:px-6 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-blue-950 border border-blue-800 rounded-xl text-blue-400">
-                  <Edit3 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2 font-mono">
-                    Edit Work Order Specification
-                    <span className="text-[10px] bg-blue-950 border border-blue-800 text-blue-400 font-mono px-2 py-0.5 rounded uppercase font-bold">
-                      WO-#{editingProject.id}
+      {/* List of Active Work Order Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {activeWorkJobs.map(project => {
+          const client = clients.find(c => c.id === project.clientId);
+          const projectCategories = Array.from(new Set((project.rooms || []).map(r => r.category || 'interior')));
+
+          return (
+            <div 
+              key={project.id}
+              className="bg-[#18181b] border border-neutral-800 hover:border-blue-500/50 rounded-2xl p-5 flex flex-col justify-between space-y-4 transition shadow-lg group"
+            >
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-mono text-blue-400 uppercase font-bold tracking-wider block">
+                      WO-#{project.id}
                     </span>
-                  </h3>
-                  <p className="text-xs text-zinc-400 font-mono">Add scope items, configure options, update pricing, and edit product descriptions.</p>
+                    <h3 className="font-bold text-white text-base group-hover:text-blue-400 transition">
+                      {project.title || client?.name || 'Painting Work Order'}
+                    </h3>
+                  </div>
+
+                  <span className="bg-emerald-950 text-emerald-400 border border-emerald-800 text-[10px] font-mono font-bold px-2.5 py-1 rounded-lg uppercase shrink-0">
+                    {project.status}
+                  </span>
+                </div>
+
+                <div className="space-y-1 text-xs text-zinc-400 font-mono">
+                  <p className="flex items-center gap-1.5 text-zinc-300">
+                    <Wrench className="w-3.5 h-3.5 text-zinc-500" />
+                    <span>Client: <strong>{client?.name || 'Valued Client'}</strong></span>
+                  </p>
+                  <p className="flex items-center gap-1.5 truncate">
+                    <MapPin className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                    <span className="truncate">{client?.address || 'Guelph, ON'}</span>
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {projectCategories.map(cat => (
+                    <span key={cat} className="text-[10px] font-mono uppercase bg-neutral-900 border border-neutral-800 text-zinc-300 px-2 py-0.5 rounded-md font-bold">
+                      {cat} WO ({project.rooms?.filter(r => (r.category || 'interior') === cat).length})
+                    </span>
+                  ))}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                {onSelectProjectForFullEdit && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const pId = editingProject.id;
-                      setEditingProject(null);
-                      onSelectProjectForFullEdit(pId);
-                    }}
-                    className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-zinc-300 font-mono text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer border border-neutral-700"
-                    title="Open in full project estimator view"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Full Estimator</span>
-                  </button>
-                )}
+              <div className="pt-3 border-t border-neutral-800/80 flex items-center justify-between gap-2 font-mono text-xs">
+                <div>
+                  <span className="text-[10px] text-zinc-500 block uppercase font-bold">Total Budget</span>
+                  <span className="text-sm font-bold text-emerald-400">
+                    ${(project.summary?.totalPrice || 0).toLocaleString()}
+                  </span>
+                </div>
 
                 <button
                   type="button"
-                  onClick={handleSaveWorkOrderEdits}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-900/30"
+                  onClick={() => setSelectedProject(project)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Open Work Order</span>
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* OFFICIAL WORK ORDER INTERACTIVE DOCUMENT CANVAS MODAL OVERLAY */}
+      {selectedProject && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto animate-fade-in">
+          <div className="bg-[#18181b] border border-neutral-800 rounded-2xl md:rounded-3xl max-w-6xl w-full max-h-[96vh] overflow-y-auto shadow-2xl text-left font-sans flex flex-col my-auto no-print">
+            
+            {/* Modal Control Toolbar */}
+            <div className="sticky top-0 z-20 bg-[#111111] border-b border-neutral-800 p-3 sm:p-4 md:px-6 flex flex-col lg:flex-row lg:items-center justify-between gap-3 no-print">
+              
+              {/* Left: Document Info & Dynamic Scope Tabs */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-blue-950 border border-blue-800 rounded-xl text-blue-400 shrink-0">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex flex-wrap items-center gap-2">
+                      <span>Official Interactive Work Order</span>
+                      <span className="text-[10px] bg-emerald-950 border border-emerald-800 text-emerald-400 font-mono px-2 py-0.5 rounded uppercase font-bold flex items-center gap-1">
+                        <Edit3 className="w-3 h-3" /> Live Editor
+                      </span>
+                    </h3>
+                    <p className="text-xs text-zinc-400 font-mono">WO-#{selectedProject.id} &bull; {activeRoomsForScope.length} Active Scope Area(s)</p>
+                  </div>
+                </div>
+
+                {/* Scope Filter Tabs */}
+                <div className="flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 p-1 rounded-xl font-mono text-xs overflow-x-auto max-w-full scrollbar-none whitespace-nowrap">
+                  <span className="text-[10px] uppercase text-zinc-500 font-bold px-2 hidden sm:inline">Active Scope Filter:</span>
+                  {availableScopeCategories.map(cat => {
+                    const roomCount = (selectedProject.rooms || []).filter(r => (r.category || 'interior') === cat).length;
+                    const labelMap: Record<string, string> = {
+                      interior: 'Interior WO',
+                      exterior: 'Exterior WO',
+                      deck: 'Deck WO'
+                    };
+                    const colorMap: Record<string, string> = {
+                      interior: 'bg-emerald-600',
+                      exterior: 'bg-sky-600',
+                      deck: 'bg-amber-600'
+                    };
+                    const activeBg = colorMap[cat] || 'bg-blue-600';
+
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setSelectedScopeFilter(cat)}
+                        className={`px-3 py-1.5 rounded-lg transition text-xs font-bold cursor-pointer shrink-0 ${
+                          selectedScopeFilter === cat
+                            ? `${activeBg} text-white shadow`
+                            : 'text-zinc-400 hover:text-white hover:bg-neutral-800'
+                        }`}
+                      >
+                        {labelMap[cat] || `${cat.toUpperCase()} WO`} ({roomCount})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Action Buttons: Save Changes, Export PDF, Print, Close */}
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleSaveDocument}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-900/30 min-h-[38px]"
                 >
                   <Save className="w-4 h-4" />
                   <span>Save Changes</span>
@@ -586,984 +696,973 @@ export default function WorkOrdersList({
 
                 <button
                   type="button"
-                  onClick={() => setEditingProject(null)}
-                  className="p-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-zinc-400 hover:text-white rounded-xl transition cursor-pointer"
-                  title="Close Editor"
+                  onClick={() => {
+                    generateWorkOrderPDF({
+                      project: selectedProject,
+                      client: {
+                        id: selectedProject.clientId,
+                        name: clientName,
+                        phone: clientPhone,
+                        email: clientEmail,
+                        address: clientAddress,
+                        status: 'Active',
+                        notes: '',
+                        createdAt: '',
+                        updatedAt: ''
+                      },
+                      rooms: activeRoomsForScope,
+                      scopeCategory: selectedScopeFilter,
+                      liveSummary: {
+                        laborCost: projectMetrics.laborCost,
+                        materialCost: projectMetrics.materialCost,
+                        totalHours: projectMetrics.totalHours,
+                        subtotal: projectMetrics.subtotal,
+                        hst: projectMetrics.hst,
+                        totalCost: projectMetrics.totalCost
+                      },
+                      teamNotes: teamNotes,
+                      specialConditions: specialConditions,
+                      inclusions: projectInclusions,
+                      exclusions: projectExclusions,
+                      description: projectDescription,
+                      shoppingList: editableShoppingList
+                    });
+                    triggerToast(`Downloaded ${selectedScopeFilter.toUpperCase()} Work Order PDF!`);
+                  }}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md min-h-[38px]"
+                  title="Generate & Download Category PDF"
                 >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            {/* TAB NAVIGATION */}
-            <div className="bg-neutral-900/90 border-b border-neutral-800 px-4 sm:px-6 py-2 flex items-center gap-2 overflow-x-auto font-mono text-xs">
-              <button
-                type="button"
-                onClick={() => setEditTab('items')}
-                className={`px-3 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer font-bold ${
-                  editTab === 'items'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-neutral-950 border border-neutral-800 text-zinc-400 hover:text-white'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>Items & Options ({draftRooms.length})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setEditTab('financials')}
-                className={`px-3 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer font-bold ${
-                  editTab === 'financials'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-neutral-950 border border-neutral-800 text-zinc-400 hover:text-white'
-                }`}
-              >
-                <DollarSign className="w-3.5 h-3.5" />
-                <span>Prices & HST (${draftTotalPrice.toLocaleString()})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setEditTab('products')}
-                className={`px-3 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer font-bold ${
-                  editTab === 'products'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-neutral-950 border border-neutral-800 text-zinc-400 hover:text-white'
-                }`}
-              >
-                <Package className="w-3.5 h-3.5" />
-                <span>Product Descriptions</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setEditTab('crew')}
-                className={`px-3 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer font-bold ${
-                  editTab === 'crew'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-neutral-950 border border-neutral-800 text-zinc-400 hover:text-white'
-                }`}
-              >
-                <ClipboardList className="w-3.5 h-3.5" />
-                <span>Crew & Site Notes</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setEditTab('tasks')}
-                className={`px-3 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer font-bold ${
-                  editTab === 'tasks'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'bg-neutral-950 border border-neutral-800 text-zinc-400 hover:text-white'
-                }`}
-              >
-                <ListTodo className="w-3.5 h-3.5" />
-                <span>Master Tasks ({draftTasks.length})</span>
-              </button>
-            </div>
-
-            {/* TAB CONTENT BODY */}
-            <div className="p-4 sm:p-6 space-y-6">
-
-              {/* TAB 1: ITEMS & OPTIONS */}
-              {editTab === 'items' && (
-                <div className="space-y-6">
-                  {/* Form to Add Scope Item or Option */}
-                  <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 space-y-4">
-                    <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
-                      <h4 className="font-bold text-white uppercase font-mono tracking-wider flex items-center gap-2">
-                        <PlusCircle className="w-4 h-4 text-blue-400" />
-                        <span>Add New Scope Item or Optional Extra</span>
-                      </h4>
-                      <label className="flex items-center gap-2 cursor-pointer select-none font-mono bg-amber-950/60 border border-amber-800/80 px-2.5 py-1 rounded-lg text-amber-300 font-bold">
-                        <input
-                          type="checkbox"
-                          checked={newItemIsOption}
-                          onChange={(e) => setNewItemIsOption(e.target.checked)}
-                          className="w-4 h-4 text-amber-500 rounded border-neutral-800 focus:ring-amber-500"
-                        />
-                        <span>Mark as Optional Add-on</span>
-                      </label>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="space-y-1 sm:col-span-2">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Item / Scope Title</label>
-                        <input
-                          type="text"
-                          value={newItemName}
-                          onChange={(e) => setNewItemName(e.target.value)}
-                          placeholder="e.g. Living Room Accent Wall, Garage Trim, Deck Stain Option..."
-                          className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-2.5 text-xs text-white outline-none font-mono focus:border-blue-500"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Category</label>
-                        <select
-                          value={newItemCategory}
-                          onChange={(e) => setNewItemCategory(e.target.value as any)}
-                          className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-2.5 text-xs text-white outline-none font-mono cursor-pointer"
-                        >
-                          <option value="interior">Interior Painting</option>
-                          <option value="exterior">Exterior Coating</option>
-                          <option value="deck">Deck & Fence Stain</option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Length (ft)</label>
-                        <input
-                          type="number"
-                          value={newItemLength}
-                          onChange={(e) => setNewItemLength(Number(e.target.value))}
-                          className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-2.5 text-xs text-white outline-none font-mono"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Width (ft)</label>
-                        <input
-                          type="number"
-                          value={newItemWidth}
-                          onChange={(e) => setNewItemWidth(Number(e.target.value))}
-                          className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-2.5 text-xs text-white outline-none font-mono"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Height (ft)</label>
-                        <input
-                          type="number"
-                          value={newItemHeight}
-                          onChange={(e) => setNewItemHeight(Number(e.target.value))}
-                          className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-2.5 text-xs text-white outline-none font-mono"
-                        />
-                      </div>
-
-                      <div className="space-y-1 sm:col-span-3">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Paint / Product Description</label>
-                        <input
-                          type="text"
-                          value={newItemWallPaint}
-                          onChange={(e) => setNewItemWallPaint(e.target.value)}
-                          placeholder="e.g. Benjamin Moore Regal Select Eggshell (2 Coats)"
-                          className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-2.5 text-xs text-white outline-none font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex justify-end pt-1">
-                      <button
-                        type="button"
-                        onClick={handleAddScopeItem}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Add Item to Work Order</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Existing Scope Items & Options List */}
-                  <div className="space-y-3">
-                    <h4 className="font-bold text-white uppercase font-mono tracking-wider flex items-center justify-between">
-                      <span>Configured Scope Items & Options ({draftRooms.length})</span>
-                      <span className="text-zinc-500 text-[10px]">Toggle options or edit item specs</span>
-                    </h4>
-
-                    {draftRooms.length === 0 ? (
-                      <p className="text-zinc-500 italic font-mono py-4 text-center bg-neutral-900 rounded-xl border border-neutral-850">
-                        No scope items configured yet. Add your first item above.
-                      </p>
-                    ) : (
-                      draftRooms.map((room, index) => {
-                        const sqft = room.wallsArea || (2 * (room.height || 8) * ((room.length || 0) + (room.width || 0)));
-                        return (
-                          <div 
-                            key={room.id || index}
-                            className={`p-4 rounded-2xl border space-y-3 transition-all ${
-                              room.isOption 
-                                ? 'bg-amber-950/20 border-amber-800/60' 
-                                : 'bg-neutral-900 border-neutral-800'
-                            }`}
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-800/80 pb-2">
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono font-bold text-zinc-500 text-[11px]">{index + 1}.</span>
-                                <input
-                                  type="text"
-                                  value={room.name}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setDraftRooms(draftRooms.map((r, i) => i === index ? { ...r, name: val } : r));
-                                  }}
-                                  className="bg-neutral-950 border border-neutral-800 rounded-lg px-2.5 py-1 text-xs text-white font-bold font-mono outline-none focus:border-blue-500"
-                                />
-                                {room.isOption && (
-                                  <span className="text-[9px] bg-amber-950 border border-amber-700 text-amber-300 font-mono font-bold px-2 py-0.5 rounded uppercase">
-                                    Option Add-On
-                                  </span>
-                                )}
-                              </div>
-
-                              <div className="flex items-center gap-3">
-                                {/* Option toggle */}
-                                <label className="flex items-center gap-1.5 cursor-pointer font-mono text-[11px] text-zinc-400 select-none">
-                                  <input
-                                    type="checkbox"
-                                    checked={!!room.isOption}
-                                    onChange={(e) => {
-                                      const checked = e.target.checked;
-                                      setDraftRooms(draftRooms.map((r, i) => i === index ? { ...r, isOption: checked } : r));
-                                    }}
-                                    className="w-3.5 h-3.5 text-amber-500 rounded border-neutral-800"
-                                  />
-                                  <span>Is Option</span>
-                                </label>
-
-                                {/* Delete button */}
-                                <button
-                                  type="button"
-                                  onClick={() => setDraftRooms(draftRooms.filter((_, i) => i !== index))}
-                                  className="p-1.5 text-zinc-500 hover:text-red-400 rounded hover:bg-neutral-800 transition cursor-pointer"
-                                  title="Delete Item"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Item Inputs */}
-                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 font-mono text-xs">
-                              <div>
-                                <span className="text-[9px] text-zinc-500 uppercase block">Length (ft)</span>
-                                <input
-                                  type="number"
-                                  value={room.length || 0}
-                                  onChange={(e) => {
-                                    const val = Number(e.target.value);
-                                    setDraftRooms(draftRooms.map((r, i) => i === index ? { ...r, length: val, wallsArea: 2 * (r.height || 8) * (val + (r.width || 0)) } : r));
-                                  }}
-                                  className="w-full bg-neutral-950 border border-neutral-850 rounded-lg p-1.5 text-white outline-none"
-                                />
-                              </div>
-
-                              <div>
-                                <span className="text-[9px] text-zinc-500 uppercase block">Width (ft)</span>
-                                <input
-                                  type="number"
-                                  value={room.width || 0}
-                                  onChange={(e) => {
-                                    const val = Number(e.target.value);
-                                    setDraftRooms(draftRooms.map((r, i) => i === index ? { ...r, width: val, wallsArea: 2 * (r.height || 8) * ((r.length || 0) + val) } : r));
-                                  }}
-                                  className="w-full bg-neutral-950 border border-neutral-850 rounded-lg p-1.5 text-white outline-none"
-                                />
-                              </div>
-
-                              <div>
-                                <span className="text-[9px] text-zinc-500 uppercase block">Calculated SqFt</span>
-                                <div className="p-1.5 bg-neutral-950 border border-neutral-850 rounded-lg text-zinc-400 font-bold">
-                                  {sqft} sqft
-                                </div>
-                              </div>
-
-                              <div>
-                                <span className="text-[9px] text-zinc-500 uppercase block">Paint Product Specification</span>
-                                <input
-                                  type="text"
-                                  value={room.wallPaintType || ''}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setDraftRooms(draftRooms.map((r, i) => i === index ? { ...r, wallPaintType: val } : r));
-                                  }}
-                                  placeholder="e.g. Regal Select Eggshell"
-                                  className="w-full bg-neutral-950 border border-neutral-850 rounded-lg p-1.5 text-white outline-none"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 2: FINANCIALS & PRICING */}
-              {editTab === 'financials' && (
-                <div className="space-y-6">
-                  <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-5">
-                    <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
-                      <div>
-                        <h4 className="font-bold text-white uppercase font-mono tracking-wider flex items-center gap-2">
-                          <DollarSign className="w-4 h-4 text-emerald-400" />
-                          <span>Financial Budget & Pricing Adjustments</span>
-                        </h4>
-                        <p className="text-[11px] text-zinc-400 font-mono mt-0.5">Override labor, materials, HST, discounts, or auto-recalculate based on scope items.</p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={handleRecalculateDraftFinancials}
-                        className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-400 rounded-xl font-mono text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Calculator className="w-3.5 h-3.5" />
-                        <span>Recalculate from SqFt</span>
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Labor Cost ($)</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-2.5 text-zinc-500 font-mono font-bold">$</span>
-                          <input
-                            type="number"
-                            value={draftLabor}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setDraftLabor(val);
-                              const sub = val + draftMaterial - draftDiscount;
-                              setDraftTotalPrice(Math.round((sub + (sub * draftTaxRate)) * 100) / 100);
-                            }}
-                            className="w-full bg-neutral-950 border border-neutral-850 rounded-xl p-2.5 pl-8 text-xs text-white outline-none font-mono focus:border-blue-500"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Material & Paint Cost ($)</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-2.5 text-zinc-500 font-mono font-bold">$</span>
-                          <input
-                            type="number"
-                            value={draftMaterial}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setDraftMaterial(val);
-                              const sub = draftLabor + val - draftDiscount;
-                              setDraftTotalPrice(Math.round((sub + (sub * draftTaxRate)) * 100) / 100);
-                            }}
-                            className="w-full bg-neutral-950 border border-neutral-850 rounded-xl p-2.5 pl-8 text-xs text-white outline-none font-mono focus:border-blue-500"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Tax Rate / HST (Decimal, e.g. 0.13 for 13%)</label>
-                        <div className="relative">
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={draftTaxRate}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setDraftTaxRate(val);
-                              const sub = draftLabor + draftMaterial - draftDiscount;
-                              setDraftTotalPrice(Math.round((sub + (sub * val)) * 100) / 100);
-                            }}
-                            className="w-full bg-neutral-950 border border-neutral-850 rounded-xl p-2.5 text-xs text-white outline-none font-mono pr-12 focus:border-blue-500"
-                          />
-                          <span className="absolute right-3 top-2.5 text-zinc-500 font-mono font-bold">{(draftTaxRate * 100).toFixed(0)}%</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Discount ($)</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-2.5 text-zinc-500 font-mono font-bold">$</span>
-                          <input
-                            type="number"
-                            value={draftDiscount}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setDraftDiscount(val);
-                              const sub = draftLabor + draftMaterial - val;
-                              setDraftTotalPrice(Math.round((sub + (sub * draftTaxRate)) * 100) / 100);
-                            }}
-                            className="w-full bg-neutral-950 border border-neutral-850 rounded-xl p-2.5 pl-8 text-xs text-white outline-none font-mono focus:border-blue-500"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-1 sm:col-span-2">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Grand Total Price ($)</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-2.5 text-emerald-500 font-mono font-bold">$</span>
-                          <input
-                            type="number"
-                            value={draftTotalPrice}
-                            onChange={(e) => setDraftTotalPrice(Number(e.target.value))}
-                            className="w-full bg-neutral-950 border border-emerald-500/50 rounded-xl p-2.5 pl-8 text-sm font-bold text-emerald-400 outline-none font-mono"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 3: PRODUCT DESCRIPTIONS */}
-              {editTab === 'products' && (
-                <div className="space-y-6">
-                  <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-5 space-y-4">
-                    <h4 className="font-bold text-white uppercase font-mono tracking-wider flex items-center gap-2 border-b border-neutral-800 pb-2">
-                      <Package className="w-4 h-4 text-purple-400" />
-                      <span>Add Product Specification / Material Description</span>
-                    </h4>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase">Manufacturer / Brand</label>
-                        <input
-                          type="text"
-                          value={newProdBrand}
-                          onChange={(e) => setNewProdBrand(e.target.value)}
-                          placeholder="e.g. Benjamin Moore, Sherwin-Williams"
-                          className="w-full bg-neutral-950 border border-neutral-850 rounded-xl p-2.5 text-white outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase">Product Name</label>
-                        <input
-                          type="text"
-                          value={newProdName}
-                          onChange={(e) => setNewProdName(e.target.value)}
-                          placeholder="e.g. Regal Select, Emerald, Woodlux"
-                          className="w-full bg-neutral-950 border border-neutral-850 rounded-xl p-2.5 text-white outline-none"
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-400 uppercase">Sheen / Finish</label>
-                        <select
-                          value={newProdFinish}
-                          onChange={(e) => setNewProdFinish(e.target.value as any)}
-                          className="w-full bg-neutral-950 border border-neutral-850 rounded-xl p-2.5 text-white outline-none cursor-pointer"
-                        >
-                          <option value="Flat">Flat / Matte</option>
-                          <option value="Eggshell">Eggshell</option>
-                          <option value="Satin">Satin</option>
-                          <option value="Semi-Gloss">Semi-Gloss</option>
-                          <option value="Gloss">High Gloss</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-end pt-1">
-                      <button
-                        type="button"
-                        onClick={handleAddProductSpec}
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-mono font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Add Product Specification</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 4: CREW & SITE NOTES */}
-              {editTab === 'crew' && (
-                <div className="space-y-5 bg-neutral-900 border border-neutral-800 rounded-2xl p-5">
-                  <h4 className="font-bold text-white uppercase font-mono tracking-wider flex items-center gap-2 border-b border-neutral-800 pb-2">
-                    <ClipboardList className="w-4 h-4 text-amber-400" />
-                    <span>Crew Instructions & Site Notes</span>
-                  </h4>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Special Site Instructions & Crew Notes (`teamNotes`)</label>
-                    <textarea
-                      rows={4}
-                      value={draftTeamNotes}
-                      onChange={(e) => setDraftTeamNotes(e.target.value)}
-                      placeholder="Enter special access codes, lockbox details, floor protection mandates, or crew instructions..."
-                      className="w-full bg-neutral-950 border border-neutral-850 rounded-xl p-3 text-xs text-white outline-none font-mono focus:border-blue-500 leading-relaxed"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono">Work Order Scope Description (`description`)</label>
-                    <textarea
-                      rows={3}
-                      value={draftDescription}
-                      onChange={(e) => setDraftDescription(e.target.value)}
-                      placeholder="Overall project scope overview..."
-                      className="w-full bg-neutral-950 border border-neutral-850 rounded-xl p-3 text-xs text-white outline-none font-mono focus:border-blue-500 leading-relaxed"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 5: MASTER TASKS */}
-              {editTab === 'tasks' && (
-                <div className="space-y-5 bg-neutral-900 border border-neutral-800 rounded-2xl p-5">
-                  <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
-                    <h4 className="font-bold text-white uppercase font-mono tracking-wider flex items-center gap-2">
-                      <ListTodo className="w-4 h-4 text-blue-400" />
-                      <span>Master Operational Tasks Checklist ({draftTasks.length})</span>
-                    </h4>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newTaskText}
-                      onChange={(e) => setNewTaskText(e.target.value)}
-                      placeholder="Add new checklist task..."
-                      className="flex-1 bg-neutral-950 border border-neutral-850 rounded-xl px-3 py-2 text-xs text-white outline-none font-mono"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!newTaskText.trim()) return;
-                        setDraftTasks([...draftTasks, { id: 'task-' + Math.random().toString(36).substr(2, 6), text: newTaskText.trim(), completed: false }]);
-                        setNewTaskText('');
-                        triggerToast('Added task to master checklist!');
-                      }}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-xl cursor-pointer"
-                    >
-                      Add Task
-                    </button>
-                  </div>
-
-                  <div className="space-y-2 max-h-[250px] overflow-y-auto">
-                    {draftTasks.map((t, idx) => (
-                      <div key={t.id || idx} className="flex items-center justify-between bg-neutral-950 p-2.5 rounded-xl border border-neutral-850 font-mono text-xs">
-                        <label className="flex items-center gap-2.5 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={t.completed}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setDraftTasks(draftTasks.map((tk, i) => i === idx ? { ...tk, completed: checked } : tk));
-                            }}
-                            className="w-4 h-4 text-blue-500 rounded border-neutral-800"
-                          />
-                          <span className={t.completed ? 'line-through text-zinc-500' : 'text-zinc-200'}>{t.text}</span>
-                        </label>
-
-                        <button
-                          type="button"
-                          onClick={() => setDraftTasks(draftTasks.filter((_, i) => i !== idx))}
-                          className="text-zinc-500 hover:text-red-400 p-1 rounded"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-            </div>
-
-            {/* Modal Control Footer */}
-            <div className="p-4 sm:px-6 border-t border-neutral-800 bg-[#111111] flex items-center justify-between">
-              <span className="text-xs text-zinc-400 font-mono">
-                PaintCRM Editor &bull; WO-#{editingProject.id}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingProject(null)}
-                  className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-mono font-bold text-xs rounded-xl transition cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveWorkOrderEdits}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-900/30"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>Save Work Order Changes</span>
-                </button>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* OFFICIAL WORK ORDER DOCUMENT MODAL OVERLAY */}
-      {selectedProject && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-6 overflow-y-auto animate-fade-in">
-          <div className="bg-[#18181b] border border-neutral-800 rounded-3xl max-w-4xl w-full max-h-[96vh] overflow-y-auto shadow-2xl text-left font-sans flex flex-col my-auto no-print">
-            
-            {/* Modal Control Toolbar */}
-            <div className="sticky top-0 z-20 bg-[#111111] border-b border-neutral-800 p-4 sm:px-6 flex items-center justify-between gap-4 no-print">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-950 border border-blue-800 rounded-xl text-blue-400">
-                  <FileText className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    Official Document Preview
-                    <span className="text-[10px] bg-emerald-950 border border-emerald-800 text-emerald-400 font-mono px-2 py-0.5 rounded uppercase font-bold">
-                      Print Ready
-                    </span>
-                  </h3>
-                  <p className="text-xs text-zinc-400 font-mono">Work Order WO-#{selectedProject.id}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleStartEditing(selectedProject)}
-                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Edit Work Order</span>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download {selectedScopeFilter.toUpperCase()} PDF</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-2 cursor-pointer border border-neutral-700"
+                  className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer border border-neutral-700 min-h-[38px]"
                   title="Print Official Work Order Document"
                 >
-                  <Printer className="w-4 h-4" />
-                  <span>Print Document</span>
+                  <Printer className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Print</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSelectedProject(null)}
-                  className="p-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-zinc-400 hover:text-white rounded-xl transition cursor-pointer"
-                  title="Close Preview"
+                  className="p-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-zinc-400 hover:text-white rounded-xl transition cursor-pointer min-h-[38px] flex items-center justify-center"
+                  title="Close Document"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            {/* DOCUMENT CANVAS CONTAINER (PAPER STYLED OFFICIAL DOCUMENT) */}
-            <div className="p-4 sm:p-8 bg-zinc-900/80 flex justify-center">
+            {/* DOCUMENT CANVAS CONTAINER (PAPER STYLED OFFICIAL DOCUMENT WITH LIVE EDITABLE CONTROLS) */}
+            <div className="p-3 sm:p-6 md:p-8 bg-zinc-900/80 flex justify-center">
               <div 
                 id="official-work-order-document"
-                className="bg-white text-slate-900 w-full rounded-2xl shadow-2xl p-6 sm:p-10 border border-slate-200 space-y-6 font-sans text-xs select-text leading-normal"
+                className="bg-white text-slate-900 w-full rounded-2xl shadow-2xl p-4 sm:p-6 md:p-8 border border-slate-200 space-y-6 sm:space-y-8 font-sans text-xs select-text leading-normal overflow-hidden"
               >
                 
-                {/* 1. DOCUMENT BRANDING & HEADER */}
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-6 pb-6 border-b-2 border-slate-900">
+                {/* 1. DOCUMENT BRANDING & HEADER (EDITABLE COMPANY & SUPERVISOR INFO) */}
+                <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 sm:gap-6 pb-6 border-b-2 border-slate-900">
                   {/* Left: Company Details */}
-                  <div className="space-y-1">
+                  <div className="space-y-1.5 flex-1">
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-slate-900 text-white rounded-lg flex items-center justify-center font-black text-sm">
+                      <div className="w-8 h-8 bg-slate-900 text-white rounded-lg flex items-center justify-center font-black text-sm shrink-0">
                         CP
                       </div>
-                      <h1 className="text-lg font-black tracking-tight text-slate-900 font-serif uppercase">
-                        Capstone Painting Inc.
-                      </h1>
+                      <input 
+                        type="text"
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                        className="text-base font-black tracking-tight text-slate-900 font-serif uppercase border-b border-transparent hover:border-slate-300 focus:border-blue-600 outline-none w-full"
+                      />
                     </div>
-                    <p className="text-[11px] text-slate-600 font-medium leading-relaxed pt-1">
-                      124 Commercial Street, Suite 200<br />
-                      Guelph, ON, N1C 0A2<br />
-                      Phone: (226) 499-0079 &bull; GST/HST: 79421 8295 RT0001
-                    </p>
+                    <div className="space-y-1 pt-1 font-mono text-[11px]">
+                      <input 
+                        type="text"
+                        value={companyAddress}
+                        onChange={(e) => setCompanyAddress(e.target.value)}
+                        className="w-full text-slate-600 border-b border-transparent hover:border-slate-300 focus:border-blue-600 outline-none"
+                      />
+                      <input 
+                        type="text"
+                        value={companyTaxInfo}
+                        onChange={(e) => setCompanyTaxInfo(e.target.value)}
+                        className="w-full text-slate-600 border-b border-transparent hover:border-slate-300 focus:border-blue-600 outline-none"
+                      />
+                    </div>
                   </div>
 
-                  {/* Center: Manager / Owner Info */}
-                  <div className="space-y-1 text-slate-700 font-medium">
-                    <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider block font-mono">Job Supervisor</span>
-                    <p className="font-bold text-slate-900 text-xs">Daniel Rust, Operations Owner</p>
-                    <p className="text-[11px] text-slate-600">Direct: (226) 499-0079</p>
-                    <p className="text-[11px] text-slate-600">Email: daniel@capstonepainting.ca</p>
+                  {/* Center: Job Supervisor Info (Editable) */}
+                  <div className="space-y-1 text-slate-700 font-mono text-xs flex-1 border-t md:border-t-0 md:border-l border-slate-200 pt-3 md:pt-0 md:pl-4">
+                    <span className="text-[10px] text-slate-500 uppercase font-extrabold tracking-wider block flex items-center gap-1">
+                      <UserCheck className="w-3 h-3 text-blue-600" />
+                      <span>Job Supervisor / Operations Lead</span>
+                    </span>
+                    <input 
+                      type="text"
+                      value={supervisorName}
+                      onChange={(e) => setSupervisorName(e.target.value)}
+                      className="font-bold text-slate-900 text-xs w-full border-b border-slate-200 focus:border-blue-600 outline-none bg-slate-50/50 p-1 rounded"
+                    />
+                    <input 
+                      type="text"
+                      value={supervisorPhone}
+                      onChange={(e) => setSupervisorPhone(e.target.value)}
+                      className="text-[11px] text-slate-600 w-full border-b border-slate-200 focus:border-blue-600 outline-none bg-slate-50/50 p-1 rounded"
+                    />
+                    <input 
+                      type="text"
+                      value={supervisorEmail}
+                      onChange={(e) => setSupervisorEmail(e.target.value)}
+                      className="text-[11px] text-slate-600 w-full border-b border-slate-200 focus:border-blue-600 outline-none bg-slate-50/50 p-1 rounded"
+                    />
                   </div>
 
-                  {/* Right: Work Order Official Stamp & Badge */}
-                  <div className="sm:text-right space-y-2 shrink-0">
+                  {/* Right: Work Order Stamp & Status Selection */}
+                  <div className="md:text-right space-y-2 shrink-0 border-t md:border-t-0 pt-3 md:pt-0 border-slate-200">
                     <div>
-                      <h2 className="text-xl sm:text-2xl font-black text-slate-900 uppercase tracking-wider font-mono">
-                        WORK ORDER
+                      <h2 className="text-lg sm:text-2xl font-black text-slate-900 uppercase tracking-wider font-mono flex items-center md:justify-end gap-2">
+                        <span className="text-xs bg-slate-100 text-slate-800 px-2 py-0.5 rounded border border-slate-300 uppercase">
+                          {selectedScopeFilter}
+                        </span>
+                        <span>WORK ORDER</span>
                       </h2>
                       <p className="text-xs font-bold font-mono text-slate-600 mt-0.5">
                         NO: <span className="text-blue-700">WO-#{selectedProject.id}</span>
                       </p>
                     </div>
 
-                    {/* Official PAID / APPROVED Status Badge */}
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-600 text-emerald-800 rounded-full font-black text-[11px] uppercase tracking-wider shadow-sm">
+                    {/* Status Select Dropdown */}
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-600 text-emerald-800 rounded-lg font-mono font-black text-[11px] uppercase tracking-wider shadow-sm">
                       <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
-                      <span>{selectedProject.status === 'Approved' ? 'PAID / APPROVED' : selectedProject.status}</span>
+                      <select
+                        value={selectedProject.status}
+                        onChange={(e) => setSelectedProject({ ...selectedProject, status: e.target.value as any })}
+                        className="bg-transparent font-black text-emerald-900 outline-none cursor-pointer uppercase text-xs"
+                      >
+                        <option value="Approved">Approved / Active</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Completed">Completed</option>
+                        <option value="Sent">Sent to Client</option>
+                        <option value="Draft">Draft</option>
+                      </select>
                     </div>
                   </div>
                 </div>
 
-                {/* 2. FOUR-COLUMN CLIENT & JOB METADATA TABLE */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 border border-slate-300 rounded-xl p-4 font-sans text-xs">
+                {/* 2. THREE-COLUMN CLIENT & JOB METADATA TABLE (FULLY EDITABLE & IPAD RESPONSIVE) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 bg-slate-50 border border-slate-300 rounded-xl p-3 sm:p-4 font-sans text-xs">
                   {/* Contact Info */}
-                  <div className="space-y-1 border-b sm:border-b-0 sm:border-r border-slate-200 pb-3 sm:pb-0 sm:pr-4">
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block font-mono">
-                      Contact Information
+                  <div className="space-y-1.5 border-b sm:border-b-0 sm:border-r border-slate-200 pb-3 sm:pb-0 sm:pr-4 font-mono">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                      Client Contact Info (Editable)
                     </span>
-                    <p className="font-bold text-slate-900 text-sm">{selectedClient?.name || 'Valued Client'}</p>
-                    <p className="text-slate-700 flex items-center gap-1.5 mt-0.5">
+                    <input 
+                      type="text"
+                      value={clientName}
+                      onChange={(e) => setClientName(e.target.value)}
+                      placeholder="Client Name..."
+                      className="font-bold text-slate-900 text-sm w-full bg-white border border-slate-300 rounded p-1.5 focus:border-blue-600 outline-none"
+                    />
+                    <div className="flex items-center gap-1.5">
                       <Phone className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                      <span>{selectedClient?.phone || '(555) 000-0000'}</span>
-                    </p>
-                    <p className="text-slate-700 flex items-center gap-1.5 truncate">
+                      <input 
+                        type="text"
+                        value={clientPhone}
+                        onChange={(e) => setClientPhone(e.target.value)}
+                        placeholder="Phone..."
+                        className="w-full bg-white border border-slate-300 rounded p-1 text-[11px] text-slate-800 focus:border-blue-600 outline-none"
+                      />
+                    </div>
+                    <div className="flex items-center gap-1.5">
                       <Mail className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                      <span className="truncate">{selectedClient?.email || 'client@example.com'}</span>
-                    </p>
+                      <input 
+                        type="text"
+                        value={clientEmail}
+                        onChange={(e) => setClientEmail(e.target.value)}
+                        placeholder="Email..."
+                        className="w-full bg-white border border-slate-300 rounded p-1 text-[11px] text-slate-800 focus:border-blue-600 outline-none"
+                      />
+                    </div>
                   </div>
 
                   {/* Job Site Location */}
-                  <div className="space-y-1 border-b sm:border-b-0 sm:border-r border-slate-200 pb-3 sm:pb-0 sm:pr-4">
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block font-mono">
-                      Job Site Address
+                  <div className="space-y-1.5 border-b lg:border-b-0 lg:border-r border-slate-200 pb-3 sm:pb-0 sm:pr-4 font-mono">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block">
+                      Job Site Address & Access
                     </span>
-                    <p className="font-bold text-slate-900 flex items-start gap-1.5">
-                      <MapPin className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                      <span>{selectedClient?.address || 'No physical site specified'}</span>
-                    </p>
-                    <p className="text-[11px] text-slate-500 font-mono pt-1">
-                      Access: Keylock Box / On-site contact
-                    </p>
+                    <div className="flex items-start gap-1.5">
+                      <MapPin className="w-4 h-4 text-rose-600 shrink-0 mt-1" />
+                      <input 
+                        type="text"
+                        value={clientAddress}
+                        onChange={(e) => setClientAddress(e.target.value)}
+                        placeholder="Site Address..."
+                        className="w-full bg-white border border-slate-300 rounded p-1.5 font-bold text-slate-900 focus:border-blue-600 outline-none text-xs"
+                      />
+                    </div>
+                    <div className="pt-1">
+                      <input 
+                        type="text"
+                        value={specialConditions}
+                        onChange={(e) => setSpecialConditions(e.target.value)}
+                        placeholder="Lockbox code / Entrance instructions..."
+                        className="w-full bg-amber-50 border border-amber-300 rounded p-1.5 text-[11px] text-amber-900 font-bold focus:border-blue-600 outline-none"
+                      />
+                    </div>
                   </div>
 
                   {/* Order Details */}
-                  <div className="space-y-1">
+                  <div className="space-y-1 col-span-1 sm:col-span-2 lg:col-span-1">
                     <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block font-mono">
-                      Order Specifications
+                      Work Order Scope Metrics
                     </span>
-                    <div className="grid grid-cols-2 gap-x-2 text-[11px] font-mono">
-                      <span className="text-slate-500">Date Issued:</span>
-                      <span className="font-bold text-slate-900 text-right">{new Date(selectedProject.createdAt || Date.now()).toLocaleDateString()}</span>
-                      <span className="text-slate-500">Total Hours:</span>
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] font-mono">
+                      <span className="text-slate-500">Active Scope:</span>
+                      <span className="font-bold text-slate-900 text-right uppercase">{selectedScopeFilter}</span>
+                      <span className="text-slate-500">Total Areas:</span>
+                      <span className="font-bold text-slate-900 text-right">{activeRoomsForScope.length} Rooms</span>
+                      <span className="text-slate-500">Est. Hours:</span>
                       <span className="font-bold text-blue-700 text-right">{projectMetrics.totalHours} hrs</span>
-                      <span className="text-slate-500">Status:</span>
-                      <span className="font-bold text-emerald-700 text-right uppercase">{selectedProject.status}</span>
+                      <span className="text-slate-500">Scope Budget:</span>
+                      <span className="font-bold text-emerald-700 text-right">${projectMetrics.subtotal.toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
 
-                {/* 3. CREW NOTES & FINANCIAL BUDGET BOX */}
-                <div className="border border-slate-300 rounded-xl overflow-hidden">
-                  <div className="bg-slate-100 px-4 py-2 border-b border-slate-300 flex items-center justify-between">
-                    <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider font-mono flex items-center gap-2">
-                      <ClipboardList className="w-4 h-4 text-slate-700" />
-                      <span>Crew Note & Financial Budget Breakdown</span>
+                {/* 2B. IMPORTED SCOPE PARAMETERS: INCLUSIONS, EXCLUSIONS, SPECIAL CONDITIONS & NOTES */}
+                <div className="border border-sky-200 bg-sky-50/40 rounded-xl overflow-hidden shadow-sm">
+                  <div className="bg-sky-900 text-white px-4 py-2 flex items-center justify-between">
+                    <h3 className="font-bold text-xs uppercase tracking-wider font-mono flex items-center gap-2">
+                      <ClipboardList className="w-4 h-4 text-sky-300" />
+                      <span>Contract Scope, Inclusions, Exclusions & Special Notes</span>
                     </h3>
-                    <span className="text-[11px] font-mono text-slate-600 font-bold">Official Estimate Summary</span>
+                    <span className="text-[10px] bg-sky-800 text-sky-100 font-mono px-2 py-0.5 rounded uppercase font-bold">
+                      Worker Guidelines
+                    </span>
                   </div>
 
-                  <div className="p-4 space-y-3 bg-white">
-                    {/* Compact Financial Line */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-50 border border-slate-200 rounded-lg font-mono text-xs">
-                      <div className="flex flex-wrap items-center gap-4 text-slate-800">
-                        <span><strong>L:</strong> ${projectMetrics.laborCost.toLocaleString()}</span>
-                        <span className="text-slate-300">|</span>
-                        <span><strong>M:</strong> ${projectMetrics.materialCost.toLocaleString()}</span>
-                        <span className="text-slate-300">|</span>
-                        <span><strong>Labour and Materials:</strong> ${projectMetrics.subtotal.toLocaleString()} plus HST</span>
-                        <span className="text-slate-300">|</span>
-                        <span><strong>Total HST ({( (selectedProject.summary?.taxRate ?? 0.13) * 100 ).toFixed(0)}%):</strong> ${projectMetrics.hst.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <div className="p-3.5 sm:p-4 grid grid-cols-1 md:grid-cols-2 gap-3.5 font-mono text-xs">
+                    {/* Project Description */}
+                    <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-1 col-span-1 md:col-span-2">
+                      <label className="text-[10px] font-extrabold uppercase text-slate-700 block flex items-center gap-1.5">
+                        <Info className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Project Overview & Scope Description (Editable)</span>
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={projectDescription}
+                        onChange={(e) => setProjectDescription(e.target.value)}
+                        className="w-full text-xs font-mono text-slate-800 border border-slate-200 rounded p-2 focus:border-blue-600 outline-none leading-relaxed"
+                        placeholder="Enter general scope overview..."
+                      />
+                    </div>
+
+                    {/* Inclusions */}
+                    <div className="bg-white p-3 rounded-lg border border-emerald-200 space-y-1">
+                      <label className="text-[10px] font-extrabold uppercase text-emerald-800 block flex items-center gap-1.5">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Contract Inclusions (What IS Included)</span>
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={projectInclusions}
+                        onChange={(e) => setProjectInclusions(e.target.value)}
+                        className="w-full text-xs font-mono text-slate-800 border border-slate-200 rounded p-2 focus:border-emerald-600 outline-none leading-relaxed"
+                        placeholder="List inclusions..."
+                      />
+                    </div>
+
+                    {/* Exclusions */}
+                    <div className="bg-white p-3 rounded-lg border border-rose-200 space-y-1">
+                      <label className="text-[10px] font-extrabold uppercase text-rose-800 block flex items-center gap-1.5">
+                        <X className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Contract Exclusions (What IS NOT Included)</span>
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={projectExclusions}
+                        onChange={(e) => setProjectExclusions(e.target.value)}
+                        className="w-full text-xs font-mono text-slate-800 border border-slate-200 rounded p-2 focus:border-rose-600 outline-none leading-relaxed"
+                        placeholder="List exclusions..."
+                      />
+                    </div>
+
+                    {/* Special Access Notes */}
+                    <div className="bg-white p-3 rounded-lg border border-amber-200 space-y-1">
+                      <label className="text-[10px] font-extrabold uppercase text-amber-800 block flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Special Site Access & Lockbox Notes</span>
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={specialConditions}
+                        onChange={(e) => setSpecialConditions(e.target.value)}
+                        className="w-full text-xs font-mono text-slate-800 border border-slate-200 rounded p-2 focus:border-amber-600 outline-none leading-relaxed"
+                        placeholder="Lockbox codes, pet rules, entrance notes..."
+                      />
+                    </div>
+
+                    {/* Crew Notes */}
+                    <div className="bg-white p-3 rounded-lg border border-blue-200 space-y-1">
+                      <label className="text-[10px] font-extrabold uppercase text-blue-800 block flex items-center gap-1.5">
+                        <Wrench className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Team & Crew Site Briefing Notes</span>
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={teamNotes}
+                        onChange={(e) => setTeamNotes(e.target.value)}
+                        className="w-full text-xs font-mono text-slate-800 border border-slate-200 rounded p-2 focus:border-blue-600 outline-none leading-relaxed"
+                        placeholder="Daily crew briefing, paint storage rules..."
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. EXECUTIVE CREW OVERVIEW & EDITABLE SITE PROTOCOLS */}
+                <div className="border border-blue-200 bg-blue-50/40 rounded-xl overflow-hidden shadow-sm">
+                  <div className="bg-blue-900 text-white px-4 py-2 flex items-center justify-between">
+                    <h3 className="font-bold text-xs uppercase tracking-wider font-mono flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-blue-300" />
+                      <span>Executive Crew Overview & Job Site Protocols</span>
+                    </h3>
+                    <span className="text-[10px] bg-blue-800 text-blue-100 font-mono px-2 py-0.5 rounded uppercase font-bold">
+                      Painters Briefing
+                    </span>
+                  </div>
+
+                  <div className="p-3.5 sm:p-4 space-y-4">
+                    {/* Key Metrics Bar */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-3 font-mono text-center">
+                      <div className="bg-white p-2 sm:p-2.5 rounded-lg border border-blue-200 shadow-2xs">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Areas / Rooms</span>
+                        <span className="text-sm sm:text-base font-black text-slate-900">{activeRoomsForScope.length}</span>
                       </div>
-                      <div className="bg-slate-900 text-white font-bold px-3 py-1 rounded text-sm font-mono shrink-0">
-                        Total: ${projectMetrics.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <div className="bg-white p-2 sm:p-2.5 rounded-lg border border-blue-200 shadow-2xs">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Wall Sq Ft</span>
+                        <span className="text-sm sm:text-base font-black text-blue-800">{projectMetrics.wallArea.toFixed(0)}</span>
+                      </div>
+                      <div className="bg-white p-2 sm:p-2.5 rounded-lg border border-blue-200 shadow-2xs">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Ceiling Sq Ft</span>
+                        <span className="text-sm sm:text-base font-black text-indigo-800">{projectMetrics.ceilingArea.toFixed(0)}</span>
+                      </div>
+                      <div className="bg-white p-2 sm:p-2.5 rounded-lg border border-blue-200 shadow-2xs">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Labor Hours</span>
+                        <span className="text-sm sm:text-base font-black text-emerald-800">{projectMetrics.totalHours} hrs</span>
+                      </div>
+                      <div className="bg-white p-2 sm:p-2.5 rounded-lg border border-blue-200 shadow-2xs col-span-2 sm:col-span-1">
+                        <span className="text-[10px] text-slate-500 uppercase font-bold block">Scope Subtotal</span>
+                        <span className="text-sm sm:text-base font-black text-slate-900">${projectMetrics.subtotal.toLocaleString()}</span>
                       </div>
                     </div>
 
-                    {/* Site Access & Crew Instructions */}
-                    {(selectedProject.teamNotes || selectedProject.specialConditions || selectedProject.description) && (
-                      <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-lg text-slate-800 space-y-1">
-                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-800 font-mono block">
-                          Special Site Instructions & Crew Notes:
+                    {/* Job Site Protocol Checklist (Editable List) */}
+                    <div className="bg-white p-3.5 rounded-lg border border-slate-200 space-y-2 font-mono text-xs">
+                      <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                        <span className="font-extrabold text-slate-800 uppercase text-[10px] flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                          <span>Crew Site Setup & Quality Protocols Checklist (Editable)</span>
                         </span>
-                        <p className="text-xs text-slate-700 leading-relaxed font-mono whitespace-pre-wrap">
-                          {selectedProject.teamNotes || selectedProject.specialConditions || selectedProject.description}
-                        </p>
+                        <button
+                          type="button"
+                          onClick={handleAddProtocol}
+                          className="px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 rounded text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Add Protocol Item</span>
+                        </button>
                       </div>
-                    )}
-                  </div>
-                </div>
 
-                {/* 4. PRODUCT DESCRIPTION & SPECIFICATIONS */}
-                <div className="border border-slate-300 rounded-xl overflow-hidden">
-                  <div className="bg-slate-100 px-4 py-2 border-b border-slate-300 flex items-center justify-between">
-                    <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider font-mono flex items-center gap-2">
-                      <Package className="w-4 h-4 text-purple-700" />
-                      <span>Product Specifications & Paint Descriptions</span>
-                    </h3>
-                    <span className="text-[11px] font-mono text-slate-600 font-bold">Material Supplies</span>
-                  </div>
-
-                  <div className="p-4 space-y-3 bg-white">
-                    {projectMetrics.productsList.length > 0 ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-xs">
-                        {projectMetrics.productsList.map((prod, idx) => (
-                          <div key={idx} className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between">
-                            <span className="font-bold text-slate-900">{prod}</span>
-                            <span className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold uppercase">
-                              Standard
-                            </span>
+                      <div className="space-y-1.5">
+                        {siteProtocols.map(proto => (
+                          <div key={proto.id} className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={proto.completed}
+                              onChange={(e) => handleUpdateProtocol(proto.id, { completed: e.target.checked })}
+                              className="w-4 h-4 text-emerald-600 rounded cursor-pointer shrink-0"
+                            />
+                            <input
+                              type="text"
+                              value={proto.text}
+                              onChange={(e) => handleUpdateProtocol(proto.id, { text: e.target.value })}
+                              className="w-full bg-slate-50/80 border border-slate-200 rounded px-2 py-1 text-slate-800 focus:border-blue-600 outline-none text-xs"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProtocol(proto.id)}
+                              className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer shrink-0"
+                              title="Delete protocol item"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         ))}
                       </div>
-                    ) : (
-                      <p className="text-slate-600 italic font-mono text-xs">
-                        Standard Premium Benjamin Moore / Sherwin-Williams Low-VOC Latex Primers & Paints specified.
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* 5. TOTAL DIMENSIONS METRICS SUMMARY */}
-                <div className="border border-slate-300 rounded-xl overflow-hidden">
-                  <div className="bg-slate-100 px-4 py-2 border-b border-slate-300 flex items-center justify-between">
-                    <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider font-mono flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-blue-700" />
-                      <span>Total Dimensions (sqft / lnft)</span>
-                    </h3>
-                  </div>
-
-                  <div className="p-4 bg-white">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-center text-xs">
-                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
-                        <span className="text-[10px] text-slate-500 uppercase block font-bold">Walls Area</span>
-                        <span className="text-sm font-bold text-slate-900 mt-0.5 block">{projectMetrics.wallArea.toFixed(2)} sq ft</span>
-                      </div>
-
-                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
-                        <span className="text-[10px] text-slate-500 uppercase block font-bold">Ceilings Area</span>
-                        <span className="text-sm font-bold text-slate-900 mt-0.5 block">{projectMetrics.ceilingArea.toFixed(2)} sq ft</span>
-                      </div>
-
-                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
-                        <span className="text-[10px] text-slate-500 uppercase block font-bold">Floor Area</span>
-                        <span className="text-sm font-bold text-slate-900 mt-0.5 block">{projectMetrics.floorArea.toFixed(2)} sq ft</span>
-                      </div>
-
-                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg">
-                        <span className="text-[10px] text-slate-500 uppercase block font-bold">Baseboard Trim</span>
-                        <span className="text-sm font-bold text-slate-900 mt-0.5 block">{projectMetrics.trimLnft.toFixed(1)} ln ft</span>
-                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* 6. AREA & ROOM DETAILED SCOPE SPECIFICATIONS */}
-                <div className="border border-slate-300 rounded-xl overflow-hidden">
-                  <div className="bg-slate-100 px-4 py-2 border-b border-slate-300 flex items-center justify-between">
-                    <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider font-mono flex items-center gap-2">
-                      <Wrench className="w-4 h-4 text-slate-700" />
-                      <span>Area & Room Detailed Work Scope</span>
+                {/* 4. PAINTER MATERIAL & PAINT SHOPPING LIST (WITH SHEEN & EDITABLE FEILDS) */}
+                <div className="border border-slate-300 rounded-xl overflow-hidden shadow-sm">
+                  <div className="bg-slate-900 text-white px-3.5 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="font-bold text-xs uppercase tracking-wider font-mono flex items-center gap-2">
+                      <ShoppingCart className="w-4 h-4 text-emerald-400" />
+                      <span>Painter Shopping List & Material Budget (Editable Sheens)</span>
                     </h3>
-                    <span className="text-[11px] font-mono text-slate-600 font-bold">
-                      {(selectedProject.rooms || []).length} Scope Area{(selectedProject.rooms || []).length !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-
-                  <div className="p-4 space-y-4 bg-white">
-                    {(selectedProject.rooms || []).length === 0 ? (
-                      <p className="text-slate-500 italic font-mono text-xs">No specific room breakdown defined.</p>
-                    ) : (
-                      (selectedProject.rooms || []).map((room, idx) => (
-                        <div key={room.id || idx} className={`border rounded-xl overflow-hidden ${room.isOption ? 'border-amber-300 bg-amber-50/20' : 'border-slate-200'}`}>
-                          {/* Room Header */}
-                          <div className={`px-3.5 py-2 border-b flex flex-wrap items-center justify-between gap-2 ${room.isOption ? 'bg-amber-100/80 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
-                            <span className="font-bold text-slate-900 text-xs font-mono flex items-center gap-2">
-                              <span>{idx + 1}. {room.name} {room.groupName ? `(${room.groupName})` : ''}</span>
-                              {room.isOption && (
-                                <span className="bg-amber-600 text-white font-bold text-[9px] px-2 py-0.5 rounded uppercase">
-                                  Optional Add-On
-                                </span>
-                              )}
-                            </span>
-                            <div className="flex items-center gap-3 font-mono text-[10px] text-slate-600">
-                              <span>Dimensions: {room.length || 0}' × {room.width || 0}' × {room.height || 8}'</span>
-                              <span className="bg-slate-200 text-slate-800 font-bold px-2 py-0.5 rounded uppercase">
-                                {room.category || 'interior'}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Room Task Checklist & Specs */}
-                          <div className="p-3 text-xs space-y-2">
-                            {/* Paint Specifications */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono bg-slate-50/50 p-2 rounded border border-slate-100">
-                              <div>
-                                <span className="text-slate-500 font-bold">Wall Paint: </span>
-                                <span className="text-slate-900 font-medium">{room.wallPaintType || 'Regal Select Eggshell'}</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-500 font-bold">Coats/Finish: </span>
-                                <span className="text-slate-900 font-medium">2 Coats Premium Sheen</span>
-                              </div>
-                            </div>
-
-                            {/* Task Checklist Items */}
-                            {room.surfaceTasks && room.surfaceTasks.length > 0 ? (
-                              <div className="space-y-1 pt-1">
-                                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-mono block">
-                                  Scope Tasks:
-                                </span>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 font-mono text-[11px]">
-                                  {room.surfaceTasks.map(task => (
-                                    <div key={task.id} className="flex items-center gap-2 text-slate-800 bg-slate-50 p-1.5 rounded border border-slate-200/80">
-                                      <CheckCircle className={`w-3.5 h-3.5 ${task.completed ? 'text-emerald-600' : 'text-slate-400'} shrink-0`} />
-                                      <span className={task.completed ? 'line-through text-slate-400' : 'font-medium'}>{task.text}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            ) : (
-                              <p className="text-[11px] text-slate-500 font-mono italic">
-                                Standard prep (cover floor, patch drywall, sand, mask, 2 coats paint).
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* 7. OPERATIONAL TASK CHECKLIST */}
-                {selectedProject.tasks && selectedProject.tasks.length > 0 && (
-                  <div className="border border-slate-300 rounded-xl overflow-hidden">
-                    <div className="bg-slate-100 px-4 py-2 border-b border-slate-300 flex items-center justify-between">
-                      <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider font-mono flex items-center gap-2">
-                        <ListTodo className="w-4 h-4 text-slate-700" />
-                        <span>Master Operational Checklist</span>
-                      </h3>
-                      <span className="text-[11px] font-mono text-slate-600 font-bold">
-                        {selectedProject.tasks.filter(t => t.completed).length} / {selectedProject.tasks.length} Completed
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleAddShoppingItem}
+                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-[10px] font-bold rounded flex items-center gap-1 cursor-pointer shadow-sm"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Add Paint Spec</span>
+                      </button>
+                      <span className="text-[10px] font-mono text-emerald-300 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800 uppercase">
+                        {editableShoppingList.length} Item(s)
                       </span>
                     </div>
+                  </div>
 
-                    <div className="p-4 bg-white">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 font-mono text-xs">
-                        {selectedProject.tasks.map(t => (
-                          <div key={t.id} className="flex items-center gap-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
-                            <CheckCircle className={`w-4 h-4 ${t.completed ? 'text-emerald-600' : 'text-slate-400'} shrink-0`} />
-                            <span className={t.completed ? 'line-through text-slate-400' : 'text-slate-800 font-medium'}>
-                              {t.text}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                  <div className="p-3.5 sm:p-4 space-y-3 bg-white">
+                    <p className="text-xs text-slate-600 font-mono">
+                      Painters: Edit brand, product name, sheen, color codes, and gallon quantities directly below. Everything updates live!
+                    </p>
+
+                    <div className="grid grid-cols-1 gap-3">
+                      {editableShoppingList.length === 0 ? (
+                        <div className="p-6 text-center border-2 border-dashed border-slate-200 rounded-xl space-y-2">
+                          <p className="text-slate-500 italic font-mono text-xs">No paint products in list yet.</p>
+                          <button
+                            type="button"
+                            onClick={handleAddShoppingItem}
+                            className="px-3 py-1.5 bg-blue-600 text-white font-mono font-bold text-xs rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add First Paint Product</span>
+                          </button>
+                        </div>
+                      ) : (
+                        editableShoppingList.map((item, idx) => {
+                          const isChecked = !!checkedShoppingItems[item.key || `item-${idx}`];
+                          return (
+                            <div 
+                              key={item.key || idx}
+                              className={`p-3.5 rounded-xl border transition flex flex-col lg:flex-row lg:items-center justify-between gap-3 font-mono text-xs ${
+                                isChecked ? 'bg-emerald-50/60 border-emerald-300' : 'bg-slate-50/90 border-slate-300 hover:border-slate-400'
+                              }`}
+                            >
+                              {/* Left: Product & Color Editable Controls */}
+                              <div className="space-y-2 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setCheckedShoppingItems({ ...checkedShoppingItems, [item.key || `item-${idx}`]: !isChecked })}
+                                    className={`w-5 h-5 rounded flex items-center justify-center transition border cursor-pointer shrink-0 ${
+                                      isChecked ? 'bg-emerald-600 border-emerald-700 text-white' : 'bg-white border-slate-400 text-transparent hover:border-slate-600'
+                                    }`}
+                                    title="Mark purchased"
+                                  >
+                                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                  </button>
+
+                                  {/* Brand */}
+                                  <input 
+                                    type="text"
+                                    value={item.brand}
+                                    onChange={(e) => handleUpdateShoppingItem(idx, { brand: e.target.value })}
+                                    placeholder="Brand..."
+                                    className="font-black text-slate-900 text-xs bg-white border border-slate-300 rounded px-2 py-1 focus:border-blue-600 outline-none w-32 sm:w-36"
+                                  />
+
+                                  {/* Paint Product Name */}
+                                  <input 
+                                    type="text"
+                                    value={item.paintName}
+                                    onChange={(e) => handleUpdateShoppingItem(idx, { paintName: e.target.value })}
+                                    placeholder="Paint product name..."
+                                    className="font-bold text-slate-800 text-xs bg-white border border-slate-300 rounded px-2 py-1 focus:border-blue-600 outline-none flex-1 min-w-[150px]"
+                                  />
+
+                                  {/* Sheen Select Dropdown */}
+                                  <div className="flex items-center gap-1 bg-sky-100 border border-sky-300 rounded px-2 py-0.5">
+                                    <span className="text-[10px] text-sky-800 font-extrabold uppercase">Sheen:</span>
+                                    <select
+                                      value={item.sheen || 'Eggshell'}
+                                      onChange={(e) => handleUpdateShoppingItem(idx, { sheen: e.target.value })}
+                                      className="bg-transparent text-sky-950 font-black text-xs outline-none cursor-pointer uppercase"
+                                    >
+                                      <option value="Flat">Flat</option>
+                                      <option value="Matte">Matte</option>
+                                      <option value="Eggshell">Eggshell</option>
+                                      <option value="Satin">Satin</option>
+                                      <option value="Semi-Gloss">Semi-Gloss</option>
+                                      <option value="Gloss">Gloss</option>
+                                      <option value="High-Gloss">High-Gloss</option>
+                                    </select>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-2 pt-1">
+                                  {/* Color Name */}
+                                  <div className="flex items-center gap-1 bg-blue-50 border border-blue-200 rounded px-2 py-0.5">
+                                    <span className="text-[10px] text-blue-700 font-bold uppercase">Color:</span>
+                                    <input 
+                                      type="text"
+                                      value={item.colorName}
+                                      onChange={(e) => handleUpdateShoppingItem(idx, { colorName: e.target.value })}
+                                      className="bg-transparent text-blue-900 font-bold outline-none text-xs w-28 sm:w-36"
+                                    />
+                                  </div>
+
+                                  {/* Color Code */}
+                                  <div className="flex items-center gap-1 bg-slate-100 border border-slate-300 rounded px-2 py-0.5">
+                                    <span className="text-[10px] text-slate-500 font-bold uppercase">Code:</span>
+                                    <input 
+                                      type="text"
+                                      value={item.colorCode}
+                                      onChange={(e) => handleUpdateShoppingItem(idx, { colorCode: e.target.value })}
+                                      className="bg-transparent text-slate-900 font-mono font-bold outline-none text-xs w-20"
+                                    />
+                                  </div>
+
+                                  {/* Surface Target */}
+                                  <div className="flex items-center gap-1 bg-slate-100 border border-slate-300 rounded px-2 py-0.5">
+                                    <span className="text-[10px] text-slate-500 font-bold uppercase">Surface:</span>
+                                    <input 
+                                      type="text"
+                                      value={item.surface}
+                                      onChange={(e) => handleUpdateShoppingItem(idx, { surface: e.target.value })}
+                                      className="bg-transparent text-slate-900 font-bold outline-none text-xs w-24"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Right: Cans to Buy, Price per Gal & Item Budget */}
+                              <div className="flex items-center justify-between lg:justify-end gap-3 shrink-0 bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs">
+                                <div className="space-y-1 text-right">
+                                  <div className="flex items-center gap-1 justify-end">
+                                    <span className="text-[10px] text-slate-500 font-bold uppercase">Buy Gallons:</span>
+                                    <input 
+                                      type="number"
+                                      min={1}
+                                      value={item.gallonsToBuy}
+                                      onChange={(e) => handleUpdateShoppingItem(idx, { gallonsToBuy: Number(e.target.value) })}
+                                      className="w-12 bg-emerald-50 border border-emerald-300 rounded p-1 font-black text-emerald-900 text-center outline-none"
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center gap-1 justify-end text-[11px] text-slate-600">
+                                    <span className="text-[10px] text-slate-500 font-bold">$/Gal:</span>
+                                    <input 
+                                      type="number"
+                                      value={item.unitPrice || 68}
+                                      onChange={(e) => handleUpdateShoppingItem(idx, { unitPrice: Number(e.target.value) })}
+                                      className="w-14 bg-slate-50 border border-slate-300 rounded p-0.5 font-bold text-slate-900 text-center outline-none text-[11px]"
+                                    />
+                                  </div>
+
+                                  <div className="text-[11px] font-bold text-slate-900 border-t border-slate-200 pt-1">
+                                    Budget: ${item.estMaterialBudget || (item.gallonsToBuy * (item.unitPrice || 68))}
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteShoppingItem(idx)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
+                                  title="Delete paint specification"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
-                )}
+                </div>
+
+                {/* 5. ROOM X SURFACE OBJECT SPECIFICATION MATRIX TABLE (IPAD & MOBILE RESPONSIVE WRAPPER) */}
+                <div className="border border-slate-300 rounded-xl overflow-hidden shadow-sm">
+                  <div className="bg-slate-100 px-3.5 sm:px-4 py-2.5 border-b border-slate-300 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider font-mono flex items-center gap-2">
+                      <Grid className="w-4 h-4 text-indigo-700" />
+                      <span>Room x Surface Specification Table (Live In-Place Editor)</span>
+                    </h3>
+                    <span className="text-[10px] font-mono text-slate-600 font-bold bg-slate-200 px-2 py-0.5 rounded uppercase">
+                      Edit dimensions & surface options
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto bg-white scrollbar-thin">
+                    <table className="w-full text-left font-mono text-xs border-collapse min-w-[700px] md:min-w-full">
+                      <thead>
+                        <tr className="bg-slate-900 text-white text-[10px] uppercase font-bold tracking-wider">
+                          <th className="p-2.5 sm:p-3 border-r border-slate-800">Room / Area Name</th>
+                          <th className="p-2.5 sm:p-3 border-r border-slate-800">Dimensions (L × W × H ft)</th>
+                          <th className="p-2.5 sm:p-3 border-r border-slate-800">Walls Area</th>
+                          <th className="p-2.5 sm:p-3 border-r border-slate-800">Ceiling Area</th>
+                          <th className="p-2.5 sm:p-3 border-r border-slate-800">Baseboards</th>
+                          <th className="p-2.5 sm:p-3 border-r border-slate-800">Win & Door Qty</th>
+                          <th className="p-2.5 sm:p-3 border-r border-slate-800">Paint Specification</th>
+                          <th className="p-2.5 sm:p-3 text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 text-[11px]">
+                        {activeRoomsForScope.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="p-6 text-slate-500 italic text-center">
+                              No rooms found for scope filter "{selectedScopeFilter.toUpperCase()}". Click "Add New Area" below to create one!
+                            </td>
+                          </tr>
+                        ) : (
+                          (selectedProject.rooms || [])
+                            .map((room, roomIdx) => ({ room, roomIdx }))
+                            .filter(({ room }) => (room.category || 'interior') === selectedScopeFilter)
+                            .map(({ room, roomIdx }, idx) => {
+                              const l = Number(room.length) || 0;
+                              const w = Number(room.width) || 0;
+                              const h = Number(room.height) || 8;
+                              const wallSqFt = room.wallsArea || (2 * h * (l + w));
+                              const ceilingSqFt = room.ceilingArea || (l * w);
+
+                              return (
+                                <tr key={room.id || roomIdx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}>
+                                  {/* Room Name Input */}
+                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                    <input
+                                      type="text"
+                                      value={room.name}
+                                      onChange={(e) => handleUpdateRoomField(roomIdx, { name: e.target.value })}
+                                      className="w-full bg-white border border-slate-300 rounded px-2 py-1 font-bold text-slate-900 focus:border-blue-600 outline-none text-xs"
+                                    />
+                                  </td>
+
+                                  {/* Dimensions (Length x Width x Height) */}
+                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                    <div className="flex items-center gap-1 font-mono text-[11px]">
+                                      <input
+                                        type="number"
+                                        value={room.length}
+                                        onChange={(e) => handleUpdateRoomField(roomIdx, { length: Number(e.target.value) })}
+                                        className="w-10 sm:w-12 bg-white border border-slate-300 rounded p-1 text-center font-bold focus:border-blue-600 outline-none"
+                                      />
+                                      <span>' ×</span>
+                                      <input
+                                        type="number"
+                                        value={room.width}
+                                        onChange={(e) => handleUpdateRoomField(roomIdx, { width: Number(e.target.value) })}
+                                        className="w-10 sm:w-12 bg-white border border-slate-300 rounded p-1 text-center font-bold focus:border-blue-600 outline-none"
+                                      />
+                                      <span>' ×</span>
+                                      <input
+                                        type="number"
+                                        value={room.height}
+                                        onChange={(e) => handleUpdateRoomField(roomIdx, { height: Number(e.target.value) })}
+                                        className="w-8 sm:w-10 bg-white border border-slate-300 rounded p-1 text-center font-bold focus:border-blue-600 outline-none"
+                                      />
+                                      <span>'</span>
+                                    </div>
+                                  </td>
+
+                                  {/* Walls Checkbox & SqFt */}
+                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={room.walls?.checked !== false}
+                                        onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                          walls: { checked: e.target.checked, qty: room.walls?.qty ?? 'auto', coats: room.walls?.coats || 2 } 
+                                        })}
+                                        className="w-4 h-4 text-blue-600 rounded"
+                                      />
+                                      <span className="font-bold text-slate-900">{wallSqFt.toFixed(0)} sqft</span>
+                                    </label>
+                                  </td>
+
+                                  {/* Ceiling Checkbox & SqFt */}
+                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!room.ceilings?.checked}
+                                        onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                          ceilings: { checked: e.target.checked, qty: room.ceilings?.qty ?? 'auto', coats: room.ceilings?.coats || 2 } 
+                                        })}
+                                        className="w-4 h-4 text-indigo-600 rounded"
+                                      />
+                                      <span className="font-bold text-indigo-900">{ceilingSqFt.toFixed(0)} sqft</span>
+                                    </label>
+                                  </td>
+
+                                  {/* Baseboard Checkbox */}
+                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                    <label className="flex items-center gap-1.5 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!room.baseboards?.checked}
+                                        onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                          baseboards: { checked: e.target.checked, qty: room.baseboards?.qty ?? 'auto', coats: room.baseboards?.coats || 2 } 
+                                        })}
+                                        className="w-4 h-4 text-slate-700 rounded"
+                                      />
+                                      <span className="text-slate-800">Baseboards</span>
+                                    </label>
+                                  </td>
+
+                                  {/* Windows & Doors Editable Controls */}
+                                  <td className="p-2 sm:p-2.5 border-r border-slate-200 space-y-1 text-[10px]">
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="text-slate-600 font-bold">Win:</span>
+                                      <input 
+                                        type="number"
+                                        value={typeof room.windows?.qty === 'number' ? room.windows.qty : 2}
+                                        onChange={(e) => handleUpdateRoomField(roomIdx, {
+                                          windows: { checked: true, qty: Number(e.target.value), coats: room.windows?.coats || 2 }
+                                        })}
+                                        className="w-10 bg-white border border-slate-300 rounded text-center font-bold outline-none"
+                                      />
+                                    </div>
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="text-slate-600 font-bold">Door:</span>
+                                      <input 
+                                        type="number"
+                                        value={typeof room.doors?.qty === 'number' ? room.doors.qty : 1}
+                                        onChange={(e) => handleUpdateRoomField(roomIdx, {
+                                          doors: { checked: true, qty: Number(e.target.value), coats: room.doors?.coats || 2 }
+                                        })}
+                                        className="w-10 bg-white border border-slate-300 rounded text-center font-bold outline-none"
+                                      />
+                                    </div>
+                                  </td>
+
+                                  {/* Paint Product Specification Input */}
+                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                    <input
+                                      type="text"
+                                      value={room.wallPaintType || 'Benjamin Moore Regal Select Eggshell'}
+                                      onChange={(e) => handleUpdateRoomField(roomIdx, { wallPaintType: e.target.value })}
+                                      className="w-full bg-blue-50/50 border border-blue-200 rounded p-1 text-[10px] text-blue-900 font-bold focus:border-blue-600 outline-none"
+                                    />
+                                  </td>
+
+                                  {/* Delete Row Action */}
+                                  <td className="p-2 sm:p-2.5 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteRoomFromDocument(roomIdx)}
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
+                                      title="Remove room from scope"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                        )}
+                      </tbody>
+                    </table>
+
+                    {/* Add Room Button Bar */}
+                    <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs text-slate-500 font-mono">
+                        Need to add another area or room to the {selectedScopeFilter.toUpperCase()} scope?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleAddRoomToDocument}
+                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add New {selectedScopeFilter.toUpperCase()} Area</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 6. PRICE & QUANTITY CALCULATION FORMULAS RUNDOWN (EDITABLE FINANCIAL PARAMS) */}
+                <div className="border border-slate-300 rounded-xl overflow-hidden bg-slate-50/50">
+                  <div className="bg-slate-100 px-4 py-3 border-b border-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Calculator className="w-4 h-4 text-emerald-700" />
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider font-mono">
+                          Financial Rates & Calculation Formula Parameters
+                        </h3>
+                        <p className="text-[10px] text-slate-500 font-mono">
+                          Adjust labor rates, sundries per room, tax rates, and discounts directly below
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowCalculationRundown(!showCalculationRundown)}
+                      className="text-xs font-mono font-bold text-blue-700 bg-white px-2.5 py-1 rounded border border-slate-300 self-start sm:self-auto cursor-pointer"
+                    >
+                      {showCalculationRundown ? 'Hide Formulas ▲' : 'View Formulas ▼'}
+                    </button>
+                  </div>
+
+                  {/* Financial Rate Inputs Bar */}
+                  <div className="p-4 bg-slate-100/70 border-b border-slate-300 grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
+                    <div className="bg-white p-2 rounded border border-slate-300 space-y-1">
+                      <label className="text-[10px] text-slate-500 font-bold uppercase block">Labor Rate ($/hr)</label>
+                      <input 
+                        type="number"
+                        value={laborRatePerHour}
+                        onChange={(e) => setLaborRatePerHour(Number(e.target.value))}
+                        className="w-full font-black text-slate-900 text-sm outline-none bg-slate-50 p-1 rounded"
+                      />
+                    </div>
+
+                    <div className="bg-white p-2 rounded border border-slate-300 space-y-1">
+                      <label className="text-[10px] text-slate-500 font-bold uppercase block">Sundries / Room ($)</label>
+                      <input 
+                        type="number"
+                        value={sundriesPerRoom}
+                        onChange={(e) => setSundriesPerRoom(Number(e.target.value))}
+                        className="w-full font-black text-slate-900 text-sm outline-none bg-slate-50 p-1 rounded"
+                      />
+                    </div>
+
+                    <div className="bg-white p-2 rounded border border-slate-300 space-y-1">
+                      <label className="text-[10px] text-slate-500 font-bold uppercase block">Tax Rate (HST %)</label>
+                      <input 
+                        type="number"
+                        value={taxRatePercent}
+                        onChange={(e) => setTaxRatePercent(Number(e.target.value))}
+                        className="w-full font-black text-slate-900 text-sm outline-none bg-slate-50 p-1 rounded"
+                      />
+                    </div>
+
+                    <div className="bg-white p-2 rounded border border-slate-300 space-y-1">
+                      <label className="text-[10px] text-slate-500 font-bold uppercase block">Discount ($)</label>
+                      <input 
+                        type="number"
+                        value={discountAmount}
+                        onChange={(e) => setDiscountAmount(Number(e.target.value))}
+                        className="w-full font-black text-rose-700 text-sm outline-none bg-rose-50 p-1 rounded"
+                      />
+                    </div>
+                  </div>
+
+                  {showCalculationRundown && (
+                    <div className="p-5 space-y-4 bg-white font-mono text-xs text-slate-800">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* 1. Area Formula Box */}
+                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5">
+                          <h4 className="font-bold text-slate-900 text-xs uppercase flex items-center gap-1.5 border-b border-slate-200 pb-1">
+                            <Layers className="w-3.5 h-3.5 text-blue-600" />
+                            <span>1. Surface Area Formulas</span>
+                          </h4>
+                          <p className="text-[11px] text-slate-600 leading-relaxed">
+                            <strong>Wall Surface:</strong> <code>2 × Height × (Length + Width)</code><br />
+                            <strong>Ceiling Surface:</strong> <code>Length × Width</code><br />
+                            <strong>Trim Length:</strong> <code>2 × (Length + Width)</code>
+                          </p>
+                          <div className="text-[11px] text-slate-800 font-bold pt-1 bg-white p-2 rounded border border-slate-200">
+                            Scope Totals: {projectMetrics.wallArea.toFixed(0)} sq ft Walls + {projectMetrics.ceilingArea.toFixed(0)} sq ft Ceilings
+                          </div>
+                        </div>
+
+                        {/* 2. Paint Gallons Required Formula Box */}
+                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5">
+                          <h4 className="font-bold text-slate-900 text-xs uppercase flex items-center gap-1.5 border-b border-slate-200 pb-1">
+                            <ShoppingCart className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>2. Paint Gallons Formula</span>
+                          </h4>
+                          <p className="text-[11px] text-slate-600 leading-relaxed">
+                            <strong>Exact Gallons:</strong> <code>(Total Sq Ft × Coats) ÷ 350 sq ft/gal</code><br />
+                            <strong>Store Cans to Buy:</strong> <code>Math.ceil(Exact Gallons)</code> (Min 1 can/color)
+                          </p>
+                          <div className="text-[11px] text-slate-800 font-bold pt-1 bg-white p-2 rounded border border-slate-200">
+                            Standard Paint Coverage: 350 sq ft per gallon (2 full coats standard)
+                          </div>
+                        </div>
+
+                        {/* 3. Material Budget Breakdown Box */}
+                        <div className="p-3.5 bg-emerald-50/50 border border-emerald-200 rounded-lg space-y-1.5">
+                          <h4 className="font-bold text-emerald-900 text-xs uppercase flex items-center gap-1.5 border-b border-emerald-200 pb-1">
+                            <DollarSign className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>3. Material Budget Breakdown & Formula</span>
+                          </h4>
+                          <p className="text-[11px] text-emerald-900 leading-relaxed">
+                            <strong>Paint Materials:</strong> <code>Sum of Shopping Items = ${projectMetrics.sumPaintMaterial.toLocaleString()}</code><br />
+                            <strong>Sundries & Prep:</strong> <code>{activeRoomsForScope.length} Areas × ${sundriesPerRoom}.00 / area = ${projectMetrics.sundriesBudget}</code><br />
+                            <em>(Covers Scotch Blue tape, 3 mil poly drop cloths, spackle, caulk, roller covers & mini-rollers)</em>
+                          </p>
+                          <div className="text-[11px] text-emerald-950 font-bold pt-1 bg-white p-2 rounded border border-emerald-300">
+                            Total Scope Material Budget = ${projectMetrics.materialCost.toLocaleString()}
+                          </div>
+                        </div>
+
+                        {/* 4. Financial & Tax Pricing Formula Box */}
+                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5">
+                          <h4 className="font-bold text-slate-900 text-xs uppercase flex items-center gap-1.5 border-b border-slate-200 pb-1">
+                            <Clock className="w-3.5 h-3.5 text-amber-600" />
+                            <span>4. Labor & Financial Grand Total Formula</span>
+                          </h4>
+                          <p className="text-[11px] text-slate-600 leading-relaxed">
+                            <strong>Labor Hours:</strong> <code>Total Sq Ft ÷ 150 sq ft/hr = {projectMetrics.totalHours} hrs</code><br />
+                            <strong>Labor Cost:</strong> <code>{projectMetrics.totalHours} hrs × ${laborRatePerHour}.00 / hr = ${projectMetrics.laborCost.toLocaleString()}</code><br />
+                            <strong>HST Tax ({taxRatePercent}%):</strong> <code>Subtotal (${projectMetrics.subtotal.toLocaleString()}) × {taxRatePercent / 100} = ${projectMetrics.hst.toLocaleString()}</code>
+                          </p>
+                          <div className="text-[11px] text-slate-900 font-bold pt-1 bg-slate-200 p-2 rounded">
+                            Grand Total: ${projectMetrics.subtotal.toLocaleString()} Subtotal + ${projectMetrics.hst.toLocaleString()} HST = ${projectMetrics.totalCost.toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 7. FINANCIAL SUMMARY BAR */}
+                <div className="border-2 border-slate-900 rounded-xl overflow-hidden p-4 bg-slate-50">
+                  <div className="flex flex-wrap items-center justify-between gap-4 font-mono text-xs">
+                    <div className="space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Scope Financial Breakdown</span>
+                      <div className="flex flex-wrap items-center gap-4 text-slate-800 font-bold">
+                        <span>Labor Budget: ${projectMetrics.laborCost.toLocaleString()}</span>
+                        <span>&bull;</span>
+                        <span>Material Budget: ${projectMetrics.materialCost.toLocaleString()}</span>
+                        <span>&bull;</span>
+                        <span>Subtotal: ${projectMetrics.subtotal.toLocaleString()}</span>
+                        <span>&bull;</span>
+                        <span>HST ({taxRatePercent}%): ${projectMetrics.hst.toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 text-white p-3 rounded-lg text-right shrink-0">
+                      <span className="text-[10px] text-slate-400 uppercase block font-bold">Grand Total ({selectedScopeFilter.toUpperCase()})</span>
+                      <span className="text-lg font-black text-emerald-400">${projectMetrics.totalCost.toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
 
                 {/* 8. SIGNATURE & QUALITY ASSURANCE FOOTER */}
-                <div className="pt-6 border-t-2 border-slate-300 space-y-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 font-mono text-xs">
+                <div className="pt-6 border-t-2 border-slate-300 space-y-6 font-mono text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
                     <div className="space-y-4">
                       <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider block">
                         Site Lead / Operations Sign-off
                       </span>
                       <div className="h-10 border-b-2 border-slate-900 flex items-end pb-1 font-bold text-slate-800">
-                        Daniel Rust (Operations Lead)
+                        <input 
+                          type="text"
+                          value={supervisorName}
+                          onChange={(e) => setSupervisorName(e.target.value)}
+                          className="w-full font-bold text-slate-900 outline-none bg-transparent"
+                        />
                       </div>
                       <div className="flex justify-between text-[10px] text-slate-500">
                         <span>Authorized Signature</span>
@@ -1585,7 +1684,7 @@ export default function WorkOrdersList({
                     </div>
                   </div>
 
-                  <div className="bg-slate-100 p-3 rounded-lg text-center font-mono text-[10px] text-slate-600 space-y-0.5">
+                  <div className="bg-slate-100 p-3 rounded-lg text-center text-[10px] text-slate-600 space-y-0.5">
                     <p className="font-bold text-slate-800">CAPSTONE PAINTING INC. &bull; QUALITY ASSURANCE GUARANTEE</p>
                     <p>All work is executed according to professional painting standards using premium materials. Thank you for choosing Capstone Painting!</p>
                   </div>
@@ -1597,16 +1696,16 @@ export default function WorkOrdersList({
             {/* Modal Control Footer Bar */}
             <div className="p-4 sm:px-6 border-t border-neutral-800 bg-[#111111] flex items-center justify-between no-print">
               <span className="text-xs text-zinc-400 font-mono">
-                PaintCRM Document Engine &bull; Official Work Order WO-#{selectedProject.id}
+                PaintCRM Interactive Document Engine &bull; Official Work Order WO-#{selectedProject.id}
               </span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => handleStartEditing(selectedProject)}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md"
+                  onClick={handleSaveDocument}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-900/30"
                 >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Edit Work Order</span>
+                  <Save className="w-4 h-4" />
+                  <span>Save Work Order Changes</span>
                 </button>
                 <button
                   type="button"

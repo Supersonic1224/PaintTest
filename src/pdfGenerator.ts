@@ -1076,3 +1076,317 @@ export function generateReceiptPDF({
 
   return { base64, blobUrl };
 }
+
+interface WorkOrderPDFParams {
+  project: ProjectType;
+  client?: ClientLead;
+  rooms: RoomSpec[];
+  scopeCategory: 'all' | 'interior' | 'exterior' | 'deck';
+  liveSummary: {
+    laborCost: number;
+    materialCost: number;
+    subtotal: number;
+    hst: number;
+    total?: number;
+    totalCost?: number;
+    totalHours?: number;
+  };
+  teamNotes?: string;
+  specialConditions?: string;
+  inclusions?: string;
+  exclusions?: string;
+  description?: string;
+  shoppingList?: Array<{
+    brand: string;
+    paintName: string;
+    colorName: string;
+    colorCode: string;
+    sheen: string;
+    surface: string;
+    gallonsToBuy: number;
+    estMaterialBudget: number;
+  }>;
+}
+
+export function generateWorkOrderPDF({
+  project,
+  client,
+  rooms,
+  scopeCategory,
+  liveSummary,
+  teamNotes = '',
+  specialConditions = '',
+  inclusions = '',
+  exclusions = '',
+  description = '',
+  shoppingList = [],
+}: WorkOrderPDFParams): { base64: string; blobUrl: string } {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth(); // 210mm
+  const pageHeight = doc.internal.pageSize.getHeight(); // 297mm
+  let y = 15;
+
+  const filteredRooms = rooms.filter(r => scopeCategory === 'all' || (r.category || 'interior') === scopeCategory);
+
+  const scopeTitle = scopeCategory === 'interior' ? 'INTERIOR WORK ORDER'
+    : scopeCategory === 'exterior' ? 'EXTERIOR WORK ORDER'
+    : scopeCategory === 'deck' ? 'DECK WORK ORDER'
+    : 'MASTER WORK ORDER (ALL SCOPES)';
+
+  const ensureSpace = (neededHeight: number) => {
+    if (y + neededHeight > pageHeight - 15) {
+      doc.addPage();
+      y = 15;
+    }
+  };
+
+  // 1. Header
+  doc.setFillColor(30, 41, 59); // Slate-800
+  doc.rect(0, 0, pageWidth, 36, 'F');
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('Helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text(scopeTitle, 15, 16);
+
+  doc.setFont('Helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`Work Order Ref: WO-#${project.id} | Issued: ${new Date().toLocaleDateString()}`, 15, 24);
+  doc.text(`Project: ${project.title || 'Painting Work Order'}`, 15, 30);
+
+  doc.setFillColor(16, 185, 129); // Emerald
+  doc.rect(pageWidth - 55, 10, 40, 8, 'F');
+  doc.setFont('Helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.text('CREW SPEC', pageWidth - 52, 15.5);
+
+  y = 44;
+
+  // 2. Client & Job Site Info
+  doc.setFillColor(248, 250, 252);
+  doc.rect(15, y, pageWidth - 30, 24, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.rect(15, y, pageWidth - 30, 24, 'S');
+
+  doc.setFont('Helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(30, 58, 138);
+  doc.text('CLIENT & JOB SITE LOCATION', 18, y + 6);
+
+  doc.setFont('Helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(51, 51, 51);
+  doc.text(`Client Name: ${client?.name || 'Valued Client'}`, 18, y + 12);
+  doc.text(`Phone: ${client?.phone || '(555) 000-0000'} | Email: ${client?.email || 'N/A'}`, 18, y + 17);
+
+  doc.text(`Site Address: ${client?.address || 'On-site Location'}`, pageWidth / 2 + 5, y + 12);
+  doc.text(`Scope Areas: ${filteredRooms.length} Area(s)`, pageWidth / 2 + 5, y + 17);
+
+  y += 30;
+
+  // 3. Project Description, Inclusions & Exclusions
+  const projDesc = description || project.description || '';
+  const projInc = inclusions || (project as any).inclusions || '';
+  const projExc = exclusions || (project as any).exclusions || '';
+
+  if (projDesc || projInc || projExc) {
+    ensureSpace(30);
+    doc.setFillColor(240, 249, 255); // Light sky
+    doc.rect(15, y, pageWidth - 30, 26, 'F');
+    doc.setDrawColor(186, 230, 253);
+    doc.rect(15, y, pageWidth - 30, 26, 'S');
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(3, 105, 161);
+    doc.text('SCOPE OF WORK, INCLUSIONS & EXCLUSIONS', 18, y + 6);
+
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(51, 51, 51);
+
+    if (projDesc) {
+      doc.text(`Scope: ${projDesc.substring(0, 110)}`, 18, y + 11);
+    }
+    if (projInc) {
+      doc.text(`Inclusions: ${projInc.substring(0, 110)}`, 18, y + 16);
+    }
+    if (projExc) {
+      doc.text(`Exclusions: ${projExc.substring(0, 110)}`, 18, y + 21);
+    }
+
+    y += 32;
+  }
+
+  // 4. Crew Notes & Site Protocol
+  if (teamNotes || specialConditions) {
+    ensureSpace(24);
+    doc.setFillColor(254, 252, 232); // Amber light
+    doc.rect(15, y, pageWidth - 30, 20, 'F');
+    doc.setDrawColor(253, 224, 71);
+    doc.rect(15, y, pageWidth - 30, 20, 'S');
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(180, 83, 9);
+    doc.text('SPECIAL SITE INSTRUCTIONS & ACCESS NOTES', 18, y + 6);
+
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(51, 51, 51);
+    const notesText = [teamNotes, specialConditions].filter(Boolean).join(' | ');
+    doc.text(doc.splitTextToSize(notesText, pageWidth - 40), 18, y + 12);
+
+    y += 26;
+  }
+
+  // 5. Painter Shopping List with Sheen
+  if (shoppingList && shoppingList.length > 0) {
+    ensureSpace(25);
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(30, 58, 138);
+    doc.text('PAINTER MATERIALS & SHEEN SPECIFICATIONS', 15, y);
+    y += 5;
+
+    doc.setFillColor(30, 41, 59);
+    doc.rect(15, y, pageWidth - 30, 7, 'F');
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text('Brand / Paint Line', 18, y + 4.5);
+    doc.text('Color & Code', 75, y + 4.5);
+    doc.text('Sheen', 125, y + 4.5);
+    doc.text('Surface', 155, y + 4.5);
+    doc.text('Gallons', pageWidth - 20, y + 4.5, { align: 'right' });
+    y += 7;
+
+    shoppingList.forEach((item, idx) => {
+      ensureSpace(9);
+      const bgVal = idx % 2 === 0 ? 255 : 248;
+      doc.setFillColor(bgVal, bgVal, bgVal);
+      doc.rect(15, y, pageWidth - 30, 8, 'F');
+      doc.setDrawColor(226, 232, 240);
+      doc.line(15, y + 8, pageWidth - 15, y + 8);
+
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(30, 41, 59);
+      doc.text(`${item.brand} ${item.paintName}`.substring(0, 32), 18, y + 5);
+
+      doc.setFont('Helvetica', 'normal');
+      doc.setTextColor(51, 51, 51);
+      doc.text(`${item.colorName} (${item.colorCode})`.substring(0, 28), 75, y + 5);
+
+      doc.setFont('Helvetica', 'bold');
+      doc.setTextColor(2, 132, 199); // Sky blue
+      doc.text(`${item.sheen}`, 125, y + 5);
+
+      doc.setFont('Helvetica', 'normal');
+      doc.setTextColor(51, 51, 51);
+      doc.text(`${item.surface}`, 155, y + 5);
+      doc.text(`${item.gallonsToBuy} Gal`, pageWidth - 20, y + 5, { align: 'right' });
+
+      y += 8;
+    });
+
+    y += 8;
+  }
+
+  // 6. Financial & Labor Budget Breakdown
+  ensureSpace(22);
+  doc.setFont('Helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(30, 58, 138);
+  doc.text('FINANCIAL & CREW BUDGET BREAKDOWN', 15, y);
+  y += 5;
+
+  doc.setFillColor(241, 245, 249);
+  doc.rect(15, y, pageWidth - 30, 14, 'F');
+  doc.setFont('Helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(30, 41, 59);
+  const grandTotal = liveSummary.total ?? liveSummary.totalCost ?? (liveSummary.subtotal + liveSummary.hst);
+  doc.text(`Labor Budget: $${liveSummary.laborCost.toLocaleString()}`, 18, y + 9);
+  doc.text(`Material Budget: $${liveSummary.materialCost.toLocaleString()}`, 70, y + 9);
+  doc.text(`Subtotal: $${liveSummary.subtotal.toLocaleString()}`, 125, y + 9);
+  doc.text(`Total: $${grandTotal.toLocaleString()}`, pageWidth - 20, y + 9, { align: 'right' });
+
+  y += 20;
+
+  // 7. Room & Surface Specifications Table
+  ensureSpace(30);
+  doc.setFont('Helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.setTextColor(30, 58, 138);
+  doc.text('ROOM & SURFACE SPECIFICATIONS', 15, y);
+  y += 6;
+
+  doc.setFillColor(30, 41, 59);
+  doc.rect(15, y, pageWidth - 30, 8, 'F');
+  doc.setFont('Helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(255, 255, 255);
+  doc.text('Area / Room', 18, y + 5.5);
+  doc.text('Dimensions', 60, y + 5.5);
+  doc.text('Walls & Ceiling Spec', 100, y + 5.5);
+  doc.text('Paint Product', 150, y + 5.5);
+  y += 8;
+
+  filteredRooms.forEach((r, idx) => {
+    ensureSpace(12);
+    const bgVal = idx % 2 === 0 ? 255 : 248;
+    doc.setFillColor(bgVal, bgVal, bgVal);
+    doc.rect(15, y, pageWidth - 30, 10, 'F');
+    doc.setDrawColor(241, 245, 249);
+    doc.line(15, y + 10, pageWidth - 15, y + 10);
+
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`${r.name}`, 18, y + 6);
+
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`${r.length || 0}'x${r.width || 0}'x${r.height || 8}'`, 60, y + 6);
+
+    const wallSpec = r.walls?.checked !== false ? `${r.wallsArea || 0}sqft (2c)` : '—';
+    doc.text(wallSpec, 100, y + 6);
+
+    const product = r.wallPaintType || 'BM Regal Select Eggshell';
+    doc.text(product.substring(0, 28), 150, y + 6);
+
+    y += 10;
+  });
+
+  y += 10;
+
+  // 8. Signatures Footer
+  ensureSpace(28);
+  doc.setFont('Helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text('Operations Lead Sign-off: _______________________', 15, y);
+  doc.text('Customer Acceptance: _______________________', pageWidth / 2 + 10, y);
+  doc.setFont('Helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.text('Date: ____ / ____ / ________', 15, y + 6);
+  doc.text('Date: ____ / ____ / ________', pageWidth / 2 + 10, y + 6);
+
+  const base64 = doc.output('datauristring').split(',')[1];
+  let blobUrl = '';
+  try {
+    const blob = doc.output('blob');
+    blobUrl = URL.createObjectURL(blob);
+  } catch (e) {
+    console.error('Blob generation failed:', e);
+  }
+
+  return { base64, blobUrl };
+}

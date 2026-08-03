@@ -133,7 +133,7 @@ export default function SignInGate({
                     required
                     value={inputEmail}
                     onChange={(e) => setInputEmail(e.target.value)}
-                    placeholder="e.g. aalnasih4846@gmail.com"
+                    placeholder="e.g. daniel@capstonepainting.ca"
                     className="w-full bg-neutral-950 border border-neutral-800 focus:border-blue-500 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none transition font-mono"
                   />
                 </div>

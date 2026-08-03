@@ -273,10 +273,13 @@ export default function App() {
   const isAuthorizedUser = useMemo(() => {
     if (isDemoMode) return true;
 
-    // Check if user is the main developer/owner email to auto-authorize
+    // Check if user is main owner/admin email to auto-authorize
     const loggedInEmail = dbProvider === 'supabase' ? supabaseUser?.email : currentUser?.email;
-    if (loggedInEmail && loggedInEmail.trim().toLowerCase() === 'aalnasih4846@gmail.com') {
-      return true;
+    if (loggedInEmail) {
+      const clean = loggedInEmail.trim().toLowerCase();
+      if (clean === 'aalnasih4846@gmail.com' || clean === 'daniel@capstonepainting.ca') {
+        return true;
+      }
     }
 
     if (dbProvider === 'supabase') {
@@ -447,7 +450,7 @@ export default function App() {
         setProjects(pList);
       }
     } catch (err) {
-      console.error(`Error syncing ${activeProvider} user database:`, err);
+      console.warn(`Warning during ${activeProvider} user database sync:`, err);
       if (activeProvider === 'supabase') {
         // Clear tables if there are permissions or RLS blocks to prevent stale data visibility
         setClients([]);

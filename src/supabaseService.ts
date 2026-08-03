@@ -114,20 +114,25 @@ function mapDbToProject(dbRow: any): ProjectDetails {
 export async function fetchClientsFromSupabase(userId?: string): Promise<ClientLead[]> {
   const client = getSupabase();
   if (!client) {
-    throw new Error('Supabase is not configured.');
+    return [];
   }
 
-  const { data, error } = await client
-    .from('clients')
-    .select('*')
-    .order('created_at', { ascending: false });
+  try {
+    const { data, error } = await client
+      .from('clients')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-  if (error) {
-    console.error('Supabase fetch clients error:', error);
-    throw error;
+    if (error) {
+      console.warn('Supabase fetch clients warning:', error.message || error);
+      return [];
+    }
+
+    return (data || []).map(mapDbToClient);
+  } catch (err) {
+    console.warn('Supabase fetch clients exception:', err);
+    return [];
   }
-
-  return (data || []).map(mapDbToClient);
 }
 
 export async function saveClientToSupabase(userId: string, lead: ClientLead): Promise<void> {
@@ -172,20 +177,25 @@ export async function deleteClientFromSupabase(clientId: string): Promise<void> 
 export async function fetchProjectsFromSupabase(userId?: string): Promise<ProjectDetails[]> {
   const client = getSupabase();
   if (!client) {
-    throw new Error('Supabase is not configured.');
+    return [];
   }
 
-  const { data, error } = await client
-    .from('projects')
-    .select('*')
-    .order('created_at', { ascending: false });
+  try {
+    const { data, error } = await client
+      .from('projects')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-  if (error) {
-    console.error('Supabase fetch projects error:', error);
-    throw error;
+    if (error) {
+      console.warn('Supabase fetch projects warning:', error.message || error);
+      return [];
+    }
+
+    return (data || []).map(mapDbToProject);
+  } catch (err) {
+    console.warn('Supabase fetch projects exception:', err);
+    return [];
   }
-
-  return (data || []).map(mapDbToProject);
 }
 
 export async function saveProjectToSupabase(userId: string, project: ProjectDetails): Promise<void> {
@@ -330,20 +340,25 @@ export async function updateProjectSignatureInSupabase(
 export async function fetchAuthorizedUsers(): Promise<AuthorizedUser[]> {
   const client = getSupabase();
   if (!client) {
-    throw new Error('Supabase is not configured.');
+    return [];
   }
 
-  const { data, error } = await (client
-    .from('authorized_users') as any)
-    .select('*')
-    .order('created_at', { ascending: true });
+  try {
+    const { data, error } = await (client
+      .from('authorized_users') as any)
+      .select('*')
+      .order('created_at', { ascending: true });
 
-  if (error) {
-    console.error('Supabase fetch authorized_users error:', error);
-    throw error;
+    if (error) {
+      console.warn('Supabase fetch authorized_users warning:', error.message || error);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.warn('Supabase fetch authorized_users exception:', err);
+    return [];
   }
-
-  return data || [];
 }
 
 export async function addAuthorizedUser(email: string): Promise<AuthorizedUser> {
@@ -418,8 +433,8 @@ export async function checkIsAuthorized(email?: string): Promise<boolean> {
   if (!email) return false;
   const cleanEmail = email.trim().toLowerCase();
 
-  // Auto-authorize owner
-  if (cleanEmail === 'aalnasih4846@gmail.com') {
+  // Auto-authorize owner & admin
+  if (cleanEmail === 'aalnasih4846@gmail.com' || cleanEmail === 'daniel@capstonepainting.ca') {
     return true;
   }
 

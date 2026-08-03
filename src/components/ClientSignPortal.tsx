@@ -339,7 +339,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            clientEmail: client?.email || 'aalnasih4846@gmail.com',
+            clientEmail: client?.email || 'daniel@capstonepainting.ca',
             clientName: client?.name || signerName.trim(),
             amount: firstAmount,
             proposalNo: project.id,
@@ -428,7 +428,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
           client: client || {
             id: project.clientId,
             name: signerName.trim(),
-            email: client?.email || 'aalnasih4846@gmail.com',
+            email: client?.email || 'daniel@capstonepainting.ca',
             phone: client?.phone || '',
             address: client?.address || '',
             status: 'Active',
@@ -454,7 +454,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
           clientSigned: true,
           clientAddress: client?.address || '',
           clientPhone: client?.phone || '',
-          clientEmail: client?.email || 'aalnasih4846@gmail.com',
+          clientEmail: client?.email || 'daniel@capstonepainting.ca',
           projectDate: project.createdAt ? project.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
           proposalNo: project.id,
           generalNotes: project.generalNotes || '',
@@ -486,8 +486,8 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
 
           await sendProposalEmail({
             accessToken: project.contractorAccessToken,
-            to: client?.email || 'aalnasih4846@gmail.com',
-            bcc: 'aalnasih4846@gmail.com',
+            to: client?.email || 'daniel@capstonepainting.ca',
+            bcc: 'daniel@capstonepainting.ca',
             subject: emailSubject,
             body: emailBody,
             pdfBase64: proposalPdfBase64,

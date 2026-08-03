@@ -484,11 +484,18 @@ export async function fetchAuthorizedUsersFromFirestore(): Promise<AuthorizedUse
         email: email,
         created_at: new Date().toISOString()
       }));
-      // Always include owner
+      // Always include owner & admin
       if (!localEmails.includes('aalnasih4846@gmail.com')) {
         users.push({
           id: 'aalnasih4846_gmail_com',
           email: 'aalnasih4846@gmail.com',
+          created_at: new Date().toISOString()
+        });
+      }
+      if (!localEmails.includes('daniel@capstonepainting.ca')) {
+        users.push({
+          id: 'daniel_capstonepainting_ca',
+          email: 'daniel@capstonepainting.ca',
           created_at: new Date().toISOString()
         });
       }
@@ -576,8 +583,8 @@ export async function checkIsAuthorizedInFirestore(email: string): Promise<boole
   if (!email) return false;
   const cleanEmail = email.trim().toLowerCase();
   
-  // Auto-authorize owner
-  if (cleanEmail === 'aalnasih4846@gmail.com') {
+  // Auto-authorize owner & admin
+  if (cleanEmail === 'aalnasih4846@gmail.com' || cleanEmail === 'daniel@capstonepainting.ca') {
     return true;
   }
   

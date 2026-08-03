@@ -4,6 +4,7 @@ import { googleSignIn, setAccessToken } from '../firebase';
 import { sendProposalEmail } from '../gmailService';
 import { generateProposalPDF, generateReceiptPDF } from '../pdfGenerator';
 import { uploadProjectPhotoToSupabaseBucket } from '../supabaseService';
+import { getUniqueRoomName } from '../utils/roomUtils';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import { 
   ArrowLeft, 
@@ -43,6 +44,7 @@ import {
   FolderPlus,
   Folder,
   FolderOpen,
+  Target,
   ListTodo,
   Edit3,
   Layers
@@ -2268,11 +2270,12 @@ export default function ProjectDetails({
   // Add room preset to project spec
   const handleAddRoomPreset = (presetName: string, length = cfgLength, width = cfgWidth, category: 'interior' | 'exterior' | 'deck' = 'interior') => {
     const newId = 'room-' + Math.random().toString(36).substring(2, 9);
+    const uniqueName = getUniqueRoomName(rooms, presetName);
     
     // Copy configurations completely from sidesheet controls
     const newRoom: RoomSpec = {
       id: newId,
-      name: presetName,
+      name: uniqueName,
       length,
       width,
       height: cfgCeilingHeight,
@@ -2323,7 +2326,7 @@ export default function ProjectDetails({
       ...prev,
       [newId]: true // Open accordion automatically
     }));
-    triggerNotification(`Added ${presetName} spec to worksheet list!`);
+    triggerNotification(`Added ${uniqueName} spec to worksheet list!`);
   };
 
   // Add custom or preset area to a specific room
@@ -2364,13 +2367,14 @@ export default function ProjectDetails({
   const handleCopyRoom = (room: RoomSpec, e: React.MouseEvent) => {
     e.stopPropagation();
     const newId = 'room-' + Math.random().toString(36).substring(2, 9);
+    const uniqueName = getUniqueRoomName(rooms, room.name);
     const cloned: RoomSpec = {
       ...room,
       id: newId,
-      name: `${room.name} (Copy)`
+      name: uniqueName
     };
     setRooms(prev => [...prev, cloned]);
-    triggerNotification(`Cloned room ${room.name}!`);
+    triggerNotification(`Cloned room ${room.name} as ${uniqueName}!`);
   };
 
   // Delete a room (allows deleting down to empty for draft estimates)
@@ -3560,6 +3564,44 @@ export default function ProjectDetails({
                   </span>
                 </div>
 
+              </div>
+
+              {/* 50% Direct Cost Benchmark Target Breakdown Card */}
+              <div className="bg-neutral-900/60 border border-blue-900/40 p-3.5 rounded-xl mt-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider font-mono flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    50% Direct Cost Benchmark Target
+                  </span>
+                  <span className="text-[9px] text-zinc-500 font-mono">35% Labor | 15% Material</span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                  <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
+                    <div className="text-[9px] text-zinc-500 uppercase font-bold">Target Labor (35%)</div>
+                    <div className="text-zinc-200 font-bold mt-0.5 text-xs">
+                      ${Math.round(liveSummary.subtotal * 0.35).toLocaleString()}
+                    </div>
+                    <div className="text-[9px] text-zinc-400 mt-1">
+                      Actual: <span className={liveSummary.laborCost <= liveSummary.subtotal * 0.35 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>${liveSummary.laborCost.toLocaleString()}</span> ({((liveSummary.laborCost / (liveSummary.subtotal || 1)) * 100).toFixed(1)}%)
+                    </div>
+                  </div>
+
+                  <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
+                    <div className="text-[9px] text-zinc-500 uppercase font-bold">Target Material (15%)</div>
+                    <div className="text-zinc-200 font-bold mt-0.5 text-xs">
+                      ${Math.round(liveSummary.subtotal * 0.15).toLocaleString()}
+                    </div>
+                    <div className="text-[9px] text-zinc-400 mt-1">
+                      Actual: <span className={liveSummary.materialCost <= liveSummary.subtotal * 0.15 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>${liveSummary.materialCost.toLocaleString()}</span> ({((liveSummary.materialCost / (liveSummary.subtotal || 1)) * 100).toFixed(1)}%)
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1 border-t border-neutral-800/80 text-[10px] font-mono">
+                  <span className="text-zinc-400">Total Direct Target (50%): <strong className="text-zinc-200">${Math.round(liveSummary.subtotal * 0.50).toLocaleString()}</strong></span>
+                  <span className="text-zinc-400">Gross Margin Target: <strong className="text-emerald-400">50.0%</strong></span>
+                </div>
               </div>
 
               {/* Dynamic Adjustments Panel */}
@@ -5026,26 +5068,47 @@ export default function ProjectDetails({
 
             {/* Work scope & standard specs table */}
             <div className="space-y-3 my-8">
-              <span className="text-[10px] text-zinc-400 uppercase font-black tracking-widest block">Scope of Work (Standard Services)</span>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-zinc-400 uppercase font-black tracking-widest block">Scope of Work (Standard Services)</span>
+                <span className="text-[10px] text-zinc-500 font-mono italic">Click "Make Optional" on any area to make it a client choice</span>
+              </div>
               <div className="border border-zinc-200 rounded-xl overflow-hidden divide-y divide-zinc-150 bg-zinc-50/50">
                 <div className="grid grid-cols-12 gap-2 bg-zinc-100 p-3 text-[10px] text-zinc-500 uppercase font-bold font-mono">
                   <div className="col-span-5 text-left">Room / Area Description</div>
                   <div className="col-span-4 text-left">Areas Applied</div>
-                  <div className="col-span-3 text-right">Flat Price</div>
+                  <div className="col-span-3 text-right">Flat Price & Option Toggle</div>
                 </div>
 
                 {rooms.filter(r => !r.isOption).length === 0 ? (
                   <div className="p-4 text-center text-xs text-zinc-400 italic">
-                    No standard rooms configured in this scope.
+                    All areas are currently marked as optional add-ons. Click "Include in Scope" below to move an area into standard services.
                   </div>
                 ) : (
                   rooms.filter(r => !r.isOption).map(room => {
                     const price = liveSummary.roomCosts[room.id] || 0;
                     return (
-                      <div key={room.id} className="grid grid-cols-12 gap-2 p-3.5 items-center text-xs">
-                        <div className="col-span-5 text-left font-bold text-zinc-900 font-mono">{room.name}</div>
-                        <div className="col-span-4 text-left text-zinc-600 truncate">{getRoomHighlightsText(room)}</div>
-                        <div className="col-span-3 text-right font-bold text-zinc-900 font-mono">${price.toLocaleString()}</div>
+                      <div key={room.id} className="p-3 sm:p-3.5 flex flex-col sm:grid sm:grid-cols-12 gap-2 sm:items-center text-xs">
+                        <div className="sm:col-span-4 text-left font-bold text-zinc-900 font-mono flex items-center justify-between sm:justify-start gap-2">
+                          <span>{room.name}</span>
+                          <span className="font-bold text-zinc-900 sm:hidden">${price.toLocaleString()}</span>
+                        </div>
+                        <div className="sm:col-span-5 text-left text-zinc-600 font-mono text-[11px] leading-relaxed break-words">
+                          {getRoomHighlightsText(room)}
+                        </div>
+                        <div className="sm:col-span-3 text-right font-mono flex items-center justify-between sm:justify-end gap-2 pt-1 sm:pt-0 border-t sm:border-t-0 border-zinc-200/60">
+                          <span className="font-bold text-zinc-900 hidden sm:inline">${price.toLocaleString()}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRooms(prev => prev.map(r => r.id === room.id ? { ...r, isOption: true } : r));
+                              triggerNotification(`Moved ${room.name} to Optional Extras!`);
+                            }}
+                            className="px-2.5 py-1 text-[10px] bg-zinc-200 hover:bg-amber-100 text-zinc-700 hover:text-amber-900 font-bold rounded border border-zinc-300 transition cursor-pointer"
+                            title="Convert area into an optional add-on choice for the client"
+                          >
+                            Make Optional
+                          </button>
+                        </div>
                       </div>
                     );
                   })
@@ -5056,26 +5119,52 @@ export default function ProjectDetails({
             {/* Optional choices table (highlighted in yellow outline/background if any exist) */}
             {rooms.some(r => r.isOption) && (
               <div className="space-y-3 my-8">
-                <span className="text-[10px] text-yellow-600 uppercase font-black tracking-widest block flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full" /> Optional Extras & Choices (Client Add-Ons)
-                </span>
-                <div className="border border-yellow-200 rounded-xl overflow-hidden divide-y divide-yellow-100 bg-yellow-50/30">
-                  <div className="grid grid-cols-12 gap-2 bg-yellow-100/55 p-3 text-[10px] text-yellow-700 uppercase font-bold font-mono">
-                    <div className="col-span-5 text-left">Room / Area Description</div>
-                    <div className="col-span-4 text-left">Areas Applied</div>
-                    <div className="col-span-3 text-right">Optional Flat Price</div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-amber-600 uppercase font-black tracking-widest flex items-center gap-1.5 font-mono">
+                    <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                    Optional Extras & Choices (Client Add-Ons)
+                  </span>
+                  <span className="text-[10px] text-amber-700 font-mono font-bold">
+                    Toggle switches to include or exclude optional add-ons
+                  </span>
+                </div>
+                <div className="border-2 border-amber-300/80 rounded-xl overflow-hidden divide-y divide-amber-200/60 bg-amber-50/40 shadow-xs">
+                  <div className="grid grid-cols-12 gap-2 bg-amber-100/80 p-3 text-[10px] text-amber-900 uppercase font-bold font-mono">
+                    <div className="col-span-5 text-left">Optional Area / Service</div>
+                    <div className="col-span-4 text-left">Specifications</div>
+                    <div className="col-span-3 text-right">Optional Upgrade Price</div>
                   </div>
 
                   {rooms.filter(r => r.isOption).map(room => {
                     const price = liveSummary.roomCosts[room.id] || 0;
                     return (
-                      <div key={room.id} className="grid grid-cols-12 gap-2 p-3.5 items-center text-xs text-yellow-950">
-                        <div className="col-span-5 text-left font-bold font-mono flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full" />
-                          {room.name}
+                      <div key={room.id} className="p-3 sm:p-3.5 flex flex-col sm:grid sm:grid-cols-12 gap-2 sm:items-center text-xs text-amber-950">
+                        <div className="sm:col-span-4 text-left font-bold font-mono flex items-center justify-between sm:justify-start gap-1.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full shrink-0" />
+                            <span>{room.name}</span>
+                            <span className="text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-extrabold">OPTION</span>
+                          </div>
+                          <span className="font-bold text-amber-950 sm:hidden">+${price.toLocaleString()}</span>
                         </div>
-                        <div className="col-span-4 text-left text-yellow-800 truncate">{getRoomHighlightsText(room)}</div>
-                        <div className="col-span-3 text-right font-bold font-mono">${price.toLocaleString()}</div>
+                        <div className="sm:col-span-5 text-left text-amber-900/80 font-mono text-[11px] leading-relaxed break-words">
+                          {getRoomHighlightsText(room)}
+                        </div>
+                        <div className="sm:col-span-3 text-right font-mono flex items-center justify-between sm:justify-end gap-2 pt-1 sm:pt-0 border-t sm:border-t-0 border-amber-200/60">
+                          <span className="font-bold text-amber-950 hidden sm:inline">+${price.toLocaleString()}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRooms(prev => prev.map(r => r.id === room.id ? { ...r, isOption: false } : r));
+                              triggerNotification(`Included ${room.name} into standard proposal scope!`);
+                            }}
+                            className="px-2.5 py-1 text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-xs transition cursor-pointer flex items-center gap-1"
+                            title="Click to include this option in the main proposal scope"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Include in Scope</span>
+                          </button>
+                        </div>
                       </div>
                     );
                   })}

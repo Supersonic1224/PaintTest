@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { ProjectDetails, ClientLead, RoomSpec, SurfaceTask, ProjectTask } from '../types';
 import { generateWorkOrderPDF } from '../pdfGenerator';
+import { getUniqueRoomName } from '../utils/roomUtils';
 import { 
   Wrench, 
   CheckCircle, 
@@ -27,7 +28,11 @@ import {
   Grid,
   Info,
   Building,
-  UserCheck
+  UserCheck,
+  Lock,
+  Target,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 export interface PainterShoppingItem {
@@ -206,8 +211,12 @@ export default function WorkOrdersList({
   const [checkedShoppingItems, setCheckedShoppingItems] = useState<Record<string, boolean>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // VIEW MODE: 'matrix' (table grid) vs 'paintScoutNotes' (PaintScout "write it yourself" freeform notes mode)
+  const [workOrderViewMode, setWorkOrderViewMode] = useState<'matrix' | 'paintScoutNotes'>('matrix');
+
   // EDITABLE DOCUMENT STATE OVERRIDES
   const [editableShoppingList, setEditableShoppingList] = useState<PainterShoppingItem[]>([]);
+  const [showMobileOptions, setShowMobileOptions] = useState<boolean>(false);
   const [supervisorName, setSupervisorName] = useState<string>('Daniel Rust, Operations Owner');
   const [supervisorPhone, setSupervisorPhone] = useState<string>('(226) 499-0079');
   const [supervisorEmail, setSupervisorEmail] = useState<string>('daniel@capstonepainting.ca');
@@ -357,9 +366,11 @@ export default function WorkOrdersList({
     const sundriesBudget = rooms.length * sundriesPerRoom;
     const materialCost = Math.max(50, sumPaintMaterial + sundriesBudget);
 
+    // Use labor cost from proposal summary if defined, ensuring 1:1 parity between Estimate and Work Order!
+    const summaryLabor = selectedProject.summary?.laborCost;
     const baseLabor = Math.round((totalSqFt * 1.85) + (totalItemsQty * 45));
-    const laborCost = Math.max(150, baseLabor);
-    const totalHours = Math.max(4, Math.round((laborCost / laborRatePerHour) * 10) / 10);
+    const laborCost = (summaryLabor && summaryLabor > 0) ? summaryLabor : Math.max(150, baseLabor);
+    const totalHours = Math.max(0.5, Math.round((laborCost / (laborRatePerHour || 85)) * 10) / 10);
     const subtotal = Math.max(0, laborCost + materialCost - discountAmount);
     const hst = Math.round(subtotal * (taxRatePercent / 100) * 100) / 100;
     const totalCost = Math.round(subtotal + hst);
@@ -444,9 +455,12 @@ export default function WorkOrdersList({
   const handleAddRoomToDocument = () => {
     if (!selectedProject) return;
     const newCat = selectedScopeFilter;
+    const baseName = `New ${newCat.charAt(0).toUpperCase() + newCat.slice(1)} Area`;
+    const uniqueName = getUniqueRoomName(selectedProject.rooms || [], baseName);
+
     const newRoom: RoomSpec = {
       id: 'room-' + Date.now(),
-      name: `New ${newCat.charAt(0).toUpperCase() + newCat.slice(1)} Area`,
+      name: uniqueName,
       category: newCat,
       length: 12,
       width: 10,
@@ -465,7 +479,7 @@ export default function WorkOrdersList({
       ...selectedProject,
       rooms: [...(selectedProject.rooms || []), newRoom]
     });
-    triggerToast(`Added new area to ${newCat.toUpperCase()} work order!`);
+    triggerToast(`Added ${uniqueName} to ${newCat.toUpperCase()} work order!`);
   };
 
   const handleDeleteRoomFromDocument = (roomIndex: number) => {
@@ -492,6 +506,51 @@ export default function WorkOrdersList({
 
   const handleDeleteProtocol = (id: string) => {
     setSiteProtocols(siteProtocols.filter(p => p.id !== id));
+  };
+
+  // PAINTSCOUT NOTES GENERATOR HELPER
+  const generateProposalNoteForRoom = (room: RoomSpec): string => {
+    const l = Number(room.length) || 0;
+    const w = Number(room.width) || 0;
+    const h = Number(room.height) || 8;
+    
+    const surfaces: string[] = [];
+    if (room.walls?.checked !== false) {
+      surfaces.push(`Walls (${room.walls?.coats || 2} coats ${room.wallPaintType ? `- ${room.wallPaintType}` : ''})`);
+    }
+    if (room.ceilings?.checked) {
+      surfaces.push(`Ceilings (${room.ceilings?.coats || 2} coats Flat White)`);
+    }
+    if (room.baseboards?.checked) {
+      surfaces.push(`Baseboards & Trim (${room.baseboards?.coats || 2} coats Pearl/Semi-Gloss)`);
+    }
+    if (room.windows?.checked) {
+      surfaces.push(`Windows (${typeof room.windows?.qty === 'number' ? room.windows.qty : 2} units)`);
+    }
+    if (room.doors?.checked) {
+      surfaces.push(`Doors (${typeof room.doors?.qty === 'number' ? room.doors.qty : 1} units)`);
+    }
+    if (room.doorFrames?.checked) {
+      surfaces.push(`Door Frames (${typeof room.doorFrames?.qty === 'number' ? room.doorFrames.qty : 1} units)`);
+    }
+
+    const lines: string[] = [];
+    lines.push(`• AREA DIMENSIONS: ${l}' × ${w}' × ${h}' (${room.wallsArea || (2*h*(l+w))} sq ft walls)`);
+    lines.push(`• WORK SCOPE: ${surfaces.length > 0 ? surfaces.join('; ') : 'General painting as required'}`);
+    lines.push(`• PREP REQUIRED: Fill fastener holes, patch plaster/drywall gouges, sand smooth, spot prime raw areas.`);
+    lines.push(`• CREW INSTRUCTIONS: Mask adjacent trim & glass, lay heavy drop cloths over floor perimeters, clean work area daily.`);
+
+    return lines.join('\n');
+  };
+
+  const handlePrefillAllProposalNotes = () => {
+    if (!selectedProject) return;
+    const updatedRooms = (selectedProject.rooms || []).map(room => ({
+      ...room,
+      notes: generateProposalNoteForRoom(room)
+    }));
+    setSelectedProject({ ...selectedProject, rooms: updatedRooms });
+    triggerToast('Pre-filled all room notes with detailed proposal specs!');
   };
 
   const handleSaveDocument = () => {
@@ -631,23 +690,48 @@ export default function WorkOrdersList({
             {/* Modal Control Toolbar */}
             <div className="sticky top-0 z-20 bg-[#111111] border-b border-neutral-800 p-3 sm:p-4 md:px-6 flex flex-col lg:flex-row lg:items-center justify-between gap-3 no-print">
               
-              {/* Left: Document Info & Dynamic Scope Tabs */}
-              <div className="space-y-2">
+              {/* Header Bar: Title + Mobile Expand Toggle + Close Button */}
+              <div className="flex items-center justify-between w-full lg:w-auto gap-2">
                 <div className="flex items-center gap-2.5">
                   <div className="p-2 bg-blue-950 border border-blue-800 rounded-xl text-blue-400 shrink-0">
                     <FileText className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-white flex flex-wrap items-center gap-2">
-                      <span>Official Interactive Work Order</span>
-                      <span className="text-[10px] bg-emerald-950 border border-emerald-800 text-emerald-400 font-mono px-2 py-0.5 rounded uppercase font-bold flex items-center gap-1">
-                        <Edit3 className="w-3 h-3" /> Live Editor
+                    <h3 className="text-xs sm:text-sm font-bold text-white flex flex-wrap items-center gap-1.5">
+                      <span>Work Order</span>
+                      <span className="text-[9px] bg-emerald-950 border border-emerald-800 text-emerald-400 font-mono px-1.5 py-0.5 rounded uppercase font-bold flex items-center gap-1">
+                        <Edit3 className="w-2.5 h-2.5" /> Live
                       </span>
                     </h3>
-                    <p className="text-xs text-zinc-400 font-mono">WO-#{selectedProject.id} &bull; {activeRoomsForScope.length} Active Scope Area(s)</p>
+                    <p className="text-[11px] text-zinc-400 font-mono">WO-#{selectedProject.id} &bull; {activeRoomsForScope.length} Scope Area(s)</p>
                   </div>
                 </div>
 
+                {/* Mobile Right Controls: Options Toggle & Close X */}
+                <div className="flex items-center gap-2 lg:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setShowMobileOptions(!showMobileOptions)}
+                    className="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-blue-400 text-xs font-mono font-bold rounded-xl flex items-center gap-1 cursor-pointer transition"
+                    title="Toggle Work Order Options & PDF Exports"
+                  >
+                    <span>Options</span>
+                    {showMobileOptions ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedProject(null)}
+                    className="p-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-zinc-400 hover:text-white rounded-xl transition cursor-pointer"
+                    title="Close Document"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Expandable Options & Action Buttons (Always visible on desktop lg, toggled on mobile) */}
+              <div className={showMobileOptions ? 'flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 w-full lg:w-auto pt-2 lg:pt-0 border-t border-neutral-800/80 lg:border-t-0' : 'hidden lg:flex lg:flex-row items-center justify-between gap-3 w-full lg:w-auto'}>
                 {/* Scope Filter Tabs */}
                 <div className="flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 p-1 rounded-xl font-mono text-xs overflow-x-auto max-w-full scrollbar-none whitespace-nowrap">
                   <span className="text-[10px] uppercase text-zinc-500 font-bold px-2 hidden sm:inline">Active Scope Filter:</span>
@@ -681,79 +765,135 @@ export default function WorkOrdersList({
                     );
                   })}
                 </div>
-              </div>
 
-              {/* Action Buttons: Save Changes, Export PDF, Print, Close */}
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleSaveDocument}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-900/30 min-h-[38px]"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>Save Changes</span>
-                </button>
+                {/* Action Buttons: Save Changes, Export PDF, Print, Close */}
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleSaveDocument}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-900/30 min-h-[38px] flex-1 sm:flex-none"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Save Changes</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    generateWorkOrderPDF({
-                      project: selectedProject,
-                      client: {
-                        id: selectedProject.clientId,
-                        name: clientName,
-                        phone: clientPhone,
-                        email: clientEmail,
-                        address: clientAddress,
-                        status: 'Active',
-                        notes: '',
-                        createdAt: '',
-                        updatedAt: ''
-                      },
-                      rooms: activeRoomsForScope,
-                      scopeCategory: selectedScopeFilter,
-                      liveSummary: {
-                        laborCost: projectMetrics.laborCost,
-                        materialCost: projectMetrics.materialCost,
-                        totalHours: projectMetrics.totalHours,
-                        subtotal: projectMetrics.subtotal,
-                        hst: projectMetrics.hst,
-                        totalCost: projectMetrics.totalCost
-                      },
-                      teamNotes: teamNotes,
-                      specialConditions: specialConditions,
-                      inclusions: projectInclusions,
-                      exclusions: projectExclusions,
-                      description: projectDescription,
-                      shoppingList: editableShoppingList
-                    });
-                    triggerToast(`Downloaded ${selectedScopeFilter.toUpperCase()} Work Order PDF!`);
-                  }}
-                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md min-h-[38px]"
-                  title="Generate & Download Category PDF"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download {selectedScopeFilter.toUpperCase()} PDF</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const pdf = generateWorkOrderPDF({
+                        project: selectedProject,
+                        client: {
+                          id: selectedProject.clientId,
+                          name: clientName,
+                          phone: clientPhone,
+                          email: clientEmail,
+                          address: clientAddress,
+                          status: 'Active',
+                          notes: '',
+                          createdAt: '',
+                          updatedAt: ''
+                        },
+                        rooms: activeRoomsForScope,
+                        scopeCategory: selectedScopeFilter,
+                        liveSummary: {
+                          laborCost: projectMetrics.laborCost,
+                          materialCost: projectMetrics.materialCost,
+                          totalHours: projectMetrics.totalHours,
+                          subtotal: projectMetrics.subtotal,
+                          hst: projectMetrics.hst,
+                          totalCost: projectMetrics.totalCost
+                        },
+                        teamNotes: teamNotes,
+                        specialConditions: specialConditions,
+                        inclusions: projectInclusions,
+                        exclusions: projectExclusions,
+                        description: projectDescription,
+                        shoppingList: editableShoppingList
+                      });
+                      if (pdf.blobUrl) {
+                        const a = document.createElement('a');
+                        a.href = pdf.blobUrl;
+                        a.download = `Master_WorkOrder_${selectedProject.id}_${selectedScopeFilter.toUpperCase()}.pdf`;
+                        a.click();
+                      }
+                      triggerToast(`Downloaded ${selectedScopeFilter.toUpperCase()} Work Order PDF!`);
+                    }}
+                    className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md min-h-[38px] flex-1 sm:flex-none"
+                    title="Generate & Download Full Master Work Order PDF"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download {selectedScopeFilter.toUpperCase()} PDF</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer border border-neutral-700 min-h-[38px]"
-                  title="Print Official Work Order Document"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Print</span>
-                </button>
+                  {/* PAINTER CREW COPY PDF BUTTON (EXCLUDES PRICE BREAKDOWNS) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const pdf = generateWorkOrderPDF({
+                        project: selectedProject,
+                        client: {
+                          id: selectedProject.clientId,
+                          name: clientName,
+                          phone: clientPhone,
+                          email: clientEmail,
+                          address: clientAddress,
+                          status: 'Active',
+                          notes: '',
+                          createdAt: '',
+                          updatedAt: ''
+                        },
+                        rooms: activeRoomsForScope,
+                        scopeCategory: selectedScopeFilter,
+                        liveSummary: {
+                          laborCost: projectMetrics.laborCost,
+                          materialCost: projectMetrics.materialCost,
+                          totalHours: projectMetrics.totalHours,
+                          subtotal: projectMetrics.subtotal,
+                          hst: projectMetrics.hst,
+                          totalCost: projectMetrics.totalCost
+                        },
+                        teamNotes: teamNotes,
+                        specialConditions: specialConditions,
+                        inclusions: projectInclusions,
+                        exclusions: projectExclusions,
+                        description: projectDescription,
+                        shoppingList: editableShoppingList,
+                        hidePrices: true
+                      });
+                      if (pdf.blobUrl) {
+                        const a = document.createElement('a');
+                        a.href = pdf.blobUrl;
+                        a.download = `PainterCrew_WorkOrder_${selectedProject.id}_${selectedScopeFilter.toUpperCase()}.pdf`;
+                        a.click();
+                      }
+                      triggerToast(`Downloaded Painter Crew Copy (No Prices) for ${selectedScopeFilter.toUpperCase()}!`);
+                    }}
+                    className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md min-h-[38px] flex-1 sm:flex-none"
+                    title="Download Painter Crew Copy (Confidential operational copy with no price details)"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Painter Crew PDF (No Prices)</span>
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={() => setSelectedProject(null)}
-                  className="p-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-zinc-400 hover:text-white rounded-xl transition cursor-pointer min-h-[38px] flex items-center justify-center"
-                  title="Close Document"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-mono font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer border border-neutral-700 min-h-[38px]"
+                    title="Print Official Work Order Document"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Print</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedProject(null)}
+                    className="hidden lg:flex p-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-zinc-400 hover:text-white rounded-xl transition cursor-pointer min-h-[38px] items-center justify-center"
+                    title="Close Document"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1295,19 +1435,353 @@ export default function WorkOrdersList({
                   <div className="bg-slate-100 px-3.5 sm:px-4 py-2.5 border-b border-slate-300 flex flex-wrap items-center justify-between gap-2">
                     <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider font-mono flex items-center gap-2">
                       <Grid className="w-4 h-4 text-indigo-700" />
-                      <span>Room x Surface Specification Table (Live In-Place Editor)</span>
+                      <span>Room x Surface Specification (Live Editor)</span>
                     </h3>
-                    <span className="text-[10px] font-mono text-slate-600 font-bold bg-slate-200 px-2 py-0.5 rounded uppercase">
-                      Edit dimensions & surface options
-                    </span>
+
+                    {/* VIEW MODE TOGGLE BUTTONS */}
+                    <div className="flex items-center gap-1.5 bg-slate-200 p-1 rounded-xl border border-slate-300 font-mono text-xs shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setWorkOrderViewMode('matrix')}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1.5 transition cursor-pointer ${
+                          workOrderViewMode === 'matrix' 
+                            ? 'bg-indigo-700 text-white shadow-sm' 
+                            : 'text-slate-700 hover:bg-slate-300'
+                        }`}
+                        title="Structured Matrix Table View"
+                      >
+                        <Grid className="w-3.5 h-3.5" />
+                        <span>Structured Table View</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setWorkOrderViewMode('paintScoutNotes');
+                          if (selectedProject) {
+                            let updated = false;
+                            const updatedRooms = (selectedProject.rooms || []).map(r => {
+                              if (r.notes === undefined || r.notes === null) {
+                                updated = true;
+                                return { ...r, notes: generateProposalNoteForRoom(r) };
+                              }
+                              return r;
+                            });
+                            if (updated) {
+                              setSelectedProject({ ...selectedProject, rooms: updatedRooms });
+                            }
+                          }
+                        }}
+                        className={`px-3 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1.5 transition cursor-pointer ${
+                          workOrderViewMode === 'paintScoutNotes' 
+                            ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-300' 
+                            : 'text-slate-700 hover:bg-slate-300'
+                        }`}
+                        title="PaintScout Style Freeform Editable Notes Mode (Write It Yourself)"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-yellow-300" />
+                        <span>PaintScout Notes View</span>
+                        <span className="text-[9px] bg-yellow-400 text-slate-900 px-1.5 py-0.5 rounded font-extrabold uppercase">Write Mode</span>
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="overflow-x-auto bg-white scrollbar-thin">
-                    <table className="w-full text-left font-mono text-xs border-collapse min-w-[700px] md:min-w-full">
+                  {/* PAINTSCOUT EDITABLE NOTES VIEW MODE */}
+                  {workOrderViewMode === 'paintScoutNotes' ? (
+                    <div className="p-3.5 sm:p-5 bg-slate-100 space-y-4 font-mono">
+                      {/* Sub-Header Toolbar */}
+                      <div className="bg-blue-950 text-white p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm border border-blue-800">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 font-bold text-sm text-blue-300">
+                            <Edit3 className="w-4 h-4 text-emerald-400" />
+                            <span>PaintScout Freeform Scope Notes Mode ("Write It Yourself")</span>
+                          </div>
+                          <p className="text-blue-200 text-xs">
+                            Each area is pre-populated from proposal details into multi-line editable notes. Customize instructions, add specific prep notes, or overwrite text directly.
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={handlePrefillAllProposalNotes}
+                            className="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 border border-blue-500 text-white font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer text-xs"
+                            title="Reset all room note boxes with proposal data"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                            <span>Pre-fill All from Proposal</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleAddRoomToDocument}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer text-xs"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add New Area Note</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Room Note Cards List */}
+                      {activeRoomsForScope.length === 0 ? (
+                        <div className="p-8 text-center text-slate-500 text-xs italic bg-white rounded-xl border border-slate-300">
+                          No areas configured for "{selectedScopeFilter.toUpperCase()}". Click "Add New Area Note" above to create one.
+                        </div>
+                      ) : (
+                        (selectedProject.rooms || [])
+                          .map((room, roomIdx) => ({ room, roomIdx }))
+                          .filter(({ room }) => (room.category || 'interior') === selectedScopeFilter)
+                          .map(({ room, roomIdx }) => {
+                            const roomNoteValue = room.notes !== undefined && room.notes !== null 
+                              ? room.notes 
+                              : generateProposalNoteForRoom(room);
+
+                            return (
+                              <div key={room.id || roomIdx} className="bg-white border-2 border-slate-300 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-sm">
+                                {/* Room Card Header */}
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                                  <div className="flex flex-col flex-1 min-w-[220px] gap-1">
+                                    <input
+                                      type="text"
+                                      value={room.name}
+                                      onChange={(e) => handleUpdateRoomField(roomIdx, { name: e.target.value })}
+                                      className="font-bold text-slate-900 bg-slate-100 border border-slate-300 rounded-lg px-3 py-1.5 text-xs sm:text-sm focus:border-blue-600 outline-none w-full font-mono"
+                                      placeholder="Area / Room Name..."
+                                    />
+                                    <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-mono text-slate-500 pl-0.5">
+                                      <span className="font-semibold text-slate-500">Dimensions:</span>
+                                      <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 text-[10px] font-bold">
+                                        {room.length || 0}' × {room.width || 0}' × {room.height || 8}' ft
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateRoomField(roomIdx, { notes: generateProposalNoteForRoom(room) })}
+                                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg border border-slate-300 transition cursor-pointer flex items-center gap-1"
+                                      title="Reset this area's text box to proposal defaults"
+                                    >
+                                      <Sparkles className="w-3 h-3 text-amber-600" />
+                                      <span>Reset to Proposal</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteRoomFromDocument(roomIdx)}
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                                      title="Delete area"
+                                    >
+                                      <Trash2 className="w-4.5 h-4.5" />
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Freeform PaintScout Note Text Area */}
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-xs uppercase font-extrabold text-slate-700 flex items-center gap-1.5">
+                                      <FileText className="w-4 h-4 text-blue-600" /> Write Area Specifications & Crew Notes
+                                    </span>
+                                    <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">Freeform Multi-line Editor</span>
+                                  </div>
+
+                                  <textarea
+                                    rows={5}
+                                    value={roomNoteValue}
+                                    onChange={(e) => handleUpdateRoomField(roomIdx, { notes: e.target.value })}
+                                    className="w-full bg-slate-50 border border-slate-300 focus:border-blue-600 focus:bg-white rounded-xl p-3.5 text-slate-900 text-xs sm:text-sm font-mono leading-relaxed outline-none shadow-inner transition"
+                                    placeholder="Type complete work order description, surface details, coat counts, prep instructions, or crew warnings..."
+                                  />
+
+                                  {/* Quick Tag Insert Chips */}
+                                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                    <span className="text-[10px] text-slate-500 font-bold uppercase">Quick Insert Snippets:</span>
+                                    {[
+                                      '• PREP: Fill nail holes, patch plaster, sand smooth',
+                                      '• WALLS: 2 coats BM Regal Select Eggshell',
+                                      '• CEILINGS: 2 coats Flat White',
+                                      '• BASEBOARDS: 2 coats Pearl/Semi-Gloss',
+                                      '• MASKING: Mask all casing & floor perimeters',
+                                      '• PROTECTION: Cover floors with heavy drop cloths'
+                                    ].map((chip, chipIdx) => (
+                                      <button
+                                        key={chipIdx}
+                                        type="button"
+                                        onClick={() => {
+                                          const existing = roomNoteValue ? roomNoteValue + '\n' : '';
+                                          handleUpdateRoomField(roomIdx, { notes: existing + chip });
+                                        }}
+                                        className="px-2 py-1 bg-slate-100 hover:bg-blue-100 text-slate-700 hover:text-blue-900 text-[10px] font-bold rounded-lg border border-slate-200 transition cursor-pointer"
+                                      >
+                                        + {chip.split(':')[0]}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                      )}
+
+                      {/* MASTER COMBINED SCOPE DOCUMENT BOX */}
+                      {activeRoomsForScope.length > 0 && (
+                        <div className="bg-amber-950/90 text-amber-100 border border-amber-800 rounded-2xl p-4 sm:p-5 space-y-3 shadow-lg">
+                          <div className="flex items-center justify-between gap-2 border-b border-amber-800/80 pb-2.5">
+                            <h4 className="font-bold text-xs sm:text-sm text-amber-300 uppercase flex items-center gap-2">
+                              <FileText className="w-4 h-4 text-amber-400" />
+                              <span>Master Combined Scope Document ({selectedScopeFilter.toUpperCase()})</span>
+                            </h4>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const masterText = activeRoomsForScope.map(r => `=== ${r.name.toUpperCase()} ===\n${(r.notes !== undefined && r.notes !== null) ? r.notes : generateProposalNoteForRoom(r)}`).join('\n\n');
+                                navigator.clipboard.writeText(masterText);
+                                triggerToast('Copied Master Scope Notes to clipboard!');
+                              }}
+                              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span>Copy Master Document</span>
+                            </button>
+                          </div>
+
+                          <pre className="text-xs text-amber-200/90 bg-neutral-900/80 p-3.5 rounded-xl border border-amber-900/50 overflow-x-auto whitespace-pre-wrap leading-relaxed font-mono">
+                            {activeRoomsForScope.map(r => `=== ${r.name.toUpperCase()} ===\n${(r.notes !== undefined && r.notes !== null) ? r.notes : generateProposalNoteForRoom(r)}`).join('\n\n')}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      {/* STRUCTURED MATRIX VIEW (MOBILE CARDS + DESKTOP TABLE) */}
+                  <div className="md:hidden divide-y divide-slate-200 bg-white">
+                    {activeRoomsForScope.length === 0 ? (
+                      <div className="p-6 text-slate-500 italic text-center text-xs font-mono">
+                        No rooms found for scope filter "{selectedScopeFilter.toUpperCase()}". Click "Add New Area" below to create one!
+                      </div>
+                    ) : (
+                      (selectedProject.rooms || [])
+                        .map((room, roomIdx) => ({ room, roomIdx }))
+                        .filter(({ room }) => (room.category || 'interior') === selectedScopeFilter)
+                        .map(({ room, roomIdx }) => {
+                          const l = Number(room.length) || 0;
+                          const w = Number(room.width) || 0;
+                          const h = Number(room.height) || 8;
+                          const wallSqFt = room.wallsArea || (2 * h * (l + w));
+                          const ceilingSqFt = room.ceilingArea || (l * w);
+
+                          return (
+                            <div key={room.id || roomIdx} className="p-3.5 space-y-3 font-mono text-xs">
+                              {/* Card Header: Room Name + Dimensions (smaller & under title) + Delete */}
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 space-y-1">
+                                  <input
+                                    type="text"
+                                    value={room.name}
+                                    onChange={(e) => handleUpdateRoomField(roomIdx, { name: e.target.value })}
+                                    className="font-bold text-slate-900 bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs focus:border-blue-600 outline-none w-full"
+                                  />
+                                  <div className="flex items-center gap-1 font-mono text-[10px] text-slate-500 pl-0.5">
+                                    <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                    <span>Dimensions: {l}' × {w}' × {h}' ft</span>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteRoomFromDocument(roomIdx)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer shrink-0 mt-0.5"
+                                  title="Remove room from scope"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+
+                              {/* Surface Checkboxes Grid */}
+                              <div className="grid grid-cols-2 gap-2 text-[11px] bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={room.walls?.checked !== false}
+                                    onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                      walls: { checked: e.target.checked, qty: room.walls?.qty ?? 'auto', coats: room.walls?.coats || 2 } 
+                                    })}
+                                    className="w-4 h-4 text-blue-600 rounded"
+                                  />
+                                  <span className="font-bold text-slate-900">Walls</span>
+                                  <span className="text-[10px] text-slate-500 font-bold">({wallSqFt.toFixed(0)}sf)</span>
+                                </label>
+
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!room.ceilings?.checked}
+                                    onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                      ceilings: { checked: e.target.checked, qty: room.ceilings?.qty ?? 'auto', coats: room.ceilings?.coats || 2 } 
+                                    })}
+                                    className="w-4 h-4 text-indigo-600 rounded"
+                                  />
+                                  <span className="font-bold text-indigo-900">Ceiling</span>
+                                  <span className="text-[10px] text-indigo-500 font-bold">({ceilingSqFt.toFixed(0)}sf)</span>
+                                </label>
+
+                                <label className="flex items-center gap-1.5 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!room.baseboards?.checked}
+                                    onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                      baseboards: { checked: e.target.checked, qty: room.baseboards?.qty ?? 'auto', coats: room.baseboards?.coats || 2 } 
+                                    })}
+                                    className="w-4 h-4 text-slate-700 rounded"
+                                  />
+                                  <span className="text-slate-800 font-medium">Baseboards</span>
+                                </label>
+
+                                <div className="flex items-center gap-2 text-[10px] text-slate-600 font-bold">
+                                  <span>Win: {typeof room.windows?.qty === 'number' ? room.windows.qty : 2}</span>
+                                  <span>&bull;</span>
+                                  <span>Door: {typeof room.doors?.qty === 'number' ? room.doors.qty : 1}</span>
+                                </div>
+                              </div>
+
+                              {/* Paint Product Spec Input */}
+                              <div className="space-y-1">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase block">Paint Specification</span>
+                                <input
+                                  type="text"
+                                  value={room.wallPaintType || 'Benjamin Moore Regal Select Eggshell'}
+                                  onChange={(e) => handleUpdateRoomField(roomIdx, { wallPaintType: e.target.value })}
+                                  className="w-full bg-blue-50/60 border border-blue-200 rounded p-1.5 text-[11px] text-blue-900 font-bold focus:border-blue-600 outline-none"
+                                />
+                              </div>
+
+                              {/* Area Notes Input */}
+                              <div className="space-y-1 bg-amber-50/50 p-2 rounded-lg border border-amber-200/80">
+                                <span className="text-[10px] font-bold text-amber-900 uppercase block flex items-center gap-1">
+                                  <FileText className="w-3 h-3 text-amber-600" /> Area Notes / Instructions
+                                </span>
+                                <input
+                                  type="text"
+                                  value={room.notes || ''}
+                                  onChange={(e) => handleUpdateRoomField(roomIdx, { notes: e.target.value })}
+                                  placeholder="Add prep condition or crew instructions..."
+                                  className="w-full bg-white border border-amber-200 rounded px-2 py-1 text-xs text-slate-800 placeholder-amber-700/50 focus:border-amber-500 outline-none font-mono"
+                                />
+                              </div>
+                            </div>
+                          );
+                        })
+                    )}
+                  </div>
+
+                  {/* DESKTOP TABLE VIEW (hidden on mobile, block on md+) */}
+                  <div className="hidden md:block overflow-x-auto bg-white scrollbar-thin">
+                    <table className="w-full text-left font-mono text-xs border-collapse min-w-full">
                       <thead>
                         <tr className="bg-slate-900 text-white text-[10px] uppercase font-bold tracking-wider">
-                          <th className="p-2.5 sm:p-3 border-r border-slate-800">Room / Area Name</th>
-                          <th className="p-2.5 sm:p-3 border-r border-slate-800">Dimensions (L × W × H ft)</th>
+                          <th className="p-2.5 sm:p-3 border-r border-slate-800">Room / Area & Dimensions</th>
                           <th className="p-2.5 sm:p-3 border-r border-slate-800">Walls Area</th>
                           <th className="p-2.5 sm:p-3 border-r border-slate-800">Ceiling Area</th>
                           <th className="p-2.5 sm:p-3 border-r border-slate-800">Baseboards</th>
@@ -1319,7 +1793,7 @@ export default function WorkOrdersList({
                       <tbody className="divide-y divide-slate-200 text-[11px]">
                         {activeRoomsForScope.length === 0 ? (
                           <tr>
-                            <td colSpan={8} className="p-6 text-slate-500 italic text-center">
+                            <td colSpan={7} className="p-6 text-slate-500 italic text-center">
                               No rooms found for scope filter "{selectedScopeFilter.toUpperCase()}". Click "Add New Area" below to create one!
                             </td>
                           </tr>
@@ -1335,158 +1809,146 @@ export default function WorkOrdersList({
                               const ceilingSqFt = room.ceilingArea || (l * w);
 
                               return (
-                                <tr key={room.id || roomIdx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}>
-                                  {/* Room Name Input */}
-                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
-                                    <input
-                                      type="text"
-                                      value={room.name}
-                                      onChange={(e) => handleUpdateRoomField(roomIdx, { name: e.target.value })}
-                                      className="w-full bg-white border border-slate-300 rounded px-2 py-1 font-bold text-slate-900 focus:border-blue-600 outline-none text-xs"
-                                    />
-                                  </td>
+                                <React.Fragment key={room.id || roomIdx}>
+                                  <tr className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}>
+                                    {/* Room Name Input & Smaller Dimensions Under Title */}
+                                    <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                      <div className="space-y-1">
+                                        <input
+                                          type="text"
+                                          value={room.name}
+                                          onChange={(e) => handleUpdateRoomField(roomIdx, { name: e.target.value })}
+                                          className="w-full bg-white border border-slate-300 rounded px-2 py-1 font-bold text-slate-900 focus:border-blue-600 outline-none text-xs font-mono"
+                                        />
+                                        <div className="flex items-center gap-1 font-mono text-[10px] text-slate-500 font-semibold pl-0.5" title="Room dimensions locked from initial scope estimate">
+                                          <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                          <span>{l}' × {w}' × {h}' ft</span>
+                                        </div>
+                                      </div>
+                                    </td>
 
-                                  {/* Dimensions (Length x Width x Height) */}
-                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
-                                    <div className="flex items-center gap-1 font-mono text-[11px]">
+                                    {/* Walls Checkbox & SqFt */}
+                                    <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                      <label className="flex items-center gap-1.5 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={room.walls?.checked !== false}
+                                          onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                            walls: { checked: e.target.checked, qty: room.walls?.qty ?? 'auto', coats: room.walls?.coats || 2 } 
+                                          })}
+                                          className="w-4 h-4 text-blue-600 rounded"
+                                        />
+                                        <span className="font-bold text-slate-900">{wallSqFt.toFixed(0)} sqft</span>
+                                        <span className="text-[10px] text-slate-500 font-mono">(2 coats)</span>
+                                      </label>
+                                    </td>
+
+                                    {/* Ceiling Checkbox & SqFt */}
+                                    <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                      <label className="flex items-center gap-1.5 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={!!room.ceilings?.checked}
+                                          onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                            ceilings: { checked: e.target.checked, qty: room.ceilings?.qty ?? 'auto', coats: room.ceilings?.coats || 2 } 
+                                          })}
+                                          className="w-4 h-4 text-indigo-600 rounded"
+                                        />
+                                        <span className="font-bold text-indigo-900">{ceilingSqFt.toFixed(0)} sqft</span>
+                                        <span className="text-[10px] text-indigo-500 font-mono">(2 coats)</span>
+                                      </label>
+                                    </td>
+
+                                    {/* Baseboard Checkbox */}
+                                    <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                      <label className="flex items-center gap-1.5 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={!!room.baseboards?.checked}
+                                          onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                            baseboards: { checked: e.target.checked, qty: room.baseboards?.qty ?? 'auto', coats: room.baseboards?.coats || 2 } 
+                                          })}
+                                          className="w-4 h-4 text-slate-700 rounded"
+                                        />
+                                        <span className="text-slate-800 font-medium">Baseboards</span>
+                                      </label>
+                                    </td>
+
+                                    {/* Windows & Doors Locked Quantities */}
+                                    <td className="p-2 sm:p-2.5 border-r border-slate-200 space-y-1 text-[10px]">
+                                      <div className="flex items-center justify-between gap-1 bg-slate-100 px-2 py-0.5 rounded border border-slate-200" title="Quantity locked from initial estimate">
+                                        <span className="text-slate-600 font-bold">Win:</span>
+                                        <span className="font-mono font-bold text-slate-900">{typeof room.windows?.qty === 'number' ? room.windows.qty : 2}</span>
+                                      </div>
+                                      <div className="flex items-center justify-between gap-1 bg-slate-100 px-2 py-0.5 rounded border border-slate-200" title="Quantity locked from initial estimate">
+                                        <span className="text-slate-600 font-bold">Door:</span>
+                                        <span className="font-mono font-bold text-slate-900">{typeof room.doors?.qty === 'number' ? room.doors.qty : 1}</span>
+                                      </div>
+                                    </td>
+
+                                    {/* Paint Product Specification Input */}
+                                    <td className="p-2 sm:p-2.5 border-r border-slate-200">
                                       <input
-                                        type="number"
-                                        value={room.length}
-                                        onChange={(e) => handleUpdateRoomField(roomIdx, { length: Number(e.target.value) })}
-                                        className="w-10 sm:w-12 bg-white border border-slate-300 rounded p-1 text-center font-bold focus:border-blue-600 outline-none"
+                                        type="text"
+                                        value={room.wallPaintType || 'Benjamin Moore Regal Select Eggshell'}
+                                        onChange={(e) => handleUpdateRoomField(roomIdx, { wallPaintType: e.target.value })}
+                                        className="w-full bg-blue-50/50 border border-blue-200 rounded p-1 text-[10px] text-blue-900 font-bold focus:border-blue-600 outline-none"
                                       />
-                                      <span>' ×</span>
-                                      <input
-                                        type="number"
-                                        value={room.width}
-                                        onChange={(e) => handleUpdateRoomField(roomIdx, { width: Number(e.target.value) })}
-                                        className="w-10 sm:w-12 bg-white border border-slate-300 rounded p-1 text-center font-bold focus:border-blue-600 outline-none"
-                                      />
-                                      <span>' ×</span>
-                                      <input
-                                        type="number"
-                                        value={room.height}
-                                        onChange={(e) => handleUpdateRoomField(roomIdx, { height: Number(e.target.value) })}
-                                        className="w-8 sm:w-10 bg-white border border-slate-300 rounded p-1 text-center font-bold focus:border-blue-600 outline-none"
-                                      />
-                                      <span>'</span>
-                                    </div>
-                                  </td>
+                                    </td>
 
-                                  {/* Walls Checkbox & SqFt */}
-                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
-                                    <label className="flex items-center gap-1.5 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={room.walls?.checked !== false}
-                                        onChange={(e) => handleUpdateRoomField(roomIdx, { 
-                                          walls: { checked: e.target.checked, qty: room.walls?.qty ?? 'auto', coats: room.walls?.coats || 2 } 
-                                        })}
-                                        className="w-4 h-4 text-blue-600 rounded"
-                                      />
-                                      <span className="font-bold text-slate-900">{wallSqFt.toFixed(0)} sqft</span>
-                                    </label>
-                                  </td>
+                                    {/* Delete Row Action */}
+                                    <td className="p-2 sm:p-2.5 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteRoomFromDocument(roomIdx)}
+                                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
+                                        title="Remove room from scope"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </td>
+                                  </tr>
 
-                                  {/* Ceiling Checkbox & SqFt */}
-                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
-                                    <label className="flex items-center gap-1.5 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={!!room.ceilings?.checked}
-                                        onChange={(e) => handleUpdateRoomField(roomIdx, { 
-                                          ceilings: { checked: e.target.checked, qty: room.ceilings?.qty ?? 'auto', coats: room.ceilings?.coats || 2 } 
-                                        })}
-                                        className="w-4 h-4 text-indigo-600 rounded"
-                                      />
-                                      <span className="font-bold text-indigo-900">{ceilingSqFt.toFixed(0)} sqft</span>
-                                    </label>
-                                  </td>
-
-                                  {/* Baseboard Checkbox */}
-                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
-                                    <label className="flex items-center gap-1.5 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={!!room.baseboards?.checked}
-                                        onChange={(e) => handleUpdateRoomField(roomIdx, { 
-                                          baseboards: { checked: e.target.checked, qty: room.baseboards?.qty ?? 'auto', coats: room.baseboards?.coats || 2 } 
-                                        })}
-                                        className="w-4 h-4 text-slate-700 rounded"
-                                      />
-                                      <span className="text-slate-800">Baseboards</span>
-                                    </label>
-                                  </td>
-
-                                  {/* Windows & Doors Editable Controls */}
-                                  <td className="p-2 sm:p-2.5 border-r border-slate-200 space-y-1 text-[10px]">
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span className="text-slate-600 font-bold">Win:</span>
-                                      <input 
-                                        type="number"
-                                        value={typeof room.windows?.qty === 'number' ? room.windows.qty : 2}
-                                        onChange={(e) => handleUpdateRoomField(roomIdx, {
-                                          windows: { checked: true, qty: Number(e.target.value), coats: room.windows?.coats || 2 }
-                                        })}
-                                        className="w-10 bg-white border border-slate-300 rounded text-center font-bold outline-none"
-                                      />
-                                    </div>
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span className="text-slate-600 font-bold">Door:</span>
-                                      <input 
-                                        type="number"
-                                        value={typeof room.doors?.qty === 'number' ? room.doors.qty : 1}
-                                        onChange={(e) => handleUpdateRoomField(roomIdx, {
-                                          doors: { checked: true, qty: Number(e.target.value), coats: room.doors?.coats || 2 }
-                                        })}
-                                        className="w-10 bg-white border border-slate-300 rounded text-center font-bold outline-none"
-                                      />
-                                    </div>
-                                  </td>
-
-                                  {/* Paint Product Specification Input */}
-                                  <td className="p-2 sm:p-2.5 border-r border-slate-200">
-                                    <input
-                                      type="text"
-                                      value={room.wallPaintType || 'Benjamin Moore Regal Select Eggshell'}
-                                      onChange={(e) => handleUpdateRoomField(roomIdx, { wallPaintType: e.target.value })}
-                                      className="w-full bg-blue-50/50 border border-blue-200 rounded p-1 text-[10px] text-blue-900 font-bold focus:border-blue-600 outline-none"
-                                    />
-                                  </td>
-
-                                  {/* Delete Row Action */}
-                                  <td className="p-2 sm:p-2.5 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteRoomFromDocument(roomIdx)}
-                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
-                                      title="Remove room from scope"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  </td>
-                                </tr>
+                                  {/* EXPANDABLE AREA NOTES ROW FOR WORK ORDER CREW */}
+                                  <tr className="bg-amber-50/40 border-b border-slate-200">
+                                    <td colSpan={8} className="p-2 px-3 sm:px-4">
+                                      <div className="flex items-center gap-2">
+                                        <FileText className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                        <span className="text-[10px] font-extrabold text-amber-900 uppercase font-mono shrink-0">Area Notes ({room.name}):</span>
+                                        <input
+                                          type="text"
+                                          value={room.notes || ''}
+                                          onChange={(e) => handleUpdateRoomField(roomIdx, { notes: e.target.value })}
+                                          placeholder="Add inclusions, exclusions, prep condition or crew instructions for this specific area..."
+                                          className="w-full bg-white border border-amber-200/80 rounded px-2.5 py-1 text-xs text-slate-800 placeholder-amber-700/50 focus:border-amber-500 focus:bg-amber-50/30 outline-none font-mono"
+                                        />
+                                      </div>
+                                    </td>
+                                  </tr>
+                                </React.Fragment>
                               );
                             })
                         )}
                       </tbody>
                     </table>
-
-                    {/* Add Room Button Bar */}
-                    <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-xs text-slate-500 font-mono">
-                        Need to add another area or room to the {selectedScopeFilter.toUpperCase()} scope?
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleAddRoomToDocument}
-                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Add New {selectedScopeFilter.toUpperCase()} Area</span>
-                      </button>
-                    </div>
                   </div>
+
+                  {/* Add Room Button Bar */}
+                      <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs text-slate-500 font-mono">
+                          Need to add another area or room to the {selectedScopeFilter.toUpperCase()} scope?
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleAddRoomToDocument}
+                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Add New {selectedScopeFilter.toUpperCase()} Area</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 6. PRICE & QUANTITY CALCULATION FORMULAS RUNDOWN (EDITABLE FINANCIAL PARAMS) */}
@@ -1627,7 +2089,7 @@ export default function WorkOrdersList({
                 </div>
 
                 {/* 7. FINANCIAL SUMMARY BAR */}
-                <div className="border-2 border-slate-900 rounded-xl overflow-hidden p-4 bg-slate-50">
+                <div className="border-2 border-slate-900 rounded-xl overflow-hidden p-4 bg-slate-50 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-4 font-mono text-xs">
                     <div className="space-y-1">
                       <span className="text-[10px] uppercase font-bold text-slate-500 block">Scope Financial Breakdown</span>
@@ -1645,6 +2107,42 @@ export default function WorkOrdersList({
                     <div className="bg-slate-900 text-white p-3 rounded-lg text-right shrink-0">
                       <span className="text-[10px] text-slate-400 uppercase block font-bold">Grand Total ({selectedScopeFilter.toUpperCase()})</span>
                       <span className="text-lg font-black text-emerald-400">${projectMetrics.totalCost.toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  {/* 50% Target Benchmark Breakdown Card */}
+                  <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-lg text-xs font-mono text-slate-800 space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 font-bold text-blue-900">
+                      <span className="flex items-center gap-1.5">
+                        <Target className="w-4 h-4 text-blue-600 shrink-0" />
+                        Project Target Benchmark (35% Labor Target | 15% Material Target | 50% Margin Target)
+                      </span>
+                      <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded text-[10px] uppercase">Target Gross Margin: 50.0%</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] pt-1">
+                      <div className="bg-white p-2.5 rounded border border-blue-100 shadow-2xs">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase block">Target Labor (35%)</span>
+                        <span className="font-bold text-slate-900 font-mono text-sm">${Math.round(projectMetrics.subtotal * 0.35).toLocaleString()}</span>
+                        <div className="text-[10px] text-slate-600 mt-1">
+                          Actual Labor: <strong className={projectMetrics.laborCost <= projectMetrics.subtotal * 0.35 ? 'text-emerald-700' : 'text-amber-700'}>${projectMetrics.laborCost.toLocaleString()}</strong> ({((projectMetrics.laborCost / (projectMetrics.subtotal || 1)) * 100).toFixed(1)}%)
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-2.5 rounded border border-blue-100 shadow-2xs">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase block">Target Material (15%)</span>
+                        <span className="font-bold text-slate-900 font-mono text-sm">${Math.round(projectMetrics.subtotal * 0.15).toLocaleString()}</span>
+                        <div className="text-[10px] text-slate-600 mt-1">
+                          Actual Material: <strong className={projectMetrics.materialCost <= projectMetrics.subtotal * 0.15 ? 'text-emerald-700' : 'text-amber-700'}>${projectMetrics.materialCost.toLocaleString()}</strong> ({((projectMetrics.materialCost / (projectMetrics.subtotal || 1)) * 100).toFixed(1)}%)
+                        </div>
+                      </div>
+
+                      <div className="bg-white p-2.5 rounded border border-blue-100 shadow-2xs">
+                        <span className="text-[10px] text-slate-500 font-bold uppercase block">Combined Target Cost (50%)</span>
+                        <span className="font-bold text-slate-900 font-mono text-sm">${Math.round(projectMetrics.subtotal * 0.50).toLocaleString()}</span>
+                        <div className="text-[10px] text-slate-600 mt-1">
+                          Actual Total Direct: <strong>${(projectMetrics.laborCost + projectMetrics.materialCost).toLocaleString()}</strong> ({(((projectMetrics.laborCost + projectMetrics.materialCost) / (projectMetrics.subtotal || 1)) * 100).toFixed(1)}%)
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

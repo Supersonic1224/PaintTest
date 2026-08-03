@@ -44,6 +44,7 @@ import WorkOrdersList from './components/WorkOrdersList';
 import SettingsPanel from './components/SettingsPanel';
 import AdminPortal from './components/AdminPortal';
 import ClientSignPortal from './components/ClientSignPortal';
+import SignInGate from './components/SignInGate';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { 
@@ -219,6 +220,7 @@ export default function App() {
   
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [needsAuth, setNeedsAuth] = useState(true);
+  const [hasSkippedAuth, setHasSkippedAuth] = useState(false);
   const [loading, setLoading] = useState(false);
   const [authErrorModalOpen, setAuthErrorModalOpen] = useState(false);
   const [authErrorCode, setAuthErrorCode] = useState<'popup-blocked' | 'unauthorized-domain' | 'generic' | null>(null);
@@ -1049,6 +1051,23 @@ export default function App() {
       <ClientSignPortal 
         proposalId={sharedProposalId} 
         onBackToApp={isAuthorizedUser ? () => setSharedProposalId(null) : undefined} 
+      />
+    );
+  }
+
+  // Display mandatory Google Sign-In Gate when app opens if user is not logged in
+  const isAuthenticated = currentUser !== null || supabaseUser !== null;
+  if (!isAuthenticated && !hasSkippedAuth) {
+    return (
+      <SignInGate
+        onSignInWithGoogle={handleSignIn}
+        onContinueAsGuest={() => {
+          setHasSkippedAuth(true);
+          setIsDemoMode(true);
+          loadDemoSeedData();
+        }}
+        loading={loading}
+        onOpenAuthHelp={() => setAuthErrorModalOpen(true)}
       />
     );
   }

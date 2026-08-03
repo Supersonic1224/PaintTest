@@ -1748,455 +1748,576 @@ ON CONFLICT (email) DO NOTHING;`;
             </div>
 
             {/* SECTION 1: LABOR BASE & SITE SETUP PRESET */}
-            <div className="space-y-4">
+            <div className="space-y-3">
               <h4 className="text-xs font-bold text-yellow-400 uppercase font-mono tracking-wider">1. Labor Base & Setup Overhead</h4>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-1.5">
-                  <label className="text-[10px] font-bold text-zinc-500 font-mono block">HOURLY LABOR RATE ($/hr)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={rates.hourlyLaborRate}
-                    onChange={(e) => updateRate('hourlyLaborRate', parseFloat(e.target.value) || 0)}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none font-bold font-mono"
-                  />
-                </div>
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-1.5">
-                  <label className="text-[10px] font-bold text-zinc-500 font-mono block">SETUP BASE PREP TIME (Hours)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={rates.setupHours}
-                    onChange={(e) => updateRate('setupHours', parseFloat(e.target.value) || 0)}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none font-bold font-mono"
-                  />
-                </div>
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-1.5">
-                  <label className="text-[10px] font-bold text-zinc-500 font-mono block">SETUP BASE MATERIALS ($)</label>
-                  <input
-                    type="number"
-                    step="1"
-                    value={rates.setupMaterials}
-                    onChange={(e) => updateRate('setupMaterials', parseFloat(e.target.value) || 0)}
-                    className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none font-bold font-mono"
-                  />
-                </div>
+              <div className="overflow-x-auto border border-neutral-800 rounded-xl bg-neutral-950">
+                <table className="w-full text-left font-mono text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-neutral-900 text-zinc-300 text-[10px] uppercase font-bold tracking-wider border-b border-neutral-800">
+                      <th className="p-3 border-r border-neutral-800">Parameter</th>
+                      <th className="p-3 border-r border-neutral-800 w-44">Config Value</th>
+                      <th className="p-3">Unit / Description</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-850 text-zinc-200">
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Hourly Labor Rate</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500 font-bold">$</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={rates.hourlyLaborRate}
+                            onChange={(e) => updateRate('hourlyLaborRate', parseFloat(e.target.value) || 0)}
+                            className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-bold font-mono focus:border-yellow-500 outline-none"
+                          />
+                        </div>
+                      </td>
+                      <td className="p-2.5 text-zinc-400 text-[11px]">Billable labor rate ($/hour) per painter</td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Setup Base Prep Time</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={rates.setupHours}
+                            onChange={(e) => updateRate('setupHours', parseFloat(e.target.value) || 0)}
+                            className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-bold font-mono focus:border-yellow-500 outline-none"
+                          />
+                          <span className="text-zinc-500 text-[10px]">hrs</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 text-zinc-400 text-[11px]">Baseline jobsite setup and masking hours per project</td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Setup Base Materials</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500 font-bold">$</span>
+                          <input
+                            type="number"
+                            step="1"
+                            value={rates.setupMaterials}
+                            onChange={(e) => updateRate('setupMaterials', parseFloat(e.target.value) || 0)}
+                            className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-bold font-mono focus:border-yellow-500 outline-none"
+                          />
+                        </div>
+                      </td>
+                      <td className="p-2.5 text-zinc-400 text-[11px]">Default sundries allowance (tape, paper, plastic, drop cloths)</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
 
             {/* SECTION 2: INTERIOR SURFACE ESTIMATION RATES */}
-            <div className="space-y-4 pt-4 border-t border-neutral-800">
+            <div className="space-y-3 pt-4 border-t border-neutral-800">
               <h4 className="text-xs font-bold text-blue-400 uppercase font-mono tracking-wider">2. Interior Surface Estimation Rates</h4>
-              
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {/* Walls */}
-                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Walls</span>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
-                        <input type="number" value={rates.wallsSpeed} onChange={(e) => updateRate('wallsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
-                        <input type="number" value={rates.wallsCoverage} onChange={(e) => updateRate('wallsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                        <input type="number" value={rates.wallsMaterialCost} onChange={(e) => updateRate('wallsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Ceilings */}
-                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Ceilings</span>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
-                        <input type="number" value={rates.ceilingsSpeed} onChange={(e) => updateRate('ceilingsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
-                        <input type="number" value={rates.ceilingsCoverage} onChange={(e) => updateRate('ceilingsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                        <input type="number" value={rates.ceilingsMaterialCost} onChange={(e) => updateRate('ceilingsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Baseboards */}
-                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Baseboards</span>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
-                        <input type="number" value={rates.baseboardsSpeed} onChange={(e) => updateRate('baseboardsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
-                        <input type="number" value={rates.baseboardsCoverage} onChange={(e) => updateRate('baseboardsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                        <input type="number" value={rates.baseboardsMaterialCost} onChange={(e) => updateRate('baseboardsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Windows */}
-                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Windows (Unit rate per coat)</span>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs/coat)</label>
-                        <input type="number" step="0.05" value={rates.windowsHoursPerCoat} onChange={(e) => updateRate('windowsHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/coat)</label>
-                        <input type="number" step="0.5" value={rates.windowsMaterialCostPerCoat} onChange={(e) => updateRate('windowsMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Doors */}
-                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Doors (Unit rate per coat)</span>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs/coat)</label>
-                        <input type="number" step="0.05" value={rates.doorsHoursPerCoat} onChange={(e) => updateRate('doorsHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/coat)</label>
-                        <input type="number" step="0.5" value={rates.doorsMaterialCostPerCoat} onChange={(e) => updateRate('doorsMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Door Frames */}
-                  <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                    <span className="text-[11px] font-bold text-white uppercase tracking-wide">Door Frames (Unit rate per coat)</span>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs/coat)</label>
-                        <input type="number" step="0.05" value={rates.doorFramesHoursPerCoat} onChange={(e) => updateRate('doorFramesHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                      <div>
-                        <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/coat)</label>
-                        <input type="number" step="0.5" value={rates.doorFramesHoursPerCoat} onChange={(e) => updateRate('doorFramesMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
+              <div className="overflow-x-auto border border-neutral-800 rounded-xl bg-neutral-950">
+                <table className="w-full text-left font-mono text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-neutral-900 text-zinc-300 text-[10px] uppercase font-bold tracking-wider border-b border-neutral-800">
+                      <th className="p-3 border-r border-neutral-800">Surface Category</th>
+                      <th className="p-3 border-r border-neutral-800">Production Speed</th>
+                      <th className="p-3 border-r border-neutral-800">Material Coverage</th>
+                      <th className="p-3">Material Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-850 text-zinc-200">
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Walls</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.wallsSpeed} onChange={(e) => updateRate('wallsSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.wallsCoverage} onChange={(e) => updateRate('wallsCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.wallsMaterialCost} onChange={(e) => updateRate('wallsMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Ceilings</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.ceilingsSpeed} onChange={(e) => updateRate('ceilingsSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.ceilingsCoverage} onChange={(e) => updateRate('ceilingsCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.ceilingsMaterialCost} onChange={(e) => updateRate('ceilingsMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Baseboards & Trim</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.baseboardsSpeed} onChange={(e) => updateRate('baseboardsSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.baseboardsCoverage} onChange={(e) => updateRate('baseboardsCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.baseboardsMaterialCost} onChange={(e) => updateRate('baseboardsMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Windows (Per coat)</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" step="0.05" value={rates.windowsHoursPerCoat} onChange={(e) => updateRate('windowsHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">hrs/coat</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800 text-zinc-600 italic text-[11px]">—</td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" step="0.5" value={rates.windowsMaterialCostPerCoat} onChange={(e) => updateRate('windowsMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/coat</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Doors (Per coat)</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" step="0.05" value={rates.doorsHoursPerCoat} onChange={(e) => updateRate('doorsHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">hrs/coat</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800 text-zinc-600 italic text-[11px]">—</td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" step="0.5" value={rates.doorsMaterialCostPerCoat} onChange={(e) => updateRate('doorsMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/coat</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Door Frames (Per coat)</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" step="0.05" value={rates.doorFramesHoursPerCoat} onChange={(e) => updateRate('doorFramesHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">hrs/coat</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800 text-zinc-600 italic text-[11px]">—</td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" step="0.5" value={rates.doorFramesMaterialCostPerCoat} onChange={(e) => updateRate('doorFramesMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-blue-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/coat</span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
 
             {/* SECTION 3: EXTERIOR SURFACE ESTIMATION RATES */}
-            <div className="space-y-4 pt-4 border-t border-neutral-800">
+            <div className="space-y-3 pt-4 border-t border-neutral-800">
               <h4 className="text-xs font-bold text-emerald-400 uppercase font-mono tracking-wider">3. Exterior Surface Estimation Rates</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {/* Siding */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Siding</span>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
-                      <input type="number" value={rates.sidingSpeed} onChange={(e) => updateRate('sidingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
-                      <input type="number" value={rates.sidingCoverage} onChange={(e) => updateRate('sidingCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                      <input type="number" value={rates.sidingMaterialCost} onChange={(e) => updateRate('sidingMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Brick Stain */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Brick Stain</span>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
-                      <input type="number" value={rates.brickSpeed} onChange={(e) => updateRate('brickSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
-                      <input type="number" value={rates.brickCoverage} onChange={(e) => updateRate('brickCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                      <input type="number" value={rates.brickMaterialCost} onChange={(e) => updateRate('brickMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Porch Floor */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Porch Floor</span>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
-                      <input type="number" value={rates.porchFloorSpeed} onChange={(e) => updateRate('porchFloorSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
-                      <input type="number" value={rates.porchFloorCoverage} onChange={(e) => updateRate('porchFloorCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                      <input type="number" value={rates.porchFloorMaterialCost} onChange={(e) => updateRate('porchFloorMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Soffits */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Soffits</span>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
-                      <input type="number" value={rates.soffitsSpeed} onChange={(e) => updateRate('soffitsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
-                      <input type="number" value={rates.soffitsCoverage} onChange={(e) => updateRate('soffitsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                      <input type="number" value={rates.soffitsMaterialCost} onChange={(e) => updateRate('soffitsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Gutters */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Gutters</span>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
-                      <input type="number" value={rates.guttersSpeed} onChange={(e) => updateRate('guttersSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
-                      <input type="number" value={rates.guttersCoverage} onChange={(e) => updateRate('guttersCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                      <input type="number" value={rates.guttersMaterialCost} onChange={(e) => updateRate('guttersMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Fascia */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Fascia</span>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
-                      <input type="number" value={rates.fasciaSpeed} onChange={(e) => updateRate('fasciaSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
-                      <input type="number" value={rates.fasciaCoverage} onChange={(e) => updateRate('fasciaCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                      <input type="number" value={rates.fasciaMaterialCost} onChange={(e) => updateRate('fasciaMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Trims */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Trims</span>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
-                      <input type="number" value={rates.trimsSpeed} onChange={(e) => updateRate('trimsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
-                      <input type="number" value={rates.trimsCoverage} onChange={(e) => updateRate('trimsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                      <input type="number" value={rates.trimsMaterialCost} onChange={(e) => updateRate('trimsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Railings */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Railings</span>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (lf/hr)</label>
-                      <input type="number" value={rates.railingsSpeed} onChange={(e) => updateRate('railingsSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (lf/gal)</label>
-                      <input type="number" value={rates.railingsCoverage} onChange={(e) => updateRate('railingsCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                      <input type="number" value={rates.railingsMaterialCost} onChange={(e) => updateRate('railingsMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Garage Doors */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Garage Doors (Per coat)</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs)</label>
-                      <input type="number" step="0.05" value={rates.garageHoursPerCoat} onChange={(e) => updateRate('garageHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($)</label>
-                      <input type="number" step="0.5" value={rates.garageMaterialCostPerCoat} onChange={(e) => updateRate('garageMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Front Doors */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Front Doors (Per coat)</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs)</label>
-                      <input type="number" step="0.05" value={rates.extDoorsHoursPerCoat} onChange={(e) => updateRate('extDoorsHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($)</label>
-                      <input type="number" step="0.5" value={rates.extDoorsMaterialCostPerCoat} onChange={(e) => updateRate('extDoorsMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Windows Fixed */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Windows Fixed (Per coat)</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs)</label>
-                      <input type="number" step="0.05" value={rates.windowsFixedHoursPerCoat} onChange={(e) => updateRate('windowsFixedHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($)</label>
-                      <input type="number" step="0.5" value={rates.windowsFixedMaterialCostPerCoat} onChange={(e) => updateRate('windowsFixedMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Shutters */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Shutters (Per coat)</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Labor (hrs)</label>
-                      <input type="number" step="0.05" value={rates.shuttersHoursPerCoat} onChange={(e) => updateRate('shuttersHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($)</label>
-                      <input type="number" step="0.5" value={rates.shuttersMaterialCostPerCoat} onChange={(e) => updateRate('shuttersMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
+              <div className="overflow-x-auto border border-neutral-800 rounded-xl bg-neutral-950">
+                <table className="w-full text-left font-mono text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-neutral-900 text-zinc-300 text-[10px] uppercase font-bold tracking-wider border-b border-neutral-800">
+                      <th className="p-3 border-r border-neutral-800">Surface Category</th>
+                      <th className="p-3 border-r border-neutral-800">Production Speed</th>
+                      <th className="p-3 border-r border-neutral-800">Material Coverage</th>
+                      <th className="p-3">Material Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-850 text-zinc-200">
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Siding</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.sidingSpeed} onChange={(e) => updateRate('sidingSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.sidingCoverage} onChange={(e) => updateRate('sidingCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.sidingMaterialCost} onChange={(e) => updateRate('sidingMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Brick Stain</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.brickSpeed} onChange={(e) => updateRate('brickSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.brickCoverage} onChange={(e) => updateRate('brickCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.brickMaterialCost} onChange={(e) => updateRate('brickMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Porch Floor</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.porchFloorSpeed} onChange={(e) => updateRate('porchFloorSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.porchFloorCoverage} onChange={(e) => updateRate('porchFloorCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.porchFloorMaterialCost} onChange={(e) => updateRate('porchFloorMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Soffits</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.soffitsSpeed} onChange={(e) => updateRate('soffitsSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.soffitsCoverage} onChange={(e) => updateRate('soffitsCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.soffitsMaterialCost} onChange={(e) => updateRate('soffitsMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Gutters</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.guttersSpeed} onChange={(e) => updateRate('guttersSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.guttersCoverage} onChange={(e) => updateRate('guttersCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.guttersMaterialCost} onChange={(e) => updateRate('guttersMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Fascia</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.fasciaSpeed} onChange={(e) => updateRate('fasciaSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.fasciaCoverage} onChange={(e) => updateRate('fasciaCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.fasciaMaterialCost} onChange={(e) => updateRate('fasciaMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Trims</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.trimsSpeed} onChange={(e) => updateRate('trimsSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.trimsCoverage} onChange={(e) => updateRate('trimsCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.trimsMaterialCost} onChange={(e) => updateRate('trimsMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Railings</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.railingsSpeed} onChange={(e) => updateRate('railingsSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.railingsCoverage} onChange={(e) => updateRate('railingsCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">lf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.railingsMaterialCost} onChange={(e) => updateRate('railingsMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Garage Doors (Per coat)</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" step="0.05" value={rates.garageHoursPerCoat} onChange={(e) => updateRate('garageHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">hrs/coat</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800 text-zinc-600 italic text-[11px]">—</td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" step="0.5" value={rates.garageMaterialCostPerCoat} onChange={(e) => updateRate('garageMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/coat</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Front Doors (Per coat)</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" step="0.05" value={rates.extDoorsHoursPerCoat} onChange={(e) => updateRate('extDoorsHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">hrs/coat</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800 text-zinc-600 italic text-[11px]">—</td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" step="0.5" value={rates.extDoorsMaterialCostPerCoat} onChange={(e) => updateRate('extDoorsMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/coat</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Windows Fixed (Per coat)</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" step="0.05" value={rates.windowsFixedHoursPerCoat} onChange={(e) => updateRate('windowsFixedHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">hrs/coat</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800 text-zinc-600 italic text-[11px]">—</td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" step="0.5" value={rates.windowsFixedMaterialCostPerCoat} onChange={(e) => updateRate('windowsFixedMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/coat</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Shutters (Per coat)</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" step="0.05" value={rates.shuttersHoursPerCoat} onChange={(e) => updateRate('shuttersHoursPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">hrs/coat</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800 text-zinc-600 italic text-[11px]">—</td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" step="0.5" value={rates.shuttersMaterialCostPerCoat} onChange={(e) => updateRate('shuttersMaterialCostPerCoat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-emerald-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/coat</span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
 
             {/* SECTION 4: DECK SURFACE ESTIMATION RATES */}
-            <div className="space-y-4 pt-4 border-t border-neutral-800">
+            <div className="space-y-3 pt-4 border-t border-neutral-800">
               <h4 className="text-xs font-bold text-indigo-400 uppercase font-mono tracking-wider">4. Deck Surface Estimation Rates</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {/* Washing */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Washing</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
-                      <input type="number" value={rates.washingSpeed} onChange={(e) => updateRate('washingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/sf)</label>
-                      <input type="number" step="0.01" value={rates.washingMaterialCostPerSqft} onChange={(e) => updateRate('washingMaterialCostPerSqft', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Stripping */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Stripping</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
-                      <input type="number" value={rates.strippingSpeed} onChange={(e) => updateRate('strippingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/sf)</label>
-                      <input type="number" step="0.005" value={rates.strippingMaterialCostPerSqft} onChange={(e) => updateRate('strippingMaterialCostPerSqft', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Reviving */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Reviving</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
-                      <input type="number" value={rates.revivingSpeed} onChange={(e) => updateRate('revivingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Mat. ($/sf)</label>
-                      <input type="number" step="0.01" value={rates.revivingMaterialCostPerSqft} onChange={(e) => updateRate('revivingMaterialCostPerSqft', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Sanding */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Sanding</span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
-                      <input type="number" value={rates.sandingSpeed} onChange={(e) => updateRate('sandingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Flat Cost ($)</label>
-                      <input type="number" value={rates.sandingMaterialCostFlat} onChange={(e) => updateRate('sandingMaterialCostFlat', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Staining */}
-                <div className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                  <span className="text-[11px] font-bold text-white uppercase tracking-wide block">Staining</span>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Speed (sf/hr)</label>
-                      <input type="number" value={rates.stainingSpeed} onChange={(e) => updateRate('stainingSpeed', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Cov (sf/gal)</label>
-                      <input type="number" value={rates.stainingCoverage} onChange={(e) => updateRate('stainingCoverage', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                    <div>
-                      <label className="text-[9px] text-zinc-500 font-mono uppercase block">Price ($/gal)</label>
-                      <input type="number" value={rates.stainingMaterialCost} onChange={(e) => updateRate('stainingMaterialCost', parseFloat(e.target.value) || 0)} className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono" />
-                    </div>
-                  </div>
-                </div>
+              <div className="overflow-x-auto border border-neutral-800 rounded-xl bg-neutral-950">
+                <table className="w-full text-left font-mono text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-neutral-900 text-zinc-300 text-[10px] uppercase font-bold tracking-wider border-b border-neutral-800">
+                      <th className="p-3 border-r border-neutral-800">Surface Task</th>
+                      <th className="p-3 border-r border-neutral-800">Production Speed</th>
+                      <th className="p-3 border-r border-neutral-800">Material Coverage</th>
+                      <th className="p-3">Material Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-850 text-zinc-200">
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Washing</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.washingSpeed} onChange={(e) => updateRate('washingSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800 text-zinc-600 italic text-[11px]">—</td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" step="0.01" value={rates.washingMaterialCostPerSqft} onChange={(e) => updateRate('washingMaterialCostPerSqft', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/sf</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Stripping</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.strippingSpeed} onChange={(e) => updateRate('strippingSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800 text-zinc-600 italic text-[11px]">—</td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" step="0.005" value={rates.strippingMaterialCostPerSqft} onChange={(e) => updateRate('strippingMaterialCostPerSqft', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/sf</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Reviving</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.revivingSpeed} onChange={(e) => updateRate('revivingSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800 text-zinc-600 italic text-[11px]">—</td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" step="0.01" value={rates.revivingMaterialCostPerSqft} onChange={(e) => updateRate('revivingMaterialCostPerSqft', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/sf</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Sanding</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.sandingSpeed} onChange={(e) => updateRate('sandingSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800 text-zinc-600 italic text-[11px]">—</td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.sandingMaterialCostFlat} onChange={(e) => updateRate('sandingMaterialCostFlat', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">(Flat cost)</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="hover:bg-neutral-900/50 transition">
+                      <td className="p-2.5 font-bold border-r border-neutral-800 text-white">Staining</td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.stainingSpeed} onChange={(e) => updateRate('stainingSpeed', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/hr</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5 border-r border-neutral-800">
+                        <div className="flex items-center gap-1.5">
+                          <input type="number" value={rates.stainingCoverage} onChange={(e) => updateRate('stainingCoverage', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">sf/gal</span>
+                        </div>
+                      </td>
+                      <td className="p-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-zinc-500">$</span>
+                          <input type="number" value={rates.stainingMaterialCost} onChange={(e) => updateRate('stainingMaterialCost', parseFloat(e.target.value) || 0)} className="w-24 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono focus:border-indigo-500 outline-none" />
+                          <span className="text-[10px] text-zinc-500">/gal</span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
 
@@ -2293,33 +2414,40 @@ ON CONFLICT (email) DO NOTHING;`;
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(proposalSettings.discountPresets || []).length === 0 ? (
-                  <div className="bg-neutral-950/40 p-6 border border-neutral-850 rounded-xl text-center md:col-span-2 text-zinc-500 text-xs">
-                    No discount presets created yet. Click "+ Add Preset" to define some standard discounts.
-                  </div>
-                ) : (
-                  (proposalSettings.discountPresets || []).map((preset, idx) => (
-                    <div key={preset.id} className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl flex items-start justify-between gap-4">
-                      <div className="flex-1 space-y-3">
-                        <div>
-                          <label className="text-[9px] text-zinc-500 font-mono uppercase block mb-1">Preset Display Name</label>
-                          <input
-                            type="text"
-                            value={preset.name}
-                            onChange={(e) => {
-                              const presets = [...(proposalSettings.discountPresets || [])];
-                              presets[idx] = { ...preset, name: e.target.value };
-                              saveProposalSettings({ ...proposalSettings, discountPresets: presets });
-                            }}
-                            className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-sans font-medium"
-                            placeholder="e.g. Winter Special"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-[9px] text-zinc-500 font-mono uppercase block mb-1">Discount Type</label>
+              <div className="overflow-x-auto border border-neutral-800 rounded-xl bg-neutral-950">
+                <table className="w-full text-left font-mono text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-neutral-900 text-zinc-300 text-[10px] uppercase font-bold tracking-wider border-b border-neutral-800">
+                      <th className="p-3 border-r border-neutral-800">Preset Display Name</th>
+                      <th className="p-3 border-r border-neutral-800">Discount Type</th>
+                      <th className="p-3 border-r border-neutral-800">Value</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-850 text-zinc-200">
+                    {(proposalSettings.discountPresets || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-6 text-center text-zinc-500 text-xs italic">
+                          No discount presets created yet. Click "+ Add Preset" to define standard discounts.
+                        </td>
+                      </tr>
+                    ) : (
+                      (proposalSettings.discountPresets || []).map((preset, idx) => (
+                        <tr key={preset.id} className="hover:bg-neutral-900/50 transition">
+                          <td className="p-2.5 border-r border-neutral-800">
+                            <input
+                              type="text"
+                              value={preset.name}
+                              onChange={(e) => {
+                                const presets = [...(proposalSettings.discountPresets || [])];
+                                presets[idx] = { ...preset, name: e.target.value };
+                                saveProposalSettings({ ...proposalSettings, discountPresets: presets });
+                              }}
+                              className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-sans font-medium"
+                              placeholder="e.g. Winter Special"
+                            />
+                          </td>
+                          <td className="p-2.5 border-r border-neutral-800">
                             <select
                               value={preset.type}
                               onChange={(e) => {
@@ -2327,137 +2455,53 @@ ON CONFLICT (email) DO NOTHING;`;
                                 presets[idx] = { ...preset, type: e.target.value as 'fixed' | 'percentage' };
                                 saveProposalSettings({ ...proposalSettings, discountPresets: presets });
                               }}
-                              className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-sans"
+                              className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-sans cursor-pointer"
                             >
                               <option value="percentage">Percentage (%)</option>
                               <option value="fixed">Fixed Amount ($)</option>
                             </select>
-                          </div>
-                          <div>
-                            <label className="text-[9px] text-zinc-500 font-mono uppercase block mb-1">Value ({preset.type === 'percentage' ? '%' : '$'})</label>
-                            <input
-                              type="number"
-                              value={preset.amount}
-                              onChange={(e) => {
-                                const presets = [...(proposalSettings.discountPresets || [])];
-                                presets[idx] = { ...preset, amount: parseFloat(e.target.value) || 0 };
+                          </td>
+                          <td className="p-2.5 border-r border-neutral-800">
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="number"
+                                value={preset.amount}
+                                onChange={(e) => {
+                                  const presets = [...(proposalSettings.discountPresets || [])];
+                                  presets[idx] = { ...preset, amount: parseFloat(e.target.value) || 0 };
+                                  saveProposalSettings({ ...proposalSettings, discountPresets: presets });
+                                }}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-mono"
+                              />
+                              <span className="text-[10px] text-zinc-500 font-bold">{preset.type === 'percentage' ? '%' : '$'}</span>
+                            </div>
+                          </td>
+                          <td className="p-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const presets = (proposalSettings.discountPresets || []).filter(p => p.id !== preset.id);
                                 saveProposalSettings({ ...proposalSettings, discountPresets: presets });
                               }}
-                              className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-mono"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const presets = (proposalSettings.discountPresets || []).filter(p => p.id !== preset.id);
-                          saveProposalSettings({ ...proposalSettings, discountPresets: presets });
-                        }}
-                        className="p-1.5 bg-red-950/20 text-red-400 hover:bg-red-900/30 rounded border border-red-950/50 cursor-pointer transition mt-5"
-                        title="Delete Preset"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))
-                )}
+                              className="p-1.5 bg-red-950/20 text-red-400 hover:bg-red-900/30 rounded border border-red-950/50 cursor-pointer transition"
+                              title="Delete Preset"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
-            {/* SECTION 7: PROPOSAL SCOPE NOTE PRESETS */}
+            {/* SECTION 7: AREA & SURFACE PRESETS */}
             <div className="space-y-4 pt-6 border-t border-neutral-850">
               <div className="flex justify-between items-center">
                 <div>
-                  <h4 className="text-xs font-bold text-cyan-400 uppercase font-mono tracking-wider">7. Scope Note Presets (Inclusions, Exclusions, Special Conditions)</h4>
-                  <p className="text-zinc-500 text-[11px] mt-0.5">Manage custom quick-load presets for proposal inclusions, exclusions, and special conditions.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const current = proposalSettings.scopePresets || DEFAULT_PROPOSAL_SETTINGS.scopePresets || [];
-                    const newPreset = {
-                      id: `sp-${Date.now()}`,
-                      category: 'inclusion' as const,
-                      name: 'New Custom Scope Preset',
-                      text: '• Describe custom inclusion or exclusion details here...'
-                    };
-                    saveProposalSettings({
-                      ...proposalSettings,
-                      scopePresets: [...current, newPreset]
-                    });
-                  }}
-                  className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 text-cyan-400 hover:text-cyan-300 text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer font-mono"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add Scope Preset
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(proposalSettings.scopePresets || DEFAULT_PROPOSAL_SETTINGS.scopePresets || []).map((preset, idx) => {
-                  const currentList = proposalSettings.scopePresets || DEFAULT_PROPOSAL_SETTINGS.scopePresets || [];
-                  return (
-                    <div key={preset.id} className="bg-neutral-950 p-4 border border-neutral-850 rounded-xl space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <input
-                          type="text"
-                          value={preset.name}
-                          onChange={(e) => {
-                            const updated = [...currentList];
-                            updated[idx] = { ...preset, name: e.target.value };
-                            saveProposalSettings({ ...proposalSettings, scopePresets: updated });
-                          }}
-                          className="bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-sans font-bold flex-1"
-                          placeholder="Preset Button Label"
-                        />
-                        <select
-                          value={preset.category}
-                          onChange={(e) => {
-                            const updated = [...currentList];
-                            updated[idx] = { ...preset, category: e.target.value as any };
-                            saveProposalSettings({ ...proposalSettings, scopePresets: updated });
-                          }}
-                          className="bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-zinc-300 font-mono"
-                        >
-                          <option value="inclusion">Inclusion</option>
-                          <option value="exclusion">Exclusion</option>
-                          <option value="special">Special Condition</option>
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updated = currentList.filter(p => p.id !== preset.id);
-                            saveProposalSettings({ ...proposalSettings, scopePresets: updated });
-                          }}
-                          className="p-1 bg-red-950/20 text-red-400 hover:bg-red-900/30 rounded border border-red-950/50 cursor-pointer transition"
-                          title="Delete Preset"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <textarea
-                        rows={3}
-                        value={preset.text}
-                        onChange={(e) => {
-                          const updated = [...currentList];
-                          updated[idx] = { ...preset, text: e.target.value };
-                          saveProposalSettings({ ...proposalSettings, scopePresets: updated });
-                        }}
-                        className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-xs text-zinc-300 focus:outline-none leading-relaxed font-sans"
-                        placeholder="Preset text payload..."
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* SECTION 8: AREA & SURFACE PRESETS */}
-            <div className="space-y-4 pt-6 border-t border-neutral-850">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h4 className="text-xs font-bold text-amber-400 uppercase font-mono tracking-wider">8. Area & Surface Layer Presets</h4>
+                  <h4 className="text-xs font-bold text-amber-400 uppercase font-mono tracking-wider">7. Area & Surface Layer Presets</h4>
                   <p className="text-zinc-500 text-[11px] mt-0.5">Manage area options available under Interior, Exterior, and Deck configurations.</p>
                 </div>
                 <button
@@ -2483,85 +2527,104 @@ ON CONFLICT (email) DO NOTHING;`;
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {(proposalSettings.areaPresets || DEFAULT_PROPOSAL_SETTINGS.areaPresets || []).map((preset, idx) => {
-                  const currentList = proposalSettings.areaPresets || DEFAULT_PROPOSAL_SETTINGS.areaPresets || [];
-                  return (
-                    <div key={preset.id} className="bg-neutral-950 p-3.5 border border-neutral-850 rounded-xl space-y-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <select
-                          value={preset.category}
-                          onChange={(e) => {
-                            const updated = [...currentList];
-                            updated[idx] = { ...preset, category: e.target.value as any };
-                            saveProposalSettings({ ...proposalSettings, areaPresets: updated });
-                          }}
-                          className="bg-neutral-900 border border-neutral-800 rounded px-2 py-0.5 text-[10px] font-bold text-amber-400 uppercase font-mono"
-                        >
-                          <option value="interior">Interior</option>
-                          <option value="exterior">Exterior</option>
-                          <option value="deck">Deck</option>
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updated = currentList.filter(p => p.id !== preset.id);
-                            saveProposalSettings({ ...proposalSettings, areaPresets: updated });
-                          }}
-                          className="p-1 bg-red-950/20 text-red-400 hover:bg-red-900/30 rounded border border-red-950/50 cursor-pointer transition"
-                          title="Delete Area Preset"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-
-                      <input
-                        type="text"
-                        value={preset.label}
-                        onChange={(e) => {
-                          const updated = [...currentList];
-                          updated[idx] = { ...preset, label: e.target.value };
-                          saveProposalSettings({ ...proposalSettings, areaPresets: updated });
-                        }}
-                        className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-medium"
-                        placeholder="Area Preset Label"
-                      />
-
-                      <div className="grid grid-cols-2 gap-2 text-[10px]">
-                        <div>
-                          <label className="text-zinc-500 font-mono block mb-0.5">Calc Type</label>
-                          <select
-                            value={preset.calcType}
-                            onChange={(e) => {
-                              const updated = [...currentList];
-                              updated[idx] = { ...preset, calcType: e.target.value as any };
-                              saveProposalSettings({ ...proposalSettings, areaPresets: updated });
-                            }}
-                            className="w-full bg-neutral-900 border border-neutral-800 rounded px-1.5 py-1 text-zinc-300 font-mono"
-                          >
-                            <option value="wall">Wall Sqft</option>
-                            <option value="ceiling">Ceiling Sqft</option>
-                            <option value="perimeter">Perimeter LF</option>
-                            <option value="item">Item Unit Qty</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-zinc-500 font-mono block mb-0.5">Coats</label>
-                          <input
-                            type="number"
-                            value={preset.defaultCoats || 2}
-                            onChange={(e) => {
-                              const updated = [...currentList];
-                              updated[idx] = { ...preset, defaultCoats: parseInt(e.target.value, 10) || 1 };
-                              saveProposalSettings({ ...proposalSettings, areaPresets: updated });
-                            }}
-                            className="w-full bg-neutral-900 border border-neutral-800 rounded px-1.5 py-1 text-zinc-300 font-mono"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="overflow-x-auto border border-neutral-800 rounded-xl bg-neutral-950">
+                <table className="w-full text-left font-mono text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-neutral-900 text-zinc-300 text-[10px] uppercase font-bold tracking-wider border-b border-neutral-800">
+                      <th className="p-3 border-r border-neutral-800">Category</th>
+                      <th className="p-3 border-r border-neutral-800">Area Preset Label</th>
+                      <th className="p-3 border-r border-neutral-800">Calculation Type</th>
+                      <th className="p-3 border-r border-neutral-800">Coats</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-850 text-zinc-200">
+                    {(proposalSettings.areaPresets || DEFAULT_PROPOSAL_SETTINGS.areaPresets || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-6 text-center text-zinc-500 text-xs italic">
+                          No area presets defined yet. Click "+ Add Area Preset" to add one.
+                        </td>
+                      </tr>
+                    ) : (
+                      (proposalSettings.areaPresets || DEFAULT_PROPOSAL_SETTINGS.areaPresets || []).map((preset, idx) => {
+                        const currentList = proposalSettings.areaPresets || DEFAULT_PROPOSAL_SETTINGS.areaPresets || [];
+                        return (
+                          <tr key={preset.id} className="hover:bg-neutral-900/50 transition">
+                            <td className="p-2.5 border-r border-neutral-800">
+                              <select
+                                value={preset.category}
+                                onChange={(e) => {
+                                  const updated = [...currentList];
+                                  updated[idx] = { ...preset, category: e.target.value as any };
+                                  saveProposalSettings({ ...proposalSettings, areaPresets: updated });
+                                }}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs font-bold text-amber-400 uppercase font-mono cursor-pointer"
+                              >
+                                <option value="interior">Interior</option>
+                                <option value="exterior">Exterior</option>
+                                <option value="deck">Deck</option>
+                              </select>
+                            </td>
+                            <td className="p-2.5 border-r border-neutral-800">
+                              <input
+                                type="text"
+                                value={preset.label}
+                                onChange={(e) => {
+                                  const updated = [...currentList];
+                                  updated[idx] = { ...preset, label: e.target.value };
+                                  saveProposalSettings({ ...proposalSettings, areaPresets: updated });
+                                }}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-medium"
+                                placeholder="Area Preset Label"
+                              />
+                            </td>
+                            <td className="p-2.5 border-r border-neutral-800">
+                              <select
+                                value={preset.calcType}
+                                onChange={(e) => {
+                                  const updated = [...currentList];
+                                  updated[idx] = { ...preset, calcType: e.target.value as any };
+                                  saveProposalSettings({ ...proposalSettings, areaPresets: updated });
+                                }}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-zinc-300 font-mono cursor-pointer"
+                              >
+                                <option value="wall">Wall Sqft</option>
+                                <option value="ceiling">Ceiling Sqft</option>
+                                <option value="perimeter">Perimeter LF</option>
+                                <option value="item">Item Unit Qty</option>
+                              </select>
+                            </td>
+                            <td className="p-2.5 border-r border-neutral-800">
+                              <input
+                                type="number"
+                                value={preset.defaultCoats || 2}
+                                onChange={(e) => {
+                                  const updated = [...currentList];
+                                  updated[idx] = { ...preset, defaultCoats: parseInt(e.target.value, 10) || 1 };
+                                  saveProposalSettings({ ...proposalSettings, areaPresets: updated });
+                                }}
+                                className="w-20 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono"
+                              />
+                            </td>
+                            <td className="p-2.5 text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = currentList.filter(p => p.id !== preset.id);
+                                  saveProposalSettings({ ...proposalSettings, areaPresets: updated });
+                                }}
+                                className="p-1.5 bg-red-950/20 text-red-400 hover:bg-red-900/30 rounded border border-red-950/50 cursor-pointer transition"
+                                title="Delete Area Preset"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>

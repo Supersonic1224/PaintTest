@@ -44,6 +44,7 @@ export interface RoomSpec {
   category?: 'interior' | 'exterior' | 'deck';
   groupName?: string;
   surfaceTasks?: SurfaceTask[];
+  notes?: string;
 }
 
 export interface EstimateSummary {

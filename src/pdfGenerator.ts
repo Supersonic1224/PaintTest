@@ -190,37 +190,7 @@ export function generateProposalPDF({
     y += 8;
 
     catRooms.forEach(room => {
-      ensureSpace(12);
       const price = liveSummary.roomCosts[room.id] || 0;
-      
-      // Draw thin border under row or custom background if it's an option room
-      if (room.isOption) {
-        doc.setFillColor(254, 251, 235); // Soft yellow
-        doc.rect(15, y, pageWidth - 30, 10, 'F');
-        doc.setDrawColor(253, 224, 71); // Soft yellow border
-        doc.rect(15, y, pageWidth - 30, 10, 'S');
-      } else {
-        doc.setDrawColor(241, 245, 249);
-        doc.line(15, y + 10, pageWidth - 15, y + 10);
-      }
-
-      // Room Name
-      doc.setFont('Helvetica', 'bold');
-      if (room.isOption) {
-        doc.setTextColor(180, 83, 9);
-        doc.text(`${room.name} (Option)`, 18, y + 6.5);
-      } else {
-        doc.setTextColor(30, 41, 59);
-        doc.text(room.name, 18, y + 6.5);
-      }
-
-      // Applied layers/inclusions
-      doc.setFont('Helvetica', 'normal');
-      if (room.isOption) {
-        doc.setTextColor(120, 53, 4);
-      } else {
-        doc.setTextColor(71, 85, 105);
-      }
 
       const subAreas: string[] = [];
       const keys = [
@@ -271,19 +241,56 @@ export function generateProposalPDF({
       });
 
       const detailsText = subAreas.length > 0 ? subAreas.join(', ') : 'No specific layers selected';
-      const truncatedDetails = detailsText.length > 52 ? detailsText.substring(0, 52) + '...' : detailsText;
-      doc.text(truncatedDetails, 85, y + 6.5);
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8.5);
+      const detailLines = doc.splitTextToSize(detailsText, 85);
+      const rowHeight = Math.max(10, detailLines.length * 4.5 + 4);
+
+      ensureSpace(rowHeight + 2);
+
+      // Draw thin border under row or custom background if it's an option room
+      if (room.isOption) {
+        doc.setFillColor(254, 251, 235); // Soft yellow
+        doc.rect(15, y, pageWidth - 30, rowHeight, 'F');
+        doc.setDrawColor(253, 224, 71); // Soft yellow border
+        doc.rect(15, y, pageWidth - 30, rowHeight, 'S');
+      } else {
+        doc.setDrawColor(241, 245, 249);
+        doc.line(15, y + rowHeight, pageWidth - 15, y + rowHeight);
+      }
+
+      // Room Name
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(9);
+      if (room.isOption) {
+        doc.setTextColor(180, 83, 9);
+        doc.text(`${room.name} (Option)`, 18, y + 5.5);
+      } else {
+        doc.setTextColor(30, 41, 59);
+        doc.text(room.name, 18, y + 5.5);
+      }
+
+      // Applied layers/inclusions (wrapped)
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8.5);
+      if (room.isOption) {
+        doc.setTextColor(120, 53, 4);
+      } else {
+        doc.setTextColor(71, 85, 105);
+      }
+      doc.text(detailLines, 85, y + 5.5);
 
       // Price
       doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(9);
       if (room.isOption) {
         doc.setTextColor(180, 83, 9);
       } else {
         doc.setTextColor(30, 41, 59);
       }
-      doc.text(`$${price.toLocaleString()}`, pageWidth - 40, y + 6.5);
+      doc.text(`$${price.toLocaleString()}`, pageWidth - 40, y + 5.5);
 
-      y += 10;
+      y += rowHeight;
     });
 
     y += 6; // Extra spacing between category sections
@@ -1106,6 +1113,7 @@ interface WorkOrderPDFParams {
     gallonsToBuy: number;
     estMaterialBudget: number;
   }>;
+  hidePrices?: boolean;
 }
 
 export function generateWorkOrderPDF({
@@ -1120,6 +1128,7 @@ export function generateWorkOrderPDF({
   exclusions = '',
   description = '',
   shoppingList = [],
+  hidePrices = false,
 }: WorkOrderPDFParams): { base64: string; blobUrl: string } {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -1298,26 +1307,28 @@ export function generateWorkOrderPDF({
     y += 8;
   }
 
-  // 6. Financial & Labor Budget Breakdown
-  ensureSpace(22);
-  doc.setFont('Helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(30, 58, 138);
-  doc.text('FINANCIAL & CREW BUDGET BREAKDOWN', 15, y);
-  y += 5;
+  // 6. Financial & Labor Budget Breakdown (Hidden for Painter Crew Copy)
+  if (!hidePrices) {
+    ensureSpace(22);
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(30, 58, 138);
+    doc.text('FINANCIAL & CREW BUDGET BREAKDOWN', 15, y);
+    y += 5;
 
-  doc.setFillColor(241, 245, 249);
-  doc.rect(15, y, pageWidth - 30, 14, 'F');
-  doc.setFont('Helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(30, 41, 59);
-  const grandTotal = liveSummary.total ?? liveSummary.totalCost ?? (liveSummary.subtotal + liveSummary.hst);
-  doc.text(`Labor Budget: $${liveSummary.laborCost.toLocaleString()}`, 18, y + 9);
-  doc.text(`Material Budget: $${liveSummary.materialCost.toLocaleString()}`, 70, y + 9);
-  doc.text(`Subtotal: $${liveSummary.subtotal.toLocaleString()}`, 125, y + 9);
-  doc.text(`Total: $${grandTotal.toLocaleString()}`, pageWidth - 20, y + 9, { align: 'right' });
+    doc.setFillColor(241, 245, 249);
+    doc.rect(15, y, pageWidth - 30, 14, 'F');
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(30, 41, 59);
+    const grandTotal = liveSummary.total ?? liveSummary.totalCost ?? (liveSummary.subtotal + liveSummary.hst);
+    doc.text(`Labor Budget: $${liveSummary.laborCost.toLocaleString()}`, 18, y + 9);
+    doc.text(`Material Budget: $${liveSummary.materialCost.toLocaleString()}`, 70, y + 9);
+    doc.text(`Subtotal: $${liveSummary.subtotal.toLocaleString()}`, 125, y + 9);
+    doc.text(`Total: $${grandTotal.toLocaleString()}`, pageWidth - 20, y + 9, { align: 'right' });
 
-  y += 20;
+    y += 20;
+  }
 
   // 7. Room & Surface Specifications Table
   ensureSpace(30);
@@ -1339,12 +1350,14 @@ export function generateWorkOrderPDF({
   y += 8;
 
   filteredRooms.forEach((r, idx) => {
-    ensureSpace(12);
+    const noteLines = r.notes ? doc.splitTextToSize(`Notes: ${r.notes.replace(/\n/g, ' ')}`, pageWidth - 36) : [];
+    const rowHeight = r.notes ? 10 + Math.min(noteLines.length, 6) * 3.8 : 10;
+    ensureSpace(rowHeight + 2);
     const bgVal = idx % 2 === 0 ? 255 : 248;
     doc.setFillColor(bgVal, bgVal, bgVal);
-    doc.rect(15, y, pageWidth - 30, 10, 'F');
+    doc.rect(15, y, pageWidth - 30, rowHeight, 'F');
     doc.setDrawColor(241, 245, 249);
-    doc.line(15, y + 10, pageWidth - 15, y + 10);
+    doc.line(15, y + rowHeight, pageWidth - 15, y + rowHeight);
 
     doc.setFont('Helvetica', 'bold');
     doc.setFontSize(8);
@@ -1356,13 +1369,20 @@ export function generateWorkOrderPDF({
     doc.setTextColor(100, 100, 100);
     doc.text(`${r.length || 0}'x${r.width || 0}'x${r.height || 8}'`, 60, y + 6);
 
-    const wallSpec = r.walls?.checked !== false ? `${r.wallsArea || 0}sqft (2c)` : '—';
+    const wallSpec = r.walls?.checked !== false ? `${r.wallsArea || 0}sqft (${r.walls?.coats || 2}c)` : '—';
     doc.text(wallSpec, 100, y + 6);
 
     const product = r.wallPaintType || 'BM Regal Select Eggshell';
     doc.text(product.substring(0, 28), 150, y + 6);
 
-    y += 10;
+    if (noteLines.length > 0) {
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(180, 83, 9); // Amber text
+      doc.text(noteLines.slice(0, 6), 18, y + 10.5);
+    }
+
+    y += rowHeight;
   });
 
   y += 10;

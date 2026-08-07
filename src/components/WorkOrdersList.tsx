@@ -262,17 +262,8 @@ export default function WorkOrdersList({
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Available scope categories in selected project
-  const availableScopeCategories = useMemo(() => {
-    if (!selectedProject?.rooms || selectedProject.rooms.length === 0) return ['interior'] as ('interior' | 'exterior' | 'deck')[];
-    const set = new Set<'interior' | 'exterior' | 'deck'>();
-    selectedProject.rooms.forEach(r => {
-      const cat = (r.category || 'interior') as 'interior' | 'exterior' | 'deck';
-      set.add(cat);
-    });
-    const list = Array.from(set);
-    return list.length > 0 ? list : (['interior'] as ('interior' | 'exterior' | 'deck')[]);
-  }, [selectedProject]);
+  // Available scope categories for splitting work order documents for painters
+  const availableScopeCategories = ['interior', 'exterior', 'deck'] as const;
 
   // Sync selected scope filter with available categories
   useEffect(() => {
@@ -454,6 +445,10 @@ export default function WorkOrdersList({
 
   const handleAddRoomToDocument = () => {
     if (!selectedProject) return;
+    if (selectedScopeFilter === 'interior') {
+      triggerToast('Interior areas cannot be added in Work Orders. Interior scope is locked to the proposal estimate.');
+      return;
+    }
     const newCat = selectedScopeFilter;
     const baseName = `New ${newCat.charAt(0).toUpperCase() + newCat.slice(1)} Area`;
     const uniqueName = getUniqueRoomName(selectedProject.rooms || [], baseName);
@@ -1512,21 +1507,30 @@ export default function WorkOrdersList({
                             <span>Pre-fill All from Proposal</span>
                           </button>
 
-                          <button
-                            type="button"
-                            onClick={handleAddRoomToDocument}
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer text-xs"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                            <span>Add New Area Note</span>
-                          </button>
+                          {selectedScopeFilter === 'interior' ? (
+                            <span className="px-3 py-1.5 bg-slate-100 text-slate-500 font-mono font-bold rounded-lg text-xs border border-slate-300/80 flex items-center gap-1.5">
+                              <Lock className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Interior Areas Locked to Estimate</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={handleAddRoomToDocument}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer text-xs"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>Add New {selectedScopeFilter.toUpperCase()} Area Note</span>
+                            </button>
+                          )}
                         </div>
                       </div>
 
                       {/* Room Note Cards List */}
                       {activeRoomsForScope.length === 0 ? (
                         <div className="p-8 text-center text-slate-500 text-xs italic bg-white rounded-xl border border-slate-300">
-                          No areas configured for "{selectedScopeFilter.toUpperCase()}". Click "Add New Area Note" above to create one.
+                          {selectedScopeFilter === 'interior'
+                            ? 'No interior areas configured in proposal estimate scope.'
+                            : `No areas configured for "${selectedScopeFilter.toUpperCase()}". Click "Add New ${selectedScopeFilter.toUpperCase()} Area Note" above to create one.`}
                         </div>
                       ) : (
                         (selectedProject.rooms || [])
@@ -1660,7 +1664,9 @@ export default function WorkOrdersList({
                   <div className="md:hidden divide-y divide-slate-200 bg-white">
                     {activeRoomsForScope.length === 0 ? (
                       <div className="p-6 text-slate-500 italic text-center text-xs font-mono">
-                        No rooms found for scope filter "{selectedScopeFilter.toUpperCase()}". Click "Add New Area" below to create one!
+                        {selectedScopeFilter === 'interior'
+                          ? 'No interior areas found in proposal estimate scope.'
+                          : `No rooms found for scope filter "${selectedScopeFilter.toUpperCase()}". Click "Add New ${selectedScopeFilter.toUpperCase()} Area" below to create one!`}
                       </div>
                     ) : (
                       (selectedProject.rooms || [])
@@ -1794,7 +1800,9 @@ export default function WorkOrdersList({
                         {activeRoomsForScope.length === 0 ? (
                           <tr>
                             <td colSpan={7} className="p-6 text-slate-500 italic text-center">
-                              No rooms found for scope filter "{selectedScopeFilter.toUpperCase()}". Click "Add New Area" below to create one!
+                              {selectedScopeFilter === 'interior'
+                                ? 'No interior areas found in proposal estimate scope.'
+                                : `No rooms found for scope filter "${selectedScopeFilter.toUpperCase()}". Click "Add New ${selectedScopeFilter.toUpperCase()} Area" below to create one!`}
                             </td>
                           </tr>
                         ) : (
@@ -1934,19 +1942,29 @@ export default function WorkOrdersList({
                   </div>
 
                   {/* Add Room Button Bar */}
-                      <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-xs text-slate-500 font-mono">
-                          Need to add another area or room to the {selectedScopeFilter.toUpperCase()} scope?
-                        </span>
-                        <button
-                          type="button"
-                          onClick={handleAddRoomToDocument}
-                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Add New {selectedScopeFilter.toUpperCase()} Area</span>
-                        </button>
-                      </div>
+                  {selectedScopeFilter === 'interior' ? (
+                    <div className="p-3 bg-slate-100/80 border-t border-slate-200 flex items-center justify-between gap-2 text-xs text-slate-500 font-mono">
+                      <span className="flex items-center gap-1.5 font-medium">
+                        <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span>Interior areas cannot be added directly in Work Orders. Interior scope is locked to proposal estimate details.</span>
+                      </span>
+                      <span className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-mono font-bold uppercase border border-slate-300">Scope Fixed</span>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs text-slate-500 font-mono">
+                        Need to add another area or room to the {selectedScopeFilter.toUpperCase()} scope?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleAddRoomToDocument}
+                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add New {selectedScopeFilter.toUpperCase()} Area</span>
+                      </button>
+                    </div>
+                  )}
                     </div>
                   )}
                 </div>

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { ProjectDetails, ClientLead } from '../types';
+import { ProjectDetails, ClientLead, RoomSpec, PaintColor } from '../types';
 import { fetchSingleProjectFromFirestore, fetchSingleClientFromFirestore, updateProjectSignatureInFirestore } from '../firebaseService';
 import { fetchSingleProjectFromSupabase, fetchSingleClientFromSupabase, updateProjectSignatureInSupabase } from '../supabaseService';
 import { generateProposalPDF, generateReceiptPDF } from '../pdfGenerator';
@@ -17,9 +17,292 @@ import {
   ShieldCheck,
   Paintbrush,
   Download,
-  X
+  X,
+  Diamond,
+  Layers,
+  ChevronDown,
+  ChevronUp,
+  Tag,
+  Sparkles,
+  CheckCircle2,
+  DollarSign
 } from 'lucide-react';
 import { motion } from 'motion/react';
+
+interface RoomCostDetail {
+  roomId: string;
+  roomName: string;
+  isOption: boolean;
+  totalCost: number;
+  laborCost: number;
+  materialCost: number;
+  surfaceItems: {
+    label: string;
+    coats: number;
+    qtyOrArea: string;
+    cost: number;
+    paint?: PaintColor;
+  }[];
+  taskItems: {
+    text: string;
+    cost: number;
+    completed: boolean;
+  }[];
+}
+
+function computeDetailedRoomBreakdownMap(rooms: RoomSpec[], proposalSubtotal: number): Record<string, RoomCostDetail> {
+  const hourlyLaborRate = 65;
+  const rawBreakdowns: Record<string, {
+    roomId: string;
+    roomName: string;
+    isOption: boolean;
+    rawTotal: number;
+    rawLabor: number;
+    rawMaterial: number;
+    surfaceItems: { label: string; coats: number; qtyOrArea: string; cost: number; paint?: PaintColor }[];
+    taskItems: { text: string; cost: number; completed: boolean }[];
+  }> = {};
+
+  let sumRawNonOptionTotals = 0;
+
+  rooms.forEach(room => {
+    let rHours = 0;
+    let rMat = 0;
+    const surfaceItems: { label: string; coats: number; qtyOrArea: string; cost: number; paint?: PaintColor }[] = [];
+    const taskItems: { text: string; cost: number; completed: boolean }[] = [];
+
+    const rL = Number(room.length) || 12;
+    const rW = Number(room.width) || 12;
+    const rH = Number(room.height) || 9;
+
+    const wArea = 2 * rH * (rL + rW);
+    const cArea = rL * rW;
+    const perimeter = 2 * (rL + rW);
+    const category = room.category || 'interior';
+
+    if (category === 'exterior') {
+      const extConfigs = [
+        { key: 'ext-siding', label: 'Exterior Siding', speed: 120, coverage: 250, matCost: 35, area: wArea, unit: 'sq ft' },
+        { key: 'ext-brick-stain', label: 'Brick Stain', speed: 100, coverage: 200, matCost: 45, area: wArea, unit: 'sq ft' },
+        { key: 'ext-porch-floor', label: 'Porch Floor', speed: 100, coverage: 250, matCost: 30, area: cArea, unit: 'sq ft' },
+        { key: 'ext-soffits', label: 'Soffits', speed: 100, coverage: 350, matCost: 20, area: perimeter, unit: 'lin ft' },
+        { key: 'ext-gutters', label: 'Gutters', speed: 100, coverage: 350, matCost: 20, area: perimeter, unit: 'lin ft' },
+        { key: 'ext-fascia', label: 'Fascia', speed: 100, coverage: 350, matCost: 20, area: perimeter, unit: 'lin ft' },
+        { key: 'ext-trims', label: 'Exterior Trims', speed: 100, coverage: 350, matCost: 20, area: perimeter, unit: 'lin ft' },
+        { key: 'ext-railings', label: 'Railings', speed: 60, coverage: 200, matCost: 25, area: perimeter, unit: 'lin ft' },
+      ];
+
+      extConfigs.forEach(cfg => {
+        const item = (room as any)[cfg.key];
+        if (item && item.checked) {
+          const coats = Number(item.coats) || 2;
+          const h = (cfg.area / cfg.speed) * coats;
+          const m = (cfg.area / cfg.coverage) * coats * cfg.matCost;
+          const cost = Math.round(h * hourlyLaborRate + m);
+          rHours += h;
+          rMat += m;
+          surfaceItems.push({ label: cfg.label, coats, qtyOrArea: `${cfg.area} ${cfg.unit}`, cost });
+        }
+      });
+
+      const extItems = [
+        { key: 'ext-garage-door', label: 'Garage Door', hPerCoat: 1.5, mPerCoat: 15 },
+        { key: 'ext-doors', label: 'Front / Exterior Doors', hPerCoat: 1.2, mPerCoat: 12 },
+        { key: 'ext-windows-fixed', label: 'Exterior Windows', hPerCoat: 0.8, mPerCoat: 8 },
+        { key: 'ext-shutters', label: 'Shutters', hPerCoat: 0.6, mPerCoat: 6 },
+      ];
+
+      extItems.forEach(cfg => {
+        const item = (room as any)[cfg.key];
+        if (item && item.checked) {
+          const qty = Number(item.qty) || 1;
+          const coats = Number(item.coats) || 2;
+          const h = qty * cfg.hPerCoat * coats;
+          const m = qty * cfg.mPerCoat * coats;
+          const cost = Math.round(h * hourlyLaborRate + m);
+          rHours += h;
+          rMat += m;
+          surfaceItems.push({ label: cfg.label, coats, qtyOrArea: `${qty} unit(s)`, cost });
+        }
+      });
+    } else if (category === 'deck') {
+      const deckConfigs = [
+        { key: 'washing', label: 'Power Washing', h: cArea / 300, m: cArea * 0.10 },
+        { key: 'stripping', label: 'Chemical Stripping', h: cArea / 200, m: cArea * 0.25 },
+        { key: 'reviving', label: 'Wood Brightening', h: cArea / 250, m: cArea * 0.15 },
+        { key: 'sanding', label: 'Deck Floor Sanding', h: cArea / 150, m: 25 },
+        { key: 'staining', label: 'Stain Coating', h: (cArea / 80) * 2, m: (cArea / 250) * 2 * 60 },
+      ];
+      deckConfigs.forEach(cfg => {
+        const item = (room as any)[cfg.key];
+        if (item && item.checked) {
+          const coats = Number(item.coats) || 1;
+          const cost = Math.round(cfg.h * hourlyLaborRate + cfg.m);
+          rHours += cfg.h;
+          rMat += cfg.m;
+          surfaceItems.push({ label: cfg.label, coats, qtyOrArea: `${cArea} sq ft`, cost });
+        }
+      });
+    } else {
+      // Interior
+      const rWalls = (room as any).walls || { checked: true, qty: 'auto', coats: 2 };
+      const rCeilings = (room as any).ceilings || { checked: true, qty: 'auto', coats: 2 };
+      const rBaseboards = (room as any).baseboards || { checked: true, qty: 'auto', coats: 2 };
+      const rWindows = (room as any).windows || { checked: false, qty: 2, coats: 2 };
+      const rDoors = (room as any).doors || { checked: false, qty: 2, coats: 2 };
+      const rDoorFrames = (room as any).doorFrames || { checked: false, qty: 2, coats: 2 };
+
+      const wallPaint = room.paints?.find(p => p.surface === 'walls');
+      const ceilingPaint = room.paints?.find(p => p.surface === 'ceiling');
+      const trimPaint = room.paints?.find(p => p.surface === 'trim');
+      const doorPaint = room.paints?.find(p => p.surface === 'doors');
+
+      if (rWalls.checked) {
+        const h = (wArea / 150) * rWalls.coats;
+        const m = (wArea / 350) * rWalls.coats * 25;
+        const cost = Math.round(h * hourlyLaborRate + m);
+        rHours += h;
+        rMat += m;
+        surfaceItems.push({ label: 'Walls', coats: rWalls.coats, qtyOrArea: `${wArea} sq ft`, cost, paint: wallPaint });
+      }
+
+      if (rCeilings.checked) {
+        const h = (cArea / 120) * rCeilings.coats;
+        const m = (cArea / 350) * rCeilings.coats * 28;
+        const cost = Math.round(h * hourlyLaborRate + m);
+        rHours += h;
+        rMat += m;
+        surfaceItems.push({ label: 'Ceiling', coats: rCeilings.coats, qtyOrArea: `${cArea} sq ft`, cost, paint: ceilingPaint });
+      }
+
+      if (rBaseboards.checked) {
+        const h = (perimeter / 100) * rBaseboards.coats;
+        const m = (perimeter / 400) * rBaseboards.coats * 18;
+        const cost = Math.round(h * hourlyLaborRate + m);
+        rHours += h;
+        rMat += m;
+        surfaceItems.push({ label: 'Baseboards', coats: rBaseboards.coats, qtyOrArea: `${perimeter} lin ft`, cost, paint: trimPaint });
+      }
+
+      if (rWindows.checked) {
+        const qty = Number(rWindows.qty) || 2;
+        const h = qty * 0.75 * rWindows.coats;
+        const m = qty * 6 * rWindows.coats;
+        const cost = Math.round(h * hourlyLaborRate + m);
+        rHours += h;
+        rMat += m;
+        surfaceItems.push({ label: 'Windows', coats: rWindows.coats, qtyOrArea: `${qty} unit(s)`, cost, paint: trimPaint });
+      }
+
+      if (rDoors.checked) {
+        const qty = Number(rDoors.qty) || 2;
+        const h = qty * 0.75 * rDoors.coats;
+        const m = qty * 7 * rDoors.coats;
+        const cost = Math.round(h * hourlyLaborRate + m);
+        rHours += h;
+        rMat += m;
+        surfaceItems.push({ label: 'Doors', coats: rDoors.coats, qtyOrArea: `${qty} unit(s)`, cost, paint: doorPaint });
+      }
+
+      if (rDoorFrames.checked) {
+        const qty = Number(rDoorFrames.qty) || 2;
+        const h = qty * 0.5 * rDoorFrames.coats;
+        const m = qty * 5 * rDoorFrames.coats;
+        const cost = Math.round(h * hourlyLaborRate + m);
+        rHours += h;
+        rMat += m;
+        surfaceItems.push({ label: 'Door Frames', coats: rDoorFrames.coats, qtyOrArea: `${qty} unit(s)`, cost, paint: trimPaint });
+      }
+    }
+
+    if ((room as any).customAreas) {
+      (room as any).customAreas.forEach((cItem: any) => {
+        if (cItem.checked !== false) {
+          const coats = Number(cItem.coats) || 2;
+          const qty = cItem.qty === 'auto' ? 1 : (Number(cItem.qty) || 1);
+          let h = qty * 0.75 * coats;
+          let m = qty * 7.00 * coats;
+          const cost = Math.round(h * hourlyLaborRate + m);
+          rHours += h;
+          rMat += m;
+          surfaceItems.push({ label: cItem.label || 'Custom Surface', coats, qtyOrArea: `${qty} unit(s)`, cost });
+        }
+      });
+    }
+
+    if (room.surfaceTasks) {
+      room.surfaceTasks.forEach(task => {
+        let tCost = 35;
+        const textLower = (task.text || '').toLowerCase();
+        if (textLower.includes('wash') || textLower.includes('clean')) tCost = 25;
+        else if (textLower.includes('patch') || textLower.includes('drywall')) tCost = 45;
+        else if (textLower.includes('prime') || textLower.includes('stain')) tCost = 50;
+
+        rHours += tCost / hourlyLaborRate;
+        rMat += 10;
+        taskItems.push({ text: task.text, cost: tCost, completed: task.completed });
+      });
+    }
+
+    const rawLabor = Math.round(rHours * hourlyLaborRate);
+    const rawMaterial = Math.round(rMat);
+    const rawTotal = Math.max(85, rawLabor + rawMaterial);
+
+    if (!room.isOption) {
+      sumRawNonOptionTotals += rawTotal;
+    }
+
+    rawBreakdowns[room.id] = {
+      roomId: room.id,
+      roomName: room.name,
+      isOption: !!room.isOption,
+      rawTotal,
+      rawLabor,
+      rawMaterial,
+      surfaceItems,
+      taskItems
+    };
+  });
+
+  const scaleFactor = (proposalSubtotal > 0 && sumRawNonOptionTotals > 0)
+    ? (proposalSubtotal / sumRawNonOptionTotals)
+    : 1;
+
+  const resultMap: Record<string, RoomCostDetail> = {};
+
+  rooms.forEach(room => {
+    const raw = rawBreakdowns[room.id];
+    if (!raw) return;
+
+    const sf = room.isOption ? 1 : scaleFactor;
+    const finalTotal = Math.round(raw.rawTotal * sf);
+    const finalLabor = Math.round(raw.rawLabor * sf);
+    const finalMaterial = Math.round(raw.rawMaterial * sf);
+
+    const scaledSurfaces = raw.surfaceItems.map(s => ({
+      ...s,
+      cost: Math.round(s.cost * sf)
+    }));
+
+    const scaledTasks = raw.taskItems.map(t => ({
+      ...t,
+      cost: Math.round(t.cost * sf)
+    }));
+
+    resultMap[room.id] = {
+      roomId: room.id,
+      roomName: room.name,
+      isOption: !!room.isOption,
+      totalCost: finalTotal,
+      laborCost: finalLabor,
+      materialCost: finalMaterial,
+      surfaceItems: scaledSurfaces,
+      taskItems: scaledTasks
+    };
+  });
+
+  return resultMap;
+}
 
 interface ClientSignPortalProps {
   proposalId: string;
@@ -145,16 +428,14 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
   const downloadFullInvoicePDF = () => {
     if (!project) return;
     try {
-      const roomCosts: Record<string, number> = {};
-      if (project.rooms && project.rooms.length > 0) {
-        const count = project.rooms.length;
-        const share = (project.summary?.totalPrice || 0) / count;
-        project.rooms.forEach((room) => {
-          roomCosts[room.id] = Math.round(share);
-        });
-      }
-
       const total = project.summary?.totalPrice || 0;
+      const subtotal = total / 1.13;
+      const roomBreakdownMap = computeDetailedRoomBreakdownMap(project.rooms || [], subtotal);
+      const roomCosts: Record<string, number> = {};
+      Object.keys(roomBreakdownMap).forEach(id => {
+        roomCosts[id] = roomBreakdownMap[id].totalCost;
+      });
+
       const deposit = total * 0.30;
       const balance = total - deposit;
 
@@ -191,8 +472,8 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
         } as any,
         rooms: project.rooms || [],
         liveSummary: {
-          subtotal: total / 1.13,
-          hst: total - (total / 1.13),
+          subtotal,
+          hst: total - subtotal,
           total,
           deposit,
           balance,
@@ -574,13 +855,19 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
 
   // Compute estimate totals
   const getTotals = () => {
-    if (!project) return { subtotal: 0, hst: 0, total: 0, deposit: 0, balance: 0 };
+    if (!project) return { subtotal: 0, hst: 0, total: 0, deposit: 0, balance: 0, roomBreakdownMap: {}, optionalTotal: 0 };
     const total = project.summary.totalPrice || 0;
     const subtotal = total / 1.13;
     const hst = total - subtotal;
     const deposit = total * 0.30;
     const balance = total - deposit;
-    return { subtotal, hst, total, deposit, balance };
+
+    const roomBreakdownMap = computeDetailedRoomBreakdownMap(project.rooms || [], subtotal);
+    const optionalTotal = Object.values(roomBreakdownMap)
+      .filter(r => r.isOption)
+      .reduce((sum, r) => sum + r.totalCost, 0);
+
+    return { subtotal, hst, total, deposit, balance, roomBreakdownMap, optionalTotal };
   };
 
   if (loading) {
@@ -599,22 +886,15 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto" />
           <h2 className="text-lg font-bold text-red-400 font-display">Proposal Access Blocked</h2>
           <p className="text-zinc-400 text-sm leading-relaxed">{error || 'This estimate record could not be fetched.'}</p>
-          <div className="pt-2">
-            {onBackToApp && (
-              <button 
-                onClick={onBackToApp}
-                className="px-5 py-2.5 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 text-white font-bold text-xs rounded-xl cursor-pointer"
-              >
-                Go to PaintNav CRM
-              </button>
-            )}
-          </div>
         </div>
       </div>
     );
   }
 
-  const { subtotal, hst, total, deposit, balance } = getTotals();
+  const { subtotal, hst, total, deposit, balance, roomBreakdownMap, optionalTotal } = getTotals();
+
+  const standardRooms = (project.rooms || []).filter(r => !r.isOption);
+  const optionRooms = (project.rooms || []).filter(r => r.isOption);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans select-none antialiased pb-16">
@@ -643,14 +923,6 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
             <Download className="w-3.5 h-3.5" />
             <span>DOWNLOAD PDF</span>
           </button>
-          {onBackToApp && (
-            <button 
-              onClick={onBackToApp}
-              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg cursor-pointer transition"
-            >
-              Back to App
-            </button>
-          )}
         </div>
       </header>
 
@@ -714,55 +986,225 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
             </div>
 
             {/* Work Scope / Rooms & Surface Specifications */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-800 flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-blue-600" /> Coating Schedule & Work Breakdown
-                </h3>
-                <span className="text-[11px] text-slate-500 font-mono">{project.rooms?.length || 0} Rooms / Areas</span>
+            <div className="space-y-6">
+              {/* Primary Scope Header */}
+              <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-blue-100 text-blue-700 rounded-lg">
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-800">
+                    Primary Scope & Room Cost Breakdown ({standardRooms.length} Areas)
+                  </h3>
+                </div>
+                <span className="text-[11px] text-slate-500 font-mono font-semibold">Base Proposal Scope</span>
               </div>
 
+              {/* Standard Rooms List */}
               <div className="space-y-4">
-                {project.rooms && project.rooms.length > 0 ? (
-                  project.rooms.map((room) => (
-                    <div key={room.id} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
-                      <div className="bg-slate-100 px-4 py-2.5 flex items-center justify-between border-b border-slate-200 text-xs">
-                        <span className="font-bold text-slate-900 text-sm">
-                          {room.name} {room.isOption && <span className="text-[10px] bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded font-mono ml-1 font-semibold">Optional Scope</span>}
-                        </span>
-                        <span className="font-mono text-slate-500 text-[11px]">
-                          {room.length}' × {room.width}' × {room.height}' ft
-                        </span>
-                      </div>
-                      <div className="p-4">
-                        {room.paints && room.paints.length > 0 ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                            {room.paints.map((paint, idx) => (
-                              <div key={idx} className="bg-slate-50 p-3 rounded-lg border border-slate-200/80 space-y-1">
-                                <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 font-bold uppercase">
-                                  <span>{paint.surface || 'Surface'}</span>
-                                  <span>{paint.coats} Coat(s)</span>
-                                </div>
-                                <p className="font-bold text-slate-900 text-xs">{paint.brand} — {paint.colorName}</p>
-                                <div className="flex items-center gap-2 text-[11px] text-slate-600">
-                                  {paint.hex && <div className="w-3.5 h-3.5 rounded-full border border-slate-300 shadow-inner" style={{ backgroundColor: paint.hex }} />}
-                                  <span>{paint.finish} Finish</span>
-                                </div>
-                              </div>
-                            ))}
+                {standardRooms.length > 0 ? (
+                  standardRooms.map((room) => {
+                    const roomDetail = roomBreakdownMap[room.id];
+                    const roomPrice = roomDetail ? roomDetail.totalCost : 0;
+
+                    return (
+                      <div key={room.id} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm hover:shadow-md transition">
+                        {/* Room Header */}
+                        <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between border-b border-slate-800 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white text-sm font-display">{room.name}</span>
+                            {room.groupName && (
+                              <span className="text-[10px] bg-slate-800 text-blue-300 px-2 py-0.5 rounded font-mono border border-slate-700">
+                                {room.groupName}
+                              </span>
+                            )}
                           </div>
-                        ) : (
-                          <p className="text-slate-500 text-xs italic">Standard wall preparation, priming, and finish coats included.</p>
-                        )}
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono text-zinc-400 text-[11px] hidden sm:inline">
+                              {room.length}' × {room.width}' × {room.height}' ft
+                            </span>
+                            <div className="bg-blue-600 text-white font-mono font-bold px-3 py-1 rounded-lg text-xs shadow">
+                              ${roomPrice.toLocaleString()}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Room Breakdown Details */}
+                        <div className="p-4 space-y-4 text-xs">
+                          {/* Surfaces & Coatings Breakdown Table */}
+                          {roomDetail && roomDetail.surfaceItems.length > 0 && (
+                            <div className="space-y-2">
+                              <span className="text-[10px] uppercase font-bold text-slate-500 font-mono tracking-wider block">
+                                Surfaces & Coating Schedule Breakdown
+                              </span>
+                              <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100">
+                                {roomDetail.surfaceItems.map((s, idx) => (
+                                  <div key={idx} className="p-2.5 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 font-medium text-slate-800">
+                                      <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
+                                      <span className="font-bold">{s.label}</span>
+                                      <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 font-mono font-semibold">
+                                        {s.coats} Coat(s)
+                                      </span>
+                                      <span className="text-[10px] text-slate-500 font-mono">({s.qtyOrArea})</span>
+                                    </div>
+
+                                    {s.paint && (
+                                      <div className="flex items-center gap-1.5 text-[11px] text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                        {s.paint.hex && (
+                                          <div className="w-3 h-3 rounded-full border border-slate-300 shrink-0" style={{ backgroundColor: s.paint.hex }} />
+                                        )}
+                                        <span className="font-semibold text-slate-800">{s.paint.brand}</span>
+                                        <span>— {s.paint.colorName}</span>
+                                        <span className="text-slate-400 font-mono">({s.paint.finish})</span>
+                                      </div>
+                                    )}
+
+                                    <div className="font-mono font-bold text-slate-900 ml-auto">
+                                      ${s.cost.toLocaleString()}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Prep & Repair Tasks */}
+                          {roomDetail && roomDetail.taskItems.length > 0 && (
+                            <div className="space-y-1.5 pt-1">
+                              <span className="text-[10px] uppercase font-bold text-slate-500 font-mono tracking-wider block">
+                                Prep & Repair Tasks Included
+                              </span>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {roomDetail.taskItems.map((t, tIdx) => (
+                                  <div key={tIdx} className="bg-slate-50 p-2 rounded-lg border border-slate-200/80 flex items-center justify-between text-[11px]">
+                                    <span className="text-slate-700 flex items-center gap-1.5">
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                      <span>{t.text}</span>
+                                    </span>
+                                    <span className="font-mono font-bold text-slate-600">${t.cost}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Room Notes */}
+                          {room.notes && (
+                            <p className="text-[11px] text-slate-600 italic bg-amber-50/50 p-2 rounded border border-amber-200/60">
+                              Note: {room.notes}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="p-6 text-center border border-dashed border-slate-300 rounded-xl text-slate-500 text-xs italic">
                     Standard full-service prep and painting scope included.
                   </div>
                 )}
               </div>
+
+              {/* Optional Upgrades & Add-on Scope Section */}
+              {optionRooms.length > 0 && (
+                <div className="space-y-4 pt-4 border-t-2 border-amber-200">
+                  <div className="bg-amber-500/10 border-2 border-amber-400/60 rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-400/30 pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-amber-500 text-white rounded-xl shadow-md">
+                          <Sparkles className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm font-bold text-amber-950 font-display flex items-center gap-1.5">
+                            Optional Upgrades & Add-on Scope ({optionRooms.length} Options Available)
+                          </h3>
+                          <p className="text-[11px] text-amber-800">
+                            The following optional areas are quoted separately as project add-ons. Review their individual costs below.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-left sm:text-right bg-amber-100/90 px-3 py-1.5 rounded-xl border border-amber-300 shrink-0">
+                        <span className="text-[10px] text-amber-800 font-mono uppercase tracking-wider block font-bold">Options Subtotal</span>
+                        <span className="text-base font-bold font-mono text-amber-900">+${optionalTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      {optionRooms.map((room) => {
+                        const roomDetail = roomBreakdownMap[room.id];
+                        const roomPrice = roomDetail ? roomDetail.totalCost : 0;
+
+                        return (
+                          <div key={room.id} className="border-2 border-amber-300/90 rounded-xl overflow-hidden bg-white shadow-sm">
+                            <div className="bg-amber-100 px-4 py-2.5 flex items-center justify-between border-b border-amber-200 text-xs">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-amber-950 text-sm font-display">{room.name}</span>
+                                <span className="text-[10px] bg-amber-500 text-white font-mono font-bold px-2 py-0.5 rounded shadow-xs">
+                                  OPTIONAL ADD-ON
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="font-mono text-amber-800 text-[11px] hidden sm:inline">
+                                  {room.length}' × {room.width}' × {room.height}' ft
+                                </span>
+                                <div className="bg-amber-800 text-white font-mono font-bold px-3 py-1 rounded-lg text-xs shadow">
+                                  Option Cost: ${roomPrice.toLocaleString()}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="p-4 space-y-3 text-xs">
+                              {roomDetail && roomDetail.surfaceItems.length > 0 && (
+                                <div className="space-y-1.5">
+                                  <span className="text-[10px] uppercase font-bold text-amber-900 font-mono tracking-wider block">
+                                    Optional Surfaces & Coating Specs
+                                  </span>
+                                  <div className="border border-amber-200 rounded-lg overflow-hidden divide-y divide-amber-100">
+                                    {roomDetail.surfaceItems.map((s, idx) => (
+                                      <div key={idx} className="p-2.5 bg-amber-50/50 flex flex-wrap items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2 text-slate-800">
+                                          <span className="font-bold text-slate-900">{s.label}</span>
+                                          <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-mono font-semibold border border-amber-200">
+                                            {s.coats} Coat(s)
+                                          </span>
+                                          <span className="text-[10px] text-slate-500 font-mono">({s.qtyOrArea})</span>
+                                        </div>
+                                        <div className="font-mono font-bold text-amber-900 ml-auto">
+                                          ${s.cost.toLocaleString()}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {roomDetail && roomDetail.taskItems.length > 0 && (
+                                <div className="space-y-1.5">
+                                  <span className="text-[10px] uppercase font-bold text-amber-900 font-mono tracking-wider block">
+                                    Optional Prep Tasks
+                                  </span>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {roomDetail.taskItems.map((t, tIdx) => (
+                                      <div key={tIdx} className="bg-amber-50/60 p-2 rounded-lg border border-amber-200 flex items-center justify-between text-[11px]">
+                                        <span className="text-amber-950 flex items-center gap-1.5">
+                                          <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                          <span>{t.text}</span>
+                                        </span>
+                                        <span className="font-mono font-bold text-amber-800">${t.cost}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Inclusions & Exclusions */}

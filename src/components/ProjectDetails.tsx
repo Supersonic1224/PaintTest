@@ -47,7 +47,8 @@ import {
   Target,
   ListTodo,
   Edit3,
-  Layers
+  Layers,
+  Sliders
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -562,6 +563,94 @@ export default function ProjectDetails({
       ...prev,
       [roomId]: !prev[roomId]
     }));
+  };
+
+  // Expandable Table Row keys track (for detailed math cost breakdown per surface/task)
+  const [expandedRowKeys, setExpandedRowKeys] = useState<Record<string, boolean>>({});
+
+  const toggleRowExpand = (rowKey: string) => {
+    setExpandedRowKeys(prev => ({
+      ...prev,
+      [rowKey]: !prev[rowKey]
+    }));
+  };
+
+  // Group Batch Editing modal state
+  const [editingGroupModalName, setEditingGroupModalName] = useState<string | null>(null);
+  const [groupBatchTaskInput, setGroupBatchTaskInput] = useState<string>('');
+
+  const handleGroupBatchSetCoats = (groupName: string, coats: number) => {
+    setRooms(prev => prev.map(r => {
+      if (r.groupName !== groupName) return r;
+      const category = r.category || 'interior';
+      let keysToUpdate: string[] = [];
+      if (category === 'exterior') {
+        keysToUpdate = ['ext-siding', 'ext-brick-stain', 'ext-porch-floor', 'ext-soffits', 'ext-gutters', 'ext-fascia', 'ext-trims', 'ext-garage-door', 'ext-doors', 'ext-windows-fixed', 'ext-railings', 'ext-shutters'];
+      } else if (category === 'deck') {
+        keysToUpdate = ['washing', 'stripping', 'reviving', 'sanding', 'staining'];
+      } else {
+        keysToUpdate = ['walls', 'ceilings', 'baseboards', 'windows', 'doors', 'doorFrames'];
+      }
+
+      const updatedObj: any = { ...r };
+      keysToUpdate.forEach(k => {
+        const cur = updatedObj[k] || { checked: true, qty: 'auto', coats: 2 };
+        updatedObj[k] = { ...cur, coats };
+      });
+
+      if (updatedObj.customAreas) {
+        updatedObj.customAreas = updatedObj.customAreas.map((c: any) => ({ ...c, coats }));
+      }
+
+      return updatedObj;
+    }));
+    triggerNotification(`Updated all surfaces in group "${groupName}" to ${coats} coat(s)!`, 'success');
+  };
+
+  const handleGroupBatchAddTask = (groupName: string, taskText: string) => {
+    if (!taskText.trim()) return;
+    setRooms(prev => prev.map(r => {
+      if (r.groupName !== groupName) return r;
+      const curTasks = r.surfaceTasks || [];
+      const newTask: SurfaceTask = {
+        id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        text: taskText.trim(),
+        surfaceCategory: 'Group Task',
+        completed: false,
+        isOption: false,
+      };
+      return {
+        ...r,
+        surfaceTasks: [...curTasks, newTask]
+      };
+    }));
+
+    setGroupBatchTaskInput('');
+    triggerNotification(`Added task "${taskText.trim()}" to all rooms in group "${groupName}"!`, 'success');
+  };
+
+  const handleGroupBatchSetOption = (groupName: string, isOption: boolean) => {
+    setRooms(prev => prev.map(r => {
+      if (r.groupName !== groupName) return r;
+      return { ...r, isOption };
+    }));
+    triggerNotification(`Set all rooms in group "${groupName}" to ${isOption ? 'Optional' : 'Standard Scope'}!`, 'success');
+  };
+
+  const handleGroupBatchSetCategory = (groupName: string, category: 'interior' | 'exterior' | 'deck') => {
+    setRooms(prev => prev.map(r => {
+      if (r.groupName !== groupName) return r;
+      return { ...r, category };
+    }));
+    triggerNotification(`Updated category of group "${groupName}" to ${category}!`, 'success');
+  };
+
+  const handleGroupBatchDelete = (groupName: string) => {
+    if (window.confirm(`Are you sure you want to delete group "${groupName}" and ALL its rooms?`)) {
+      setRooms(prev => prev.filter(r => r.groupName !== groupName));
+      setEditingGroupModalName(null);
+      triggerNotification(`Deleted group "${groupName}"!`, 'success');
+    }
   };
 
   // Selection feature & Room grouping state
@@ -2206,8 +2295,19 @@ export default function ProjectDetails({
       setShowSendProposalEmailModal(false);
     } catch (err: any) {
       console.error('Failed to send proposal:', err);
-      setGmailError(err.message || 'An unexpected error occurred during email dispatch.');
-      triggerNotification('Email dispatch failed.', 'error');
+      const isAuthError = String(err?.message || '').toLowerCase().includes('expired') ||
+                          String(err?.message || '').toLowerCase().includes('credentials') ||
+                          String(err?.message || '').toLowerCase().includes('unauthenticated') ||
+                          String(err?.message || '').toLowerCase().includes('401');
+      if (isAuthError) {
+        setLocalToken(null);
+        setAccessToken(null);
+        setGmailError('Google session expired or missing permissions. Please click "Connect Gmail Service" to re-authorize.');
+        triggerNotification('Gmail auth expired. Please re-connect Gmail.', 'error');
+      } else {
+        setGmailError(err.message || 'An unexpected error occurred during email dispatch.');
+        triggerNotification('Email dispatch failed.', 'error');
+      }
     } finally {
       setIsSendingGmail(false);
     }
@@ -4159,446 +4259,889 @@ export default function ProjectDetails({
 
                                 </div>
 
-                                {/* Direct area checklist checkboxes inside expanded room */}
-                                <div className="space-y-2 pt-1">
-                                  <span className="text-[10px] font-bold text-zinc-500 uppercase font-mono tracking-wider block mb-1">
-                                    Individual Area Layer Selectors
-                                  </span>
-                                  
-                                  <div className="grid grid-cols-3 gap-2">
-                                    {(() => {
-                                      const category = room.category || 'interior';
-                                      let baseList = [];
-                                      if (category === 'exterior') {
-                                        baseList = [
-                                          { label: 'Siding Slabs', key: 'ext-siding', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                          { label: 'Brick Stain', key: 'ext-brick-stain', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                          { label: 'Porch Floor', key: 'ext-porch-floor', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                          { label: 'Soffits', key: 'ext-soffits', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                          { label: 'Gutters', key: 'ext-gutters', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                          { label: 'Fascia Boards', key: 'ext-fascia', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                          { label: 'Trims', key: 'ext-trims', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                          { label: 'Garage Doors', key: 'ext-garage-door', hasQty: true, defaultQty: 1, defaultCoats: 2 },
-                                          { label: 'Entry Doors', key: 'ext-doors', hasQty: true, defaultQty: 1, defaultCoats: 2 },
-                                          { label: 'Windows Fixed', key: 'ext-windows-fixed', hasQty: true, defaultQty: 2, defaultCoats: 2 },
-                                          { label: 'Railings', key: 'ext-railings', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                          { label: 'Shutters Set', key: 'ext-shutters', hasQty: true, defaultQty: 2, defaultCoats: 2 },
-                                        ];
-                                      } else if (category === 'deck') {
-                                        baseList = [
-                                          { label: 'Pressure Washing', key: 'washing', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
-                                          { label: 'Chemical Stripping', key: 'stripping', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
-                                          { label: 'Reviver Agent', key: 'reviving', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
-                                          { label: 'Orbital Sanding', key: 'sanding', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
-                                          { label: 'Premium Stain', key: 'staining', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                        ];
-                                      } else {
-                                        baseList = [
-                                          { label: 'Walls Siding', key: 'walls', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                          { label: 'Ceilings Flat', key: 'ceilings', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                          { label: 'Baseboards Trim', key: 'baseboards', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
-                                          { label: 'Windows', key: 'windows', hasQty: true, defaultQty: 2, defaultCoats: 2 },
-                                          { label: 'Doors', key: 'doors', hasQty: true, defaultQty: 2, defaultCoats: 2 },
-                                          { label: 'Frames', key: 'doorFrames', hasQty: true, defaultQty: 2, defaultCoats: 2 },
-                                        ];
-                                      }
-                                      
-                                      const customAreas = (room as any).customAreas || [];
-                                      return [...baseList, ...customAreas];
-                                    })().map((sub) => {
-                                      const isCustom = sub.key.startsWith('custom-');
-                                      let checkedState = false;
-                                      let coats = sub.defaultCoats || 2;
-                                      let qty = sub.defaultQty || 'auto';
-                                      let isAreaOption = false;
+                                {/* Direct area checklist checkboxes inside expanded room replaced with expandable table */}
+                                {(() => {
+                                  const ratesObj = proposalSettings?.rates || {
+                                    wallsSpeed: 150, wallsCoverage: 350, wallsMaterialCost: 45,
+                                    ceilingsSpeed: 140, ceilingsCoverage: 350, ceilingsMaterialCost: 40,
+                                    baseboardsSpeed: 40, baseboardsCoverage: 200, baseboardsMaterialCost: 25,
+                                    windowsHoursPerCoat: 0.75, windowsMaterialCostPerCoat: 7.00,
+                                    doorsHoursPerCoat: 0.8, doorsMaterialCostPerCoat: 9.00,
+                                    doorFramesHoursPerCoat: 0.5, doorFramesMaterialCostPerCoat: 5.00,
+                                    sidingSpeed: 180, sidingCoverage: 350, sidingMaterialCost: 55,
+                                    brickSpeed: 120, brickCoverage: 250, brickMaterialCost: 65,
+                                    porchFloorSpeed: 150, porchFloorCoverage: 350, porchFloorMaterialCost: 50,
+                                    soffitsSpeed: 50, soffitsCoverage: 200, soffitsMaterialCost: 40,
+                                    guttersSpeed: 60, guttersCoverage: 250, guttersMaterialCost: 40,
+                                    fasciaSpeed: 60, fasciaCoverage: 250, fasciaMaterialCost: 40,
+                                    trimsSpeed: 60, trimsCoverage: 250, trimsMaterialCost: 40,
+                                    garageHoursPerCoat: 0.75, garageMaterialCostPerCoat: 7.50,
+                                    extDoorsHoursPerCoat: 0.75, extDoorsMaterialCostPerCoat: 7.50,
+                                    windowsFixedHoursPerCoat: 0.50, windowsFixedMaterialCostPerCoat: 6.00,
+                                    railingsSpeed: 40, railingsCoverage: 200, railingsMaterialCost: 35,
+                                    shuttersHoursPerCoat: 0.50, shuttersMaterialCostPerCoat: 5.00,
+                                    washingSpeed: 200, washingMaterialCostPerSqft: 0.08,
+                                    strippingSpeed: 100, strippingMaterialCostPerSqft: 0.175,
+                                    revivingSpeed: 150, revivingMaterialCostPerSqft: 0.10,
+                                    sandingSpeed: 80, sandingMaterialCostFlat: 30,
+                                    stainingSpeed: 80, stainingCoverage: 250, stainingMaterialCost: 60,
+                                  };
 
-                                      if (isCustom) {
-                                        const customItem = ((room as any).customAreas || []).find((c: any) => c.key === sub.key);
-                                        if (customItem) {
-                                          checkedState = customItem.checked !== false;
-                                          coats = typeof customItem.coats === 'number' ? customItem.coats : 2;
-                                          qty = customItem.qty !== undefined ? customItem.qty : 'auto';
-                                          isAreaOption = !!customItem.isOption;
-                                        }
-                                      } else {
-                                        const areaData = (room as any)[sub.key] || { checked: false, qty: sub.defaultQty, coats: sub.defaultCoats, isOption: false };
-                                        checkedState = areaData.checked !== false;
-                                        coats = typeof areaData.coats === 'number' ? areaData.coats : sub.defaultCoats;
-                                        qty = areaData.qty !== undefined ? areaData.qty : sub.defaultQty;
-                                        isAreaOption = !!areaData.isOption;
-                                      }
+                                  const rL = Number(room.length) || 12;
+                                  const rW = Number(room.width) || 12;
+                                  const rH = Number(room.height) || 9;
+                                  const wArea = 2 * rH * (rL + rW);
+                                  const cArea = rL * rW;
+                                  const perimeter = 2 * (rL + rW);
+                                  const category = room.category || 'interior';
 
-                                      const toggleChecked = () => {
-                                        setRooms(prev => prev.map(r => {
-                                          if (r.id === room.id) {
-                                            if (isCustom) {
-                                              const customAreas = (r as any).customAreas || [];
-                                              return {
-                                                ...r,
-                                                customAreas: customAreas.map((c: any) => c.key === sub.key ? { ...c, checked: !checkedState } : c)
-                                              };
-                                            }
-                                            const subObj = (r as any)[sub.key] || { checked: true, qty: sub.defaultQty, coats: sub.defaultCoats, isOption: false };
-                                            return {
-                                              ...r,
-                                              [sub.key]: { ...subObj, checked: !checkedState }
-                                            };
-                                          }
-                                          return r;
-                                        }));
-                                      };
+                                  interface ItemRow {
+                                    key: string;
+                                    label: string;
+                                    isCustom: boolean;
+                                    type: 'surface' | 'task';
+                                    checked: boolean;
+                                    isOption: boolean;
+                                    coats: number;
+                                    qty: number | 'auto';
+                                    hasQty: boolean;
+                                    hours: number;
+                                    materialCost: number;
+                                    laborCost: number;
+                                    totalCost: number;
+                                    formulaLabor: string;
+                                    formulaMaterial: string;
+                                    taskObj?: any;
+                                  }
 
-                                      const toggleAreaOption = (e: React.MouseEvent) => {
-                                        e.stopPropagation();
-                                        setRooms(prev => prev.map(r => {
-                                          if (r.id === room.id) {
-                                            if (isCustom) {
-                                              const customAreas = (r as any).customAreas || [];
-                                              return {
-                                                ...r,
-                                                customAreas: customAreas.map((c: any) => c.key === sub.key ? { ...c, isOption: !isAreaOption } : c)
-                                              };
-                                            }
-                                            const subObj = (r as any)[sub.key] || { checked: true, qty: sub.defaultQty, coats: sub.defaultCoats, isOption: false };
-                                            return {
-                                              ...r,
-                                              [sub.key]: { ...subObj, isOption: !isAreaOption }
-                                            };
-                                          }
-                                          return r;
-                                        }));
-                                      };
+                                  const items: ItemRow[] = [];
 
-                                      const updateCoats = (newCoats: number) => {
-                                        setRooms(prev => prev.map(r => {
-                                          if (r.id === room.id) {
-                                            if (isCustom) {
-                                              const customAreas = (r as any).customAreas || [];
-                                              return {
-                                                ...r,
-                                                customAreas: customAreas.map((c: any) => c.key === sub.key ? { ...c, coats: newCoats } : c)
-                                              };
-                                            }
-                                            const subObj = (r as any)[sub.key] || { checked: true, qty: sub.defaultQty, coats: sub.defaultCoats, isOption: false };
-                                            return {
-                                              ...r,
-                                              [sub.key]: { ...subObj, coats: newCoats }
-                                            };
-                                          }
-                                          return r;
-                                        }));
-                                      };
+                                  let baseList: Array<{ label: string; key: string; hasQty: boolean; defaultQty: any; defaultCoats: number }> = [];
 
-                                      const updateQty = (newQty: number) => {
-                                        setRooms(prev => prev.map(r => {
-                                          if (r.id === room.id) {
-                                            if (isCustom) {
-                                              const customAreas = (r as any).customAreas || [];
-                                              return {
-                                                ...r,
-                                                customAreas: customAreas.map((c: any) => c.key === sub.key ? { ...c, qty: newQty } : c)
-                                              };
-                                            }
-                                            const subObj = (r as any)[sub.key] || { checked: true, qty: sub.defaultQty, coats: sub.defaultCoats, isOption: false };
-                                            return {
-                                              ...r,
-                                              [sub.key]: { ...subObj, qty: newQty }
-                                            };
-                                          }
-                                          return r;
-                                        }));
-                                      };
+                                  if (category === 'exterior') {
+                                    baseList = [
+                                      { label: 'Siding Slabs', key: 'ext-siding', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                      { label: 'Brick Stain', key: 'ext-brick-stain', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                      { label: 'Porch Floor', key: 'ext-porch-floor', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                      { label: 'Soffits', key: 'ext-soffits', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                      { label: 'Gutters', key: 'ext-gutters', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                      { label: 'Fascia Boards', key: 'ext-fascia', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                      { label: 'Trims', key: 'ext-trims', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                      { label: 'Garage Doors', key: 'ext-garage-door', hasQty: true, defaultQty: 1, defaultCoats: 2 },
+                                      { label: 'Entry Doors', key: 'ext-doors', hasQty: true, defaultQty: 1, defaultCoats: 2 },
+                                      { label: 'Windows Fixed', key: 'ext-windows-fixed', hasQty: true, defaultQty: 2, defaultCoats: 2 },
+                                      { label: 'Railings', key: 'ext-railings', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                      { label: 'Shutters Set', key: 'ext-shutters', hasQty: true, defaultQty: 2, defaultCoats: 2 },
+                                    ];
+                                  } else if (category === 'deck') {
+                                    baseList = [
+                                      { label: 'Pressure Washing', key: 'washing', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
+                                      { label: 'Chemical Stripping', key: 'stripping', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
+                                      { label: 'Reviver Agent', key: 'reviving', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
+                                      { label: 'Orbital Sanding', key: 'sanding', hasQty: false, defaultQty: 'auto', defaultCoats: 1 },
+                                      { label: 'Premium Stain', key: 'staining', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                    ];
+                                  } else {
+                                    baseList = [
+                                      { label: 'Walls Siding', key: 'walls', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                      { label: 'Ceilings Flat', key: 'ceilings', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                      { label: 'Baseboards Trim', key: 'baseboards', hasQty: false, defaultQty: 'auto', defaultCoats: 2 },
+                                      { label: 'Windows', key: 'windows', hasQty: true, defaultQty: 2, defaultCoats: 2 },
+                                      { label: 'Doors', key: 'doors', hasQty: true, defaultQty: 2, defaultCoats: 2 },
+                                      { label: 'Frames', key: 'doorFrames', hasQty: true, defaultQty: 2, defaultCoats: 2 },
+                                    ];
+                                  }
 
-                                      const isAreaSelected = !!selectedAreas[`${room.id}::${sub.key}`];
+                                  baseList.forEach((sub) => {
+                                    const areaData = (room as any)[sub.key] || { checked: (category === 'interior' && ['walls','ceilings','baseboards'].includes(sub.key)), qty: sub.defaultQty, coats: sub.defaultCoats, isOption: false };
+                                    const checked = areaData.checked !== false;
+                                    const coats = typeof areaData.coats === 'number' ? areaData.coats : sub.defaultCoats;
+                                    const qty = areaData.qty !== undefined ? areaData.qty : sub.defaultQty;
+                                    const isOption = !!areaData.isOption;
 
-                                      return (
-                                        <div
-                                          key={sub.key}
-                                          className={`rounded-xl border transition font-mono flex flex-col justify-between overflow-hidden relative ${
-                                            isAreaSelected && selectMode
-                                              ? 'bg-blue-950/25 border-blue-500 text-white shadow-[0_0_10px_rgba(59,130,246,0.25)] ring-1 ring-blue-500/20'
-                                              : checkedState 
-                                                ? isAreaOption
-                                                  ? 'bg-amber-950/20 border-amber-500/50 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.15)]'
-                                                  : 'bg-neutral-900/40 border-blue-500/30 text-white' 
-                                                : 'bg-neutral-950 border-neutral-850 text-zinc-500 hover:border-neutral-700'
-                                          }`}
-                                        >
-                                          {/* Header clickable to toggle checked state */}
-                                          <div className="w-full p-2 flex items-center justify-between gap-1.5 select-none text-left">
-                                            <div 
-                                              onClick={() => {
-                                                if (selectMode) {
-                                                  handleToggleAreaSelection(room.id, sub.key);
-                                                } else {
-                                                  toggleChecked();
-                                                }
-                                              }} 
-                                              className="flex items-center gap-2 flex-1 truncate cursor-pointer"
-                                            >
-                                              {selectMode ? (
-                                                <input
-                                                  type="checkbox"
-                                                  checked={isAreaSelected}
-                                                  onChange={() => handleToggleAreaSelection(room.id, sub.key)}
-                                                  onClick={(e) => e.stopPropagation()}
-                                                  className="w-3.5 h-3.5 rounded border-neutral-700 bg-neutral-950 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer shrink-0"
-                                                />
-                                              ) : (
-                                                <span className={`w-2 h-2 rounded-full shrink-0 ${checkedState ? 'bg-blue-400' : 'bg-neutral-800'}`} />
-                                              )}
-                                              <span className="text-[11px] font-bold truncate">{sub.label}</span>
-                                            </div>
+                                    let h = 0;
+                                    let m = 0;
+                                    let fLabor = '';
+                                    let fMat = '';
 
-                                            <div className="flex items-center gap-1 shrink-0">
-                                              {/* Diamond Option Toggle */}
-                                              <button
-                                                type="button"
-                                                onClick={toggleAreaOption}
-                                                className="p-1 hover:bg-neutral-850 rounded transition cursor-pointer"
-                                                title={isAreaOption ? "Active Option. Click to make standard." : "Mark as Option"}
-                                              >
-                                                <Diamond className={`w-3 h-3 ${isAreaOption ? 'fill-amber-400 text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`} />
-                                              </button>
+                                    if (sub.key === 'walls') {
+                                      h = (wArea / ratesObj.wallsSpeed) * coats;
+                                      m = (wArea / ratesObj.wallsCoverage) * coats * ratesObj.wallsMaterialCost;
+                                      fLabor = `${wArea} sqft ÷ ${ratesObj.wallsSpeed} sqft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${wArea} sqft ÷ ${ratesObj.wallsCoverage} sqft/gal × ${coats} coat(s) × $${ratesObj.wallsMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ceilings') {
+                                      h = (cArea / ratesObj.ceilingsSpeed) * coats;
+                                      m = (cArea / ratesObj.ceilingsCoverage) * coats * ratesObj.ceilingsMaterialCost;
+                                      fLabor = `${cArea} sqft ÷ ${ratesObj.ceilingsSpeed} sqft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${cArea} sqft ÷ ${ratesObj.ceilingsCoverage} sqft/gal × ${coats} coat(s) × $${ratesObj.ceilingsMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'baseboards') {
+                                      h = (perimeter / ratesObj.baseboardsSpeed) * coats;
+                                      m = (perimeter / ratesObj.baseboardsCoverage) * coats * ratesObj.baseboardsMaterialCost;
+                                      fLabor = `${perimeter} lin ft ÷ ${ratesObj.baseboardsSpeed} ft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${perimeter} lin ft ÷ ${ratesObj.baseboardsCoverage} ft/gal × ${coats} coat(s) × $${ratesObj.baseboardsMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'windows') {
+                                      const q = Number(qty) || 0;
+                                      h = q * ratesObj.windowsHoursPerCoat * coats;
+                                      m = q * ratesObj.windowsMaterialCostPerCoat * coats;
+                                      fLabor = `${q} window(s) × ${ratesObj.windowsHoursPerCoat} hrs/coat × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${q} window(s) × $${ratesObj.windowsMaterialCostPerCoat}/coat × ${coats} coat(s) = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'doors') {
+                                      const q = Number(qty) || 0;
+                                      h = q * ratesObj.doorsHoursPerCoat * coats;
+                                      m = q * ratesObj.doorsMaterialCostPerCoat * coats;
+                                      fLabor = `${q} door(s) × ${ratesObj.doorsHoursPerCoat} hrs/coat × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${q} door(s) × $${ratesObj.doorsMaterialCostPerCoat}/coat × ${coats} coat(s) = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'doorFrames') {
+                                      const q = Number(qty) || 0;
+                                      h = q * ratesObj.doorFramesHoursPerCoat * coats;
+                                      m = q * ratesObj.doorFramesMaterialCostPerCoat * coats;
+                                      fLabor = `${q} frame(s) × ${ratesObj.doorFramesHoursPerCoat} hrs/coat × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${q} frame(s) × $${ratesObj.doorFramesMaterialCostPerCoat}/coat × ${coats} coat(s) = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-siding') {
+                                      h = (wArea / ratesObj.sidingSpeed) * coats;
+                                      m = (wArea / ratesObj.sidingCoverage) * coats * ratesObj.sidingMaterialCost;
+                                      fLabor = `${wArea} sqft ÷ ${ratesObj.sidingSpeed} sqft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${wArea} sqft ÷ ${ratesObj.sidingCoverage} sqft/gal × ${coats} coat(s) × $${ratesObj.sidingMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-brick-stain') {
+                                      h = (wArea / ratesObj.brickSpeed) * coats;
+                                      m = (wArea / ratesObj.brickCoverage) * coats * ratesObj.brickMaterialCost;
+                                      fLabor = `${wArea} sqft ÷ ${ratesObj.brickSpeed} sqft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${wArea} sqft ÷ ${ratesObj.brickCoverage} sqft/gal × ${coats} coat(s) × $${ratesObj.brickMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-porch-floor') {
+                                      h = (cArea / ratesObj.porchFloorSpeed) * coats;
+                                      m = (cArea / ratesObj.porchFloorCoverage) * coats * ratesObj.porchFloorMaterialCost;
+                                      fLabor = `${cArea} sqft ÷ ${ratesObj.porchFloorSpeed} sqft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${cArea} sqft ÷ ${ratesObj.porchFloorCoverage} sqft/gal × ${coats} coat(s) × $${ratesObj.porchFloorMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-soffits') {
+                                      h = (perimeter / ratesObj.soffitsSpeed) * coats;
+                                      m = (perimeter / ratesObj.soffitsCoverage) * coats * ratesObj.soffitsMaterialCost;
+                                      fLabor = `${perimeter} lin ft ÷ ${ratesObj.soffitsSpeed} ft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${perimeter} lin ft ÷ ${ratesObj.soffitsCoverage} ft/gal × ${coats} coat(s) × $${ratesObj.soffitsMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-gutters') {
+                                      h = (perimeter / ratesObj.guttersSpeed) * coats;
+                                      m = (perimeter / ratesObj.guttersCoverage) * coats * ratesObj.guttersMaterialCost;
+                                      fLabor = `${perimeter} lin ft ÷ ${ratesObj.guttersSpeed} ft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${perimeter} lin ft ÷ ${ratesObj.guttersCoverage} ft/gal × ${coats} coat(s) × $${ratesObj.guttersMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-fascia') {
+                                      h = (perimeter / ratesObj.fasciaSpeed) * coats;
+                                      m = (perimeter / ratesObj.fasciaCoverage) * coats * ratesObj.fasciaMaterialCost;
+                                      fLabor = `${perimeter} lin ft ÷ ${ratesObj.fasciaSpeed} ft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${perimeter} lin ft ÷ ${ratesObj.fasciaCoverage} ft/gal × ${coats} coat(s) × $${ratesObj.fasciaMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-trims') {
+                                      h = (perimeter / ratesObj.trimsSpeed) * coats;
+                                      m = (perimeter / ratesObj.trimsCoverage) * coats * ratesObj.trimsMaterialCost;
+                                      fLabor = `${perimeter} lin ft ÷ ${ratesObj.trimsSpeed} ft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${perimeter} lin ft ÷ ${ratesObj.trimsCoverage} ft/gal × ${coats} coat(s) × $${ratesObj.trimsMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-garage-door') {
+                                      const q = Number(qty) || 1;
+                                      h = q * ratesObj.garageHoursPerCoat * coats;
+                                      m = q * ratesObj.garageMaterialCostPerCoat * coats;
+                                      fLabor = `${q} unit(s) × ${ratesObj.garageHoursPerCoat} hrs/coat × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${q} unit(s) × $${ratesObj.garageMaterialCostPerCoat}/coat × ${coats} coat(s) = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-doors') {
+                                      const q = Number(qty) || 1;
+                                      h = q * ratesObj.extDoorsHoursPerCoat * coats;
+                                      m = q * ratesObj.extDoorsMaterialCostPerCoat * coats;
+                                      fLabor = `${q} door(s) × ${ratesObj.extDoorsHoursPerCoat} hrs/coat × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${q} door(s) × $${ratesObj.extDoorsMaterialCostPerCoat}/coat × ${coats} coat(s) = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-windows-fixed') {
+                                      const q = Number(qty) || 2;
+                                      h = q * ratesObj.windowsFixedHoursPerCoat * coats;
+                                      m = q * ratesObj.windowsFixedMaterialCostPerCoat * coats;
+                                      fLabor = `${q} window(s) × ${ratesObj.windowsFixedHoursPerCoat} hrs/coat × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${q} window(s) × $${ratesObj.windowsFixedMaterialCostPerCoat}/coat × ${coats} coat(s) = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-railings') {
+                                      h = (perimeter / ratesObj.railingsSpeed) * coats;
+                                      m = (perimeter / ratesObj.railingsCoverage) * coats * ratesObj.railingsMaterialCost;
+                                      fLabor = `${perimeter} lin ft ÷ ${ratesObj.railingsSpeed} ft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${perimeter} lin ft ÷ ${ratesObj.railingsCoverage} ft/gal × ${coats} coat(s) × $${ratesObj.railingsMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'ext-shutters') {
+                                      const q = Number(qty) || 2;
+                                      h = q * ratesObj.shuttersHoursPerCoat * coats;
+                                      m = q * ratesObj.shuttersMaterialCostPerCoat * coats;
+                                      fLabor = `${q} shutter set(s) × ${ratesObj.shuttersHoursPerCoat} hrs/coat × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${q} shutter set(s) × $${ratesObj.shuttersMaterialCostPerCoat}/coat × ${coats} coat(s) = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'washing') {
+                                      h = cArea / ratesObj.washingSpeed;
+                                      m = cArea * ratesObj.washingMaterialCostPerSqft;
+                                      fLabor = `${cArea} sqft ÷ ${ratesObj.washingSpeed} sqft/hr = ${h.toFixed(1)} hrs`;
+                                      fMat = `${cArea} sqft × $${ratesObj.washingMaterialCostPerSqft}/sqft = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'stripping') {
+                                      h = cArea / ratesObj.strippingSpeed;
+                                      m = cArea * ratesObj.strippingMaterialCostPerSqft;
+                                      fLabor = `${cArea} sqft ÷ ${ratesObj.strippingSpeed} sqft/hr = ${h.toFixed(1)} hrs`;
+                                      fMat = `${cArea} sqft × $${ratesObj.strippingMaterialCostPerSqft}/sqft = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'reviving') {
+                                      h = cArea / ratesObj.revivingSpeed;
+                                      m = cArea * ratesObj.revivingMaterialCostPerSqft;
+                                      fLabor = `${cArea} sqft ÷ ${ratesObj.revivingSpeed} sqft/hr = ${h.toFixed(1)} hrs`;
+                                      fMat = `${cArea} sqft × $${ratesObj.revivingMaterialCostPerSqft}/sqft = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'sanding') {
+                                      h = cArea / ratesObj.sandingSpeed;
+                                      m = ratesObj.sandingMaterialCostFlat;
+                                      fLabor = `${cArea} sqft ÷ ${ratesObj.sandingSpeed} sqft/hr = ${h.toFixed(1)} hrs`;
+                                      fMat = `Flat sanding supplies allowance = $${m.toFixed(2)}`;
+                                    } else if (sub.key === 'staining') {
+                                      h = (cArea / ratesObj.stainingSpeed) * coats;
+                                      m = (cArea / ratesObj.stainingCoverage) * coats * ratesObj.stainingMaterialCost;
+                                      fLabor = `${cArea} sqft ÷ ${ratesObj.stainingSpeed} sqft/hr × ${coats} coat(s) = ${h.toFixed(1)} hrs`;
+                                      fMat = `${cArea} sqft ÷ ${ratesObj.stainingCoverage} sqft/gal × ${coats} coat(s) × $${ratesObj.stainingMaterialCost}/gal = $${m.toFixed(2)}`;
+                                    }
 
-                                              {/* Delete Custom Area Button */}
-                                              {isCustom && (
-                                                <button
-                                                  type="button"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setRooms(prev => prev.map(r => {
-                                                      if (r.id === room.id) {
+                                    const lCost = h * hourlyLaborRate;
+                                    const tot = lCost + m;
+
+                                    items.push({
+                                      key: sub.key,
+                                      label: sub.label,
+                                      isCustom: false,
+                                      type: 'surface',
+                                      checked,
+                                      isOption,
+                                      coats,
+                                      qty,
+                                      hasQty: sub.hasQty,
+                                      hours: h,
+                                      materialCost: m,
+                                      laborCost: lCost,
+                                      totalCost: tot,
+                                      formulaLabor: fLabor,
+                                      formulaMaterial: fMat
+                                    });
+                                  });
+
+                                  // Custom areas
+                                  const customAreas = (room as any).customAreas || [];
+                                  customAreas.forEach((cItem: any) => {
+                                    const checked = cItem.checked !== false;
+                                    const coats = Number(cItem.coats) || 2;
+                                    const qty = cItem.qty === 'auto' ? 1 : (Number(cItem.qty) || 1);
+                                    const isOption = !!cItem.isOption;
+
+                                    let h = 0;
+                                    let m = 0;
+                                    const speed = cItem.speed || 150;
+                                    const coverage = cItem.coverage || 350;
+                                    const matCost = cItem.materialCost || 25;
+
+                                    if (cItem.calcType === 'wall') {
+                                      h = (wArea / speed) * coats;
+                                      m = (wArea / coverage) * coats * matCost;
+                                    } else if (cItem.calcType === 'ceiling') {
+                                      h = (cArea / speed) * coats;
+                                      m = (cArea / coverage) * coats * matCost;
+                                    } else if (cItem.calcType === 'perimeter') {
+                                      h = (perimeter / speed) * coats;
+                                      m = (perimeter / coverage) * coats * matCost;
+                                    } else {
+                                      h = qty * 0.75 * coats;
+                                      m = qty * 7.00 * coats;
+                                    }
+
+                                    const lCost = h * hourlyLaborRate;
+                                    const tot = lCost + m;
+
+                                    items.push({
+                                      key: cItem.key,
+                                      label: cItem.label || 'Custom Layer',
+                                      isCustom: true,
+                                      type: 'surface',
+                                      checked,
+                                      isOption,
+                                      coats,
+                                      qty,
+                                      hasQty: cItem.calcType === 'item',
+                                      hours: h,
+                                      materialCost: m,
+                                      laborCost: lCost,
+                                      totalCost: tot,
+                                      formulaLabor: `Custom surface calc: ${h.toFixed(1)} hrs`,
+                                      formulaMaterial: `Custom material rate: $${m.toFixed(2)}`
+                                    });
+                                  });
+
+                                  // Tasks
+                                  const surfaceTasks = getRoomTasks(room);
+                                  surfaceTasks.forEach((task) => {
+                                    const checked = !task.completed;
+                                    let tHours = 0.75;
+                                    let tMat = 12.00;
+
+                                    const textLower = (task.text || '').toLowerCase();
+                                    if (textLower.includes('wash') || textLower.includes('clean')) {
+                                      tHours = 0.5; tMat = 8.00;
+                                    } else if (textLower.includes('patch') || textLower.includes('repair') || textLower.includes('drywall')) {
+                                      tHours = 1.0; tMat = 15.00;
+                                    } else if (textLower.includes('prime') || textLower.includes('stain') || textLower.includes('strip')) {
+                                      tHours = 1.0; tMat = 20.00;
+                                    } else if (textLower.includes('sand')) {
+                                      tHours = 0.5; tMat = 10.00;
+                                    }
+
+                                    const lCost = tHours * hourlyLaborRate;
+                                    const tot = lCost + tMat;
+
+                                    items.push({
+                                      key: `task-${task.id}`,
+                                      label: task.text,
+                                      isCustom: false,
+                                      type: 'task',
+                                      checked,
+                                      isOption: !!task.isOption,
+                                      coats: 1,
+                                      qty: 1,
+                                      hasQty: false,
+                                      hours: tHours,
+                                      materialCost: tMat,
+                                      laborCost: lCost,
+                                      totalCost: tot,
+                                      formulaLabor: `Prep Task Estimate: ${tHours.toFixed(1)} hrs @ $${hourlyLaborRate}/hr`,
+                                      formulaMaterial: `Prep Materials / Consumables Allowance: $${tMat.toFixed(2)}`,
+                                      taskObj: task
+                                    });
+                                  });
+
+                                  const activeTotalCost = items.filter(i => i.checked && !i.isOption).reduce((sum, i) => sum + i.totalCost, 0);
+
+                                  return (
+                                    <div className="space-y-3 pt-2">
+                                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-800 pb-2">
+                                        <div className="flex items-center gap-2">
+                                          <Layers className="w-4 h-4 text-blue-400" />
+                                          <span className="text-xs font-bold text-white uppercase font-mono tracking-wider">
+                                            Configured Room Specifications & Cost Table
+                                          </span>
+                                          <span className="text-[10px] text-zinc-500 font-mono hidden sm:inline">
+                                            (Expand row for material & labor formulas)
+                                          </span>
+                                        </div>
+                                        
+                                        <div className="flex items-center gap-2 font-mono text-[11px]">
+                                          <span className="text-zinc-400">
+                                            Active Total: <strong className="text-emerald-400 font-bold">${Math.round(activeTotalCost).toLocaleString()}</strong>
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setAddingAreaRoomId(room.id)}
+                                            className="px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-blue-300 hover:text-white rounded-lg text-xs font-mono font-bold transition flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <Plus className="w-3 h-3" />
+                                            <span>+ Custom Layer</span>
+                                          </button>
+                                        </div>
+                                      </div>
+
+                                      {/* Expandable Table container */}
+                                      <div className="border border-neutral-800/90 rounded-2xl overflow-hidden bg-neutral-950/80 shadow-inner">
+                                        <div className="overflow-x-auto">
+                                          <table className="w-full text-left font-mono text-xs border-collapse">
+                                            <thead>
+                                              <tr className="bg-neutral-900/90 border-b border-neutral-800 text-[10px] text-zinc-400 uppercase font-bold tracking-wider">
+                                                <th className="py-2.5 px-3 min-w-[170px]">Task / Surface Item</th>
+                                                <th className="py-2.5 px-3 text-center min-w-[100px]">Coats / Qty</th>
+                                                <th className="py-2.5 px-3 text-right min-w-[110px]">Labour (Hrs / $)</th>
+                                                <th className="py-2.5 px-3 text-right min-w-[90px]">Materials ($)</th>
+                                                <th className="py-2.5 px-3 text-right min-w-[120px]">Total & Impact</th>
+                                                <th className="py-2.5 px-3 text-center min-w-[90px]">Actions</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-neutral-850/80">
+                                              {/* Surface Items Section */}
+                                              <tr className="bg-neutral-900/40 font-bold text-[10px] text-blue-300 uppercase tracking-wider">
+                                                <td colSpan={6} className="py-1.5 px-3 bg-blue-950/20 border-b border-neutral-850">
+                                                  Surfaces & Coatings ({items.filter(i => i.type === 'surface').length})
+                                                </td>
+                                              </tr>
+
+                                              {items.filter(i => i.type === 'surface').map(item => {
+                                                const rowKey = `${room.id}::${item.key}`;
+                                                const isRowExpanded = !!expandedRowKeys[rowKey];
+                                                const impactPct = activeTotalCost > 0 && item.checked && !item.isOption
+                                                  ? ((item.totalCost / activeTotalCost) * 100).toFixed(1)
+                                                  : '0.0';
+
+                                                const toggleChecked = () => {
+                                                  setRooms(prev => prev.map(r => {
+                                                    if (r.id === room.id) {
+                                                      if (item.isCustom) {
                                                         const customAreas = (r as any).customAreas || [];
                                                         return {
                                                           ...r,
-                                                          customAreas: customAreas.filter((c: any) => c.key !== sub.key)
+                                                          customAreas: customAreas.map((c: any) => c.key === item.key ? { ...c, checked: !item.checked } : c)
                                                         };
                                                       }
-                                                      return r;
-                                                    }));
-                                                    triggerNotification(`Removed custom layer "${sub.label}"`);
-                                                  }}
-                                                  className="p-1 hover:bg-red-950/40 text-zinc-500 hover:text-red-400 rounded transition cursor-pointer"
-                                                  title="Delete this custom area layer"
-                                                >
-                                                  <Trash2 className="w-3 h-3" />
-                                                </button>
-                                              )}
-                                            </div>
-                                          </div>
+                                                      const subObj = (r as any)[item.key] || { checked: true, qty: item.qty, coats: item.coats, isOption: false };
+                                                      return {
+                                                        ...r,
+                                                        [item.key]: { ...subObj, checked: !item.checked }
+                                                      };
+                                                    }
+                                                    return r;
+                                                  }));
+                                                };
 
-                                          {/* Compact Adjusters shown only if checked */}
-                                          {checkedState && (
-                                            <div className="px-2 pb-2 flex flex-col gap-1 text-[10px] border-t border-neutral-850 bg-black/10">
-                                              <div className="flex items-center justify-between text-zinc-400 mt-1">
-                                                <span className="text-zinc-500 text-[9px] uppercase tracking-wider">Coats:</span>
-                                                <div className="flex items-center gap-1 bg-neutral-950 border border-neutral-800 rounded px-1 py-0.2">
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => updateCoats(Math.max(1, coats - 1))}
-                                                    className="w-3.5 h-3.5 hover:bg-neutral-800 hover:text-white rounded flex items-center justify-center cursor-pointer font-semibold"
-                                                  >
-                                                    -
-                                                  </button>
-                                                  <span className="w-4.5 text-center font-bold text-white font-mono text-[9px]">{coats}</span>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => updateCoats(Math.min(4, coats + 1))}
-                                                    className="w-3.5 h-3.5 hover:bg-neutral-800 hover:text-white rounded flex items-center justify-center cursor-pointer font-semibold"
-                                                  >
-                                                    +
-                                                  </button>
-                                                </div>
-                                              </div>
+                                                const toggleOption = (e: React.MouseEvent) => {
+                                                  e.stopPropagation();
+                                                  setRooms(prev => prev.map(r => {
+                                                    if (r.id === room.id) {
+                                                      if (item.isCustom) {
+                                                        const customAreas = (r as any).customAreas || [];
+                                                        return {
+                                                          ...r,
+                                                          customAreas: customAreas.map((c: any) => c.key === item.key ? { ...c, isOption: !item.isOption } : c)
+                                                        };
+                                                      }
+                                                      const subObj = (r as any)[item.key] || { checked: true, qty: item.qty, coats: item.coats, isOption: false };
+                                                      return {
+                                                        ...r,
+                                                        [item.key]: { ...subObj, isOption: !item.isOption }
+                                                      };
+                                                    }
+                                                    return r;
+                                                  }));
+                                                };
 
-                                              {sub.hasQty && (
-                                                <div className="flex items-center justify-between text-zinc-400 border-t border-neutral-800/20 pt-1">
-                                                  <span className="text-zinc-500 text-[9px] uppercase tracking-wider">Qty:</span>
-                                                  <div className="flex items-center gap-1 bg-neutral-950 border border-neutral-800 rounded px-1 py-0.2">
+                                                const updateCoats = (newCoats: number) => {
+                                                  setRooms(prev => prev.map(r => {
+                                                    if (r.id === room.id) {
+                                                      if (item.isCustom) {
+                                                        const customAreas = (r as any).customAreas || [];
+                                                        return {
+                                                          ...r,
+                                                          customAreas: customAreas.map((c: any) => c.key === item.key ? { ...c, coats: newCoats } : c)
+                                                        };
+                                                      }
+                                                      const subObj = (r as any)[item.key] || { checked: true, qty: item.qty, coats: item.coats, isOption: false };
+                                                      return {
+                                                        ...r,
+                                                        [item.key]: { ...subObj, coats: newCoats }
+                                                      };
+                                                    }
+                                                    return r;
+                                                  }));
+                                                };
+
+                                                const updateQty = (newQty: number) => {
+                                                  setRooms(prev => prev.map(r => {
+                                                    if (r.id === room.id) {
+                                                      if (item.isCustom) {
+                                                        const customAreas = (r as any).customAreas || [];
+                                                        return {
+                                                          ...r,
+                                                          customAreas: customAreas.map((c: any) => c.key === item.key ? { ...c, qty: newQty } : c)
+                                                        };
+                                                      }
+                                                      const subObj = (r as any)[item.key] || { checked: true, qty: item.qty, coats: item.coats, isOption: false };
+                                                      return {
+                                                        ...r,
+                                                        [item.key]: { ...subObj, qty: newQty }
+                                                      };
+                                                    }
+                                                    return r;
+                                                  }));
+                                                };
+
+                                                return (
+                                                  <React.Fragment key={item.key}>
+                                                    <tr className={`transition hover:bg-neutral-900/60 ${
+                                                      item.isOption
+                                                        ? 'bg-amber-950/15 text-amber-200'
+                                                        : item.checked
+                                                          ? 'text-zinc-100'
+                                                          : 'text-zinc-500 opacity-60'
+                                                    }`}>
+                                                      <td className="py-2 px-3">
+                                                        <div className="flex items-center gap-2">
+                                                          <input
+                                                            type="checkbox"
+                                                            checked={item.checked}
+                                                            onChange={toggleChecked}
+                                                            className="w-3.5 h-3.5 rounded border-neutral-700 bg-neutral-950 text-blue-500 focus:ring-0 cursor-pointer shrink-0"
+                                                          />
+                                                          <span className="font-bold">{item.label}</span>
+                                                          {item.isOption && (
+                                                            <span className="text-[9px] bg-amber-950 text-amber-300 border border-amber-500/50 px-1.5 py-0.2 rounded uppercase font-extrabold shrink-0">
+                                                              Option
+                                                            </span>
+                                                          )}
+                                                        </div>
+                                                      </td>
+
+                                                      <td className="py-2 px-3 text-center">
+                                                        {item.checked ? (
+                                                          <div className="inline-flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded px-1.5 py-0.5">
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => updateCoats(Math.max(1, item.coats - 1))}
+                                                              className="w-4 h-4 hover:bg-neutral-800 text-zinc-300 rounded flex items-center justify-center cursor-pointer text-xs font-bold"
+                                                            >
+                                                              -
+                                                            </button>
+                                                            <span className="w-5 text-center font-bold text-white text-[11px]">{item.coats}c</span>
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => updateCoats(Math.min(4, item.coats + 1))}
+                                                              className="w-4 h-4 hover:bg-neutral-800 text-zinc-300 rounded flex items-center justify-center cursor-pointer text-xs font-bold"
+                                                            >
+                                                              +
+                                                            </button>
+                                                            {item.hasQty && (
+                                                              <div className="pl-1 border-l border-neutral-800 flex items-center gap-0.5 ml-1">
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => updateQty(Math.max(0, (typeof item.qty === 'number' ? item.qty : 2) - 1))}
+                                                                  className="w-3.5 h-3.5 hover:bg-neutral-800 text-zinc-300 rounded flex items-center justify-center cursor-pointer text-[10px]"
+                                                                >
+                                                                  -
+                                                                </button>
+                                                                <span className="text-[10px] text-zinc-300">{item.qty === 'auto' ? 2 : item.qty}u</span>
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => updateQty((typeof item.qty === 'number' ? item.qty : 2) + 1)}
+                                                                  className="w-3.5 h-3.5 hover:bg-neutral-800 text-zinc-300 rounded flex items-center justify-center cursor-pointer text-[10px]"
+                                                                >
+                                                                  +
+                                                                </button>
+                                                              </div>
+                                                            )}
+                                                          </div>
+                                                        ) : (
+                                                          <span className="text-zinc-600 italic text-[11px]">Unselected</span>
+                                                        )}
+                                                      </td>
+
+                                                      <td className="py-2 px-3 text-right">
+                                                        {item.checked ? (
+                                                          <div>
+                                                            <span className="font-bold text-zinc-200">${item.laborCost.toFixed(0)}</span>
+                                                            <span className="text-[10px] text-zinc-400 block font-normal">{item.hours.toFixed(1)} hrs</span>
+                                                          </div>
+                                                        ) : (
+                                                          <span className="text-zinc-600">—</span>
+                                                        )}
+                                                      </td>
+
+                                                      <td className="py-2 px-3 text-right">
+                                                        {item.checked ? (
+                                                          <span className="font-bold text-amber-300">${item.materialCost.toFixed(0)}</span>
+                                                        ) : (
+                                                          <span className="text-zinc-600">—</span>
+                                                        )}
+                                                      </td>
+
+                                                      <td className="py-2 px-3 text-right">
+                                                        {item.checked ? (
+                                                          <div className="flex items-center justify-end gap-1.5">
+                                                            <span className="font-bold text-emerald-400 text-xs">${item.totalCost.toFixed(0)}</span>
+                                                            {!item.isOption && (
+                                                              <span className="text-[9px] bg-emerald-950/80 border border-emerald-800/60 text-emerald-300 px-1.5 py-0.2 rounded font-bold">
+                                                                {impactPct}%
+                                                              </span>
+                                                            )}
+                                                          </div>
+                                                        ) : (
+                                                          <span className="text-zinc-600">—</span>
+                                                        )}
+                                                      </td>
+
+                                                      <td className="py-2 px-3 text-center">
+                                                        <div className="flex items-center justify-center gap-1">
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => toggleRowExpand(rowKey)}
+                                                            className="p-1 hover:bg-neutral-800 rounded transition cursor-pointer text-zinc-400 hover:text-white"
+                                                            title="Toggle mathematical cost calculation breakdown"
+                                                          >
+                                                            {isRowExpanded ? <ChevronDown className="w-3.5 h-3.5 text-blue-400" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                                          </button>
+
+                                                          <button
+                                                            type="button"
+                                                            onClick={toggleOption}
+                                                            className="p-1 hover:bg-neutral-800 rounded transition cursor-pointer"
+                                                            title={item.isOption ? "Active Option. Click to make standard." : "Mark as Option"}
+                                                          >
+                                                            <Diamond className={`w-3.5 h-3.5 ${item.isOption ? 'fill-amber-400 text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`} />
+                                                          </button>
+
+                                                          {item.isCustom && (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => {
+                                                                setRooms(prev => prev.map(r => {
+                                                                  if (r.id === room.id) {
+                                                                    const customAreas = (r as any).customAreas || [];
+                                                                    return {
+                                                                      ...r,
+                                                                      customAreas: customAreas.filter((c: any) => c.key !== item.key)
+                                                                    };
+                                                                  }
+                                                                  return r;
+                                                                }));
+                                                              }}
+                                                              className="p-1 hover:bg-red-950/40 text-zinc-500 hover:text-red-400 rounded transition cursor-pointer"
+                                                              title="Delete custom surface layer"
+                                                            >
+                                                              <Trash2 className="w-3 h-3" />
+                                                            </button>
+                                                          )}
+                                                        </div>
+                                                      </td>
+                                                    </tr>
+
+                                                    {/* EXPANDABLE DETAIL DRAWER ROW */}
+                                                    {isRowExpanded && (
+                                                      <tr className="bg-neutral-900/90 text-[11px] border-b border-neutral-800">
+                                                        <td colSpan={6} className="p-3 bg-gradient-to-r from-neutral-950 via-neutral-900 to-neutral-950">
+                                                          <div className="p-2.5 rounded-xl border border-neutral-800 bg-neutral-950/60 space-y-2">
+                                                            <div className="flex items-center justify-between text-blue-300 font-bold border-b border-neutral-800 pb-1 text-[10px] uppercase">
+                                                              <span>📊 Cost Impact & Mathematical Calculation Breakdown</span>
+                                                              <span>{item.label}</span>
+                                                            </div>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-zinc-300">
+                                                              <div className="space-y-1">
+                                                                <span className="text-[10px] text-zinc-500 uppercase font-bold block">Labour Formula:</span>
+                                                                <p className="text-zinc-300 bg-neutral-900 p-2 rounded border border-neutral-800 font-mono text-[10px]">
+                                                                  {item.formulaLabor}
+                                                                </p>
+                                                                <p className="text-[10px] text-zinc-400">
+                                                                  Labour Rate: <strong>${hourlyLaborRate.toFixed(2)}/hr</strong> • Labour Cost: <strong className="text-blue-300">${item.laborCost.toFixed(2)}</strong>
+                                                                </p>
+                                                              </div>
+                                                              <div className="space-y-1">
+                                                                <span className="text-[10px] text-zinc-500 uppercase font-bold block">Material Formula:</span>
+                                                                <p className="text-zinc-300 bg-neutral-900 p-2 rounded border border-neutral-800 font-mono text-[10px]">
+                                                                  {item.formulaMaterial}
+                                                                </p>
+                                                                <p className="text-[10px] text-zinc-400">
+                                                                  Material Cost: <strong className="text-amber-300">${item.materialCost.toFixed(2)}</strong>
+                                                                </p>
+                                                              </div>
+                                                            </div>
+                                                            <div className="flex items-center justify-between pt-1 border-t border-neutral-850 text-[11px]">
+                                                              <span className="text-zinc-400">Total Price Impact on Room: <strong className="text-emerald-400">${item.totalCost.toFixed(2)}</strong></span>
+                                                              {!item.isOption && activeTotalCost > 0 && (
+                                                                <span className="text-zinc-400">Contributes <strong className="text-blue-300">{impactPct}%</strong> to room total</span>
+                                                              )}
+                                                            </div>
+                                                          </div>
+                                                        </td>
+                                                      </tr>
+                                                    )}
+                                                  </React.Fragment>
+                                                );
+                                              })}
+
+                                              {/* Tasks Section Header */}
+                                              <tr className="bg-neutral-900/40 font-bold text-[10px] text-indigo-300 uppercase tracking-wider border-t border-neutral-800">
+                                                <td colSpan={6} className="py-1.5 px-3 bg-indigo-950/20 border-b border-neutral-850 flex items-center justify-between">
+                                                  <span>Preparation & Surface Tasks ({items.filter(i => i.type === 'task').length})</span>
+                                                  {room.category === 'deck' && items.filter(i => i.type === 'task').length === 0 && (
                                                     <button
                                                       type="button"
-                                                      onClick={() => updateQty(Math.max(0, (typeof qty === 'number' ? qty : 2) - 1))}
-                                                      className="w-3.5 h-3.5 hover:bg-neutral-800 hover:text-white rounded flex items-center justify-center cursor-pointer font-semibold"
+                                                      onClick={() => {
+                                                        setRooms(prev => prev.map(r => r.id === room.id ? { ...r, surfaceTasks: DEFAULT_DECK_TASKS } : r));
+                                                      }}
+                                                      className="text-[10px] text-emerald-400 hover:underline cursor-pointer"
                                                     >
-                                                      -
+                                                      + Load Default Deck Tasks
                                                     </button>
-                                                    <span className="w-4.5 text-center font-bold text-white font-mono text-[9px]">
-                                                      {qty === 'auto' ? 2 : qty}
-                                                    </span>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => updateQty((typeof qty === 'number' ? qty : 2) + 1)}
-                                                      className="w-3.5 h-3.5 hover:bg-neutral-800 hover:text-white rounded flex items-center justify-center cursor-pointer font-semibold"
-                                                    >
-                                                      +
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              )}
-                                            </div>
-                                          )}
+                                                  )}
+                                                </td>
+                                              </tr>
+
+                                              {items.filter(i => i.type === 'task').map(item => {
+                                                const rowKey = `${room.id}::${item.key}`;
+                                                const isRowExpanded = !!expandedRowKeys[rowKey];
+                                                const impactPct = activeTotalCost > 0 && item.checked && !item.isOption
+                                                  ? ((item.totalCost / activeTotalCost) * 100).toFixed(1)
+                                                  : '0.0';
+
+                                                const taskObj = item.taskObj;
+
+                                                return (
+                                                  <React.Fragment key={item.key}>
+                                                    <tr className={`transition hover:bg-neutral-900/60 ${
+                                                      item.isOption
+                                                        ? 'bg-amber-950/15 text-amber-200'
+                                                        : taskObj?.completed
+                                                          ? 'text-zinc-500 line-through opacity-60'
+                                                          : 'text-zinc-100'
+                                                    }`}>
+                                                      <td className="py-2 px-3">
+                                                        <div className="flex items-center gap-2">
+                                                          <input
+                                                            type="checkbox"
+                                                            checked={taskObj?.completed || false}
+                                                            onChange={() => handleToggleRoomTask(room.id, taskObj.id)}
+                                                            className="w-3.5 h-3.5 rounded border-neutral-700 bg-neutral-950 text-blue-500 focus:ring-0 cursor-pointer shrink-0"
+                                                          />
+                                                          <span className={`font-bold ${taskObj?.completed ? 'line-through' : ''}`}>{item.label}</span>
+                                                          {taskObj?.surfaceCategory && (
+                                                            <span className="text-[9px] bg-neutral-900 border border-neutral-800 text-zinc-400 px-1.5 py-0.2 rounded uppercase shrink-0">
+                                                              {taskObj.surfaceCategory}
+                                                            </span>
+                                                          )}
+                                                          {item.isOption && (
+                                                            <span className="text-[9px] bg-amber-950 text-amber-300 border border-amber-500/50 px-1.5 py-0.2 rounded uppercase font-extrabold shrink-0">
+                                                              Option
+                                                            </span>
+                                                          )}
+                                                        </div>
+                                                      </td>
+
+                                                      <td className="py-2 px-3 text-center text-zinc-400 text-[11px]">
+                                                        Task Item
+                                                      </td>
+
+                                                      <td className="py-2 px-3 text-right">
+                                                        <div>
+                                                          <span className="font-bold text-zinc-200">${item.laborCost.toFixed(0)}</span>
+                                                          <span className="text-[10px] text-zinc-400 block font-normal">{item.hours.toFixed(1)} hrs</span>
+                                                        </div>
+                                                      </td>
+
+                                                      <td className="py-2 px-3 text-right">
+                                                        <span className="font-bold text-amber-300">${item.materialCost.toFixed(0)}</span>
+                                                      </td>
+
+                                                      <td className="py-2 px-3 text-right">
+                                                        <div className="flex items-center justify-end gap-1.5">
+                                                          <span className="font-bold text-emerald-400 text-xs">${item.totalCost.toFixed(0)}</span>
+                                                          {!item.isOption && (
+                                                            <span className="text-[9px] bg-emerald-950/80 border border-emerald-800/60 text-emerald-300 px-1.5 py-0.2 rounded font-bold">
+                                                              {impactPct}%
+                                                            </span>
+                                                          )}
+                                                        </div>
+                                                      </td>
+
+                                                      <td className="py-2 px-3 text-center">
+                                                        <div className="flex items-center justify-center gap-1">
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => toggleRowExpand(rowKey)}
+                                                            className="p-1 hover:bg-neutral-800 rounded transition cursor-pointer text-zinc-400 hover:text-white"
+                                                            title="Toggle mathematical cost calculation breakdown"
+                                                          >
+                                                            {isRowExpanded ? <ChevronDown className="w-3.5 h-3.5 text-blue-400" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                                          </button>
+
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => handleToggleRoomTaskOption(room.id, taskObj.id)}
+                                                            className="p-1 hover:bg-neutral-800 rounded transition cursor-pointer"
+                                                            title={item.isOption ? "Active Option. Click to make standard task." : "Mark task as Option"}
+                                                          >
+                                                            <Diamond className={`w-3.5 h-3.5 ${item.isOption ? 'fill-amber-400 text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`} />
+                                                          </button>
+
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => handleDeleteRoomTask(room.id, taskObj.id)}
+                                                            className="p-1 hover:bg-red-950/40 text-zinc-500 hover:text-red-400 rounded transition cursor-pointer"
+                                                            title="Delete task"
+                                                          >
+                                                            <Trash2 className="w-3 h-3" />
+                                                          </button>
+                                                        </div>
+                                                      </td>
+                                                    </tr>
+
+                                                    {/* EXPANDABLE TASK DETAIL DRAWER ROW */}
+                                                    {isRowExpanded && (
+                                                      <tr className="bg-neutral-900/90 text-[11px] border-b border-neutral-800">
+                                                        <td colSpan={6} className="p-3 bg-gradient-to-r from-neutral-950 via-neutral-900 to-neutral-950">
+                                                          <div className="p-2.5 rounded-xl border border-neutral-800 bg-neutral-950/60 space-y-2">
+                                                            <div className="flex items-center justify-between text-indigo-300 font-bold border-b border-neutral-800 pb-1 text-[10px] uppercase">
+                                                              <span>📋 Task Cost Breakdown</span>
+                                                              <span>{item.label}</span>
+                                                            </div>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-zinc-300">
+                                                              <div>
+                                                                <span className="text-[10px] text-zinc-500 uppercase font-bold block">Labour Allocation:</span>
+                                                                <p className="text-zinc-300 bg-neutral-900 p-2 rounded border border-neutral-800 font-mono text-[10px]">
+                                                                  {item.formulaLabor}
+                                                                </p>
+                                                              </div>
+                                                              <div>
+                                                                <span className="text-[10px] text-zinc-500 uppercase font-bold block">Consumables / Materials:</span>
+                                                                <p className="text-zinc-300 bg-neutral-900 p-2 rounded border border-neutral-800 font-mono text-[10px]">
+                                                                  {item.formulaMaterial}
+                                                                </p>
+                                                              </div>
+                                                            </div>
+                                                            <div className="flex items-center justify-between pt-1 border-t border-neutral-850 text-[11px]">
+                                                              <span className="text-zinc-400">Total Task Price Impact: <strong className="text-emerald-400">${item.totalCost.toFixed(2)}</strong></span>
+                                                              {!item.isOption && activeTotalCost > 0 && (
+                                                                <span className="text-zinc-400">Contributes <strong className="text-blue-300">{impactPct}%</strong> to room total</span>
+                                                              )}
+                                                            </div>
+                                                          </div>
+                                                        </td>
+                                                      </tr>
+                                                    )}
+                                                  </React.Fragment>
+                                                );
+                                              })}
+                                            </tbody>
+                                          </table>
                                         </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
 
-                                {/* Add Surface Category Button Trigger */}
-                                <div className="mt-4 pt-4 border-t border-neutral-850 flex justify-end">
-                                  <button
-                                    type="button"
-                                    onClick={() => setAddingAreaRoomId(room.id)}
-                                    className="px-4 py-2 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 hover:border-neutral-700 text-white font-bold font-mono text-xs rounded-xl transition flex items-center gap-2 cursor-pointer select-none"
-                                  >
-                                    <Plus className="w-3.5 h-3.5 text-blue-400" />
-                                    <span>Add Custom / Preset Surface Category</span>
-                                  </button>
-                                </div>
+                                        {/* Add Task Input Form Bar */}
+                                        <div className="p-3 bg-neutral-900/80 border-t border-neutral-800 flex flex-wrap items-center gap-2">
+                                          <input
+                                            type="text"
+                                            placeholder="Add task to this room (e.g. Patch drywall, Power wash, Clean trim...)"
+                                            id={`new-task-input-${room.id}`}
+                                            onKeyDown={(e) => {
+                                              if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                const target = e.currentTarget;
+                                                if (target.value.trim()) {
+                                                  handleAddRoomTask(room.id, target.value.trim(), 'General', roomTaskIsOption[room.id] || false);
+                                                  target.value = '';
+                                                }
+                                              }
+                                            }}
+                                            className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-blue-500 font-mono min-w-[180px]"
+                                          />
 
-                                {/* TASK SECTION BELOW SURFACE CATEGORIES */}
-                                <div className="mt-5 pt-4 border-t border-neutral-800/80 space-y-3">
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                      <ListTodo className="w-4 h-4 text-blue-400" />
-                                      <h5 className="text-xs font-bold text-white uppercase tracking-wider font-mono">
-                                        Surface Category Tasks
-                                      </h5>
-                                      <span className="text-[10px] text-zinc-500 font-mono">
-                                        ({getRoomTasks(room).filter(t => t.completed).length}/{getRoomTasks(room).length} done)
-                                      </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setRoomTaskIsOption(prev => ({ ...prev, [room.id]: !prev[room.id] }));
+                                            }}
+                                            className={`px-2.5 py-1.5 text-xs font-bold font-mono rounded-xl border transition cursor-pointer flex items-center gap-1 shrink-0 ${
+                                              roomTaskIsOption[room.id]
+                                                ? 'bg-amber-950/90 border-amber-500 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.25)]'
+                                                : 'bg-neutral-950 border-neutral-800 text-zinc-400 hover:text-white'
+                                            }`}
+                                            title={roomTaskIsOption[room.id] ? "New task will be added as Option" : "Click to mark new task as Option"}
+                                          >
+                                            <Diamond className={`w-3 h-3 ${roomTaskIsOption[room.id] ? 'fill-amber-400 text-amber-400' : 'text-zinc-500'}`} />
+                                            <span>Option</span>
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const inputEl = document.getElementById(`new-task-input-${room.id}`) as HTMLInputElement;
+                                              if (inputEl && inputEl.value.trim()) {
+                                                handleAddRoomTask(room.id, inputEl.value.trim(), 'General', roomTaskIsOption[room.id] || false);
+                                                inputEl.value = '';
+                                              }
+                                            }}
+                                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold font-mono text-xs rounded-xl transition flex items-center gap-1 cursor-pointer shrink-0"
+                                          >
+                                            <Plus className="w-3.5 h-3.5" />
+                                            <span>Add Task</span>
+                                          </button>
+                                        </div>
+                                      </div>
                                     </div>
-                                    {room.category === 'deck' && getRoomTasks(room).length === 0 && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setRooms(prev => prev.map(r => r.id === room.id ? { ...r, surfaceTasks: DEFAULT_DECK_TASKS } : r));
-                                        }}
-                                        className="text-[10px] text-emerald-400 hover:underline font-mono cursor-pointer"
-                                      >
-                                        + Load Default Deck Tasks
-                                      </button>
-                                    )}
-                                  </div>
-
-                                  {/* Tasks List */}
-                                  <div className="space-y-1.5">
-                                    {getRoomTasks(room).length === 0 ? (
-                                      <p className="text-[11px] text-zinc-500 italic py-1">
-                                        No surface tasks added yet. Add tasks below for walls, ceilings, and other items.
-                                      </p>
-                                    ) : (
-                                      getRoomTasks(room).map(task => (
-                                        <div 
-                                          key={task.id} 
-                                          className={`flex items-center justify-between p-2 rounded-xl border text-xs font-mono transition ${
-                                            task.isOption
-                                              ? 'bg-amber-950/25 border-amber-500/50 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.15)]'
-                                              : task.completed
-                                                ? 'bg-neutral-950/60 border-neutral-850 text-zinc-500 line-through'
-                                                : 'bg-neutral-900/60 border-neutral-800 text-zinc-200'
-                                          }`}
-                                        >
-                                          <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                                            <input
-                                              type="checkbox"
-                                              checked={task.completed}
-                                              onChange={() => handleToggleRoomTask(room.id, task.id)}
-                                              className="w-3.5 h-3.5 rounded border-neutral-700 bg-neutral-950 text-blue-500 focus:ring-0 cursor-pointer shrink-0"
-                                            />
-                                            <span className={`truncate ${task.completed ? 'line-through text-zinc-500' : ''}`}>{task.text}</span>
-                                            {task.surfaceCategory && (
-                                              <span className="text-[9px] bg-neutral-950 border border-neutral-800 text-zinc-400 px-1.5 py-0.5 rounded uppercase shrink-0">
-                                                {task.surfaceCategory}
-                                              </span>
-                                            )}
-                                            {task.isOption && (
-                                              <span className="text-[9px] bg-amber-950/90 text-amber-300 border border-amber-500/50 px-1.5 py-0.5 rounded uppercase font-bold shrink-0">
-                                                Option
-                                              </span>
-                                            )}
-                                          </div>
-
-                                          <div className="flex items-center gap-1.5 shrink-0">
-                                            <button
-                                              type="button"
-                                              onClick={() => handleToggleRoomTaskOption(room.id, task.id)}
-                                              className={`px-2 py-0.5 text-[10px] font-bold font-mono rounded-md border transition cursor-pointer flex items-center gap-1 ${
-                                                task.isOption
-                                                  ? 'bg-amber-950/90 border-amber-500 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.25)]'
-                                                  : 'bg-neutral-950 border-neutral-800 text-zinc-400 hover:text-white'
-                                              }`}
-                                              title={task.isOption ? "Active Option. Click to make standard task." : "Mark task as Option"}
-                                            >
-                                              <Diamond className={`w-3 h-3 ${task.isOption ? 'fill-amber-400 text-amber-400' : 'text-zinc-500'}`} />
-                                              <span>Option</span>
-                                            </button>
-
-                                            <button
-                                              type="button"
-                                              onClick={() => handleDeleteRoomTask(room.id, task.id)}
-                                              className="p-1 hover:text-red-400 text-zinc-600 transition shrink-0 cursor-pointer"
-                                              title="Delete task"
-                                            >
-                                              <Trash2 className="w-3 h-3" />
-                                            </button>
-                                          </div>
-                                        </div>
-                                      ))
-                                    )}
-                                  </div>
-
-                                  {/* Add Task Input Form */}
-                                  <div className="flex items-center gap-2 pt-1">
-                                    <input
-                                      type="text"
-                                      placeholder="Add task (e.g. Washing, Sanding, Prep drywall...)"
-                                      id={`new-task-input-${room.id}`}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter') {
-                                          e.preventDefault();
-                                          const target = e.currentTarget;
-                                          if (target.value.trim()) {
-                                            handleAddRoomTask(room.id, target.value.trim(), 'General', roomTaskIsOption[room.id] || false);
-                                            target.value = '';
-                                          }
-                                        }
-                                      }}
-                                      className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-blue-500 font-mono"
-                                    />
-
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setRoomTaskIsOption(prev => ({ ...prev, [room.id]: !prev[room.id] }));
-                                      }}
-                                      className={`px-2.5 py-1.5 text-xs font-bold font-mono rounded-xl border transition cursor-pointer flex items-center gap-1 shrink-0 ${
-                                        roomTaskIsOption[room.id]
-                                          ? 'bg-amber-950/90 border-amber-500 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.25)]'
-                                          : 'bg-neutral-950 border-neutral-800 text-zinc-400 hover:text-white'
-                                      }`}
-                                      title={roomTaskIsOption[room.id] ? "New task will be added as Option" : "Click to mark new task as Option"}
-                                    >
-                                      <Diamond className={`w-3 h-3 ${roomTaskIsOption[room.id] ? 'fill-amber-400 text-amber-400' : 'text-zinc-500'}`} />
-                                      <span>Option</span>
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const inputEl = document.getElementById(`new-task-input-${room.id}`) as HTMLInputElement;
-                                        if (inputEl && inputEl.value.trim()) {
-                                          handleAddRoomTask(room.id, inputEl.value.trim(), 'General', roomTaskIsOption[room.id] || false);
-                                          inputEl.value = '';
-                                        }
-                                      }}
-                                      className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 hover:text-white font-bold font-mono text-xs rounded-xl transition cursor-pointer flex items-center gap-1 shrink-0"
-                                    >
-                                      <Plus className="w-3 h-3" />
-                                      <span>Add Task</span>
-                                    </button>
-                                  </div>
-                                </div>
+                                  );
+                                })()}
 
                               </div>
                             )}
@@ -4674,7 +5217,20 @@ export default function ProjectDetails({
                                       </div>
 
                                       {/* Group Action Buttons */}
-                                      <div className="flex items-center gap-1 pl-2 border-l border-blue-800/60">
+                                      <div className="flex items-center gap-1.5 pl-2 border-l border-blue-800/60">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEditingGroupModalName(gName);
+                                          }}
+                                          className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold font-mono text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-md border border-blue-400/40"
+                                          title="Bulk edit all rooms, coats, and tasks in this group"
+                                        >
+                                          <Sliders className="w-3.5 h-3.5" />
+                                          <span>Batch Edit Group</span>
+                                        </button>
+
                                         <button
                                           type="button"
                                           onClick={(e) => {
@@ -4693,7 +5249,7 @@ export default function ProjectDetails({
                                             e.stopPropagation();
                                             handleUngroupRooms(gName);
                                           }}
-                                          className="px-2.5 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-zinc-300 hover:text-red-400 rounded-lg transition text-[11px] font-mono cursor-pointer"
+                                          className="px-2 py-1 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-zinc-400 hover:text-red-400 rounded-lg transition text-[11px] font-mono cursor-pointer"
                                           title="Remove group heading from these rooms"
                                         >
                                           Ungroup
@@ -5873,8 +6429,19 @@ export default function ProjectDetails({
                         triggerNotification('Email dispatched successfully!', 'success');
                       } catch (err: any) {
                         console.error('Failed to send proposal email:', err);
-                        setGmailError(err.message || 'An unexpected error occurred during Gmail send.');
-                        triggerNotification('Gmail send failed.', 'error');
+                        const isAuthError = String(err?.message || '').toLowerCase().includes('expired') ||
+                                            String(err?.message || '').toLowerCase().includes('credentials') ||
+                                            String(err?.message || '').toLowerCase().includes('unauthenticated') ||
+                                            String(err?.message || '').toLowerCase().includes('401');
+                        if (isAuthError) {
+                          setLocalToken(null);
+                          setAccessToken(null);
+                          setGmailError('Google session expired or missing permissions. Please re-authorize Gmail below.');
+                          triggerNotification('Gmail auth expired. Please re-connect Gmail.', 'error');
+                        } else {
+                          setGmailError(err.message || 'An unexpected error occurred during Gmail send.');
+                          triggerNotification('Gmail send failed.', 'error');
+                        }
                       } finally {
                         setIsSendingGmail(false);
                       }
@@ -7423,6 +7990,179 @@ export default function ProjectDetails({
         </div>
       </div>
     )}
+      {/* GROUP BATCH EDITING MODAL */}
+      {editingGroupModalName && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-neutral-900 border border-blue-500/40 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-5 text-white font-mono">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-900/50 border border-blue-700/50 rounded-xl text-blue-400">
+                  <Sliders className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">
+                    Group Batch Manager: <span className="text-blue-400">{editingGroupModalName}</span>
+                  </h3>
+                  <p className="text-[11px] text-zinc-400">
+                    Applying bulk modifications to all {rooms.filter(r => r.groupName === editingGroupModalName).length} room(s) in this group simultaneously
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setEditingGroupModalName(null)}
+                className="p-1.5 hover:bg-neutral-800 text-zinc-400 hover:text-white rounded-xl transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* Batch Coat Count controls */}
+              <div className="p-3 bg-neutral-950/80 border border-neutral-800 rounded-xl space-y-2">
+                <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider block">
+                  1. Batch Surface Coats (Set All Rooms)
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleGroupBatchSetCoats(editingGroupModalName, 1)}
+                    className="py-2 bg-neutral-900 hover:bg-blue-950/60 border border-neutral-800 hover:border-blue-500/50 text-zinc-200 hover:text-white font-bold rounded-lg transition text-center cursor-pointer"
+                  >
+                    Set 1 Coat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleGroupBatchSetCoats(editingGroupModalName, 2)}
+                    className="py-2 bg-neutral-900 hover:bg-blue-950/60 border border-neutral-800 hover:border-blue-500/50 text-zinc-200 hover:text-white font-bold rounded-lg transition text-center cursor-pointer"
+                  >
+                    Set 2 Coats
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleGroupBatchSetCoats(editingGroupModalName, 3)}
+                    className="py-2 bg-neutral-900 hover:bg-blue-950/60 border border-neutral-800 hover:border-blue-500/50 text-zinc-200 hover:text-white font-bold rounded-lg transition text-center cursor-pointer"
+                  >
+                    Set 3 Coats
+                  </button>
+                </div>
+              </div>
+
+              {/* Batch Task Adder */}
+              <div className="p-3 bg-neutral-950/80 border border-neutral-800 rounded-xl space-y-2">
+                <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider block">
+                  2. Add Task to All Rooms in Group
+                </span>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={groupBatchTaskInput}
+                    onChange={(e) => setGroupBatchTaskInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (groupBatchTaskInput.trim()) {
+                          handleGroupBatchAddTask(editingGroupModalName, groupBatchTaskInput.trim());
+                        }
+                      }
+                    }}
+                    placeholder="e.g. Scrape flaking paint, Prime drywall repairs..."
+                    className="flex-1 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (groupBatchTaskInput.trim()) {
+                        handleGroupBatchAddTask(editingGroupModalName, groupBatchTaskInput.trim());
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition flex items-center gap-1 shrink-0 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Task</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Batch Option Status Toggle */}
+              <div className="p-3 bg-neutral-950/80 border border-neutral-800 rounded-xl space-y-2">
+                <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider block">
+                  3. Batch Option Pricing Status
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleGroupBatchSetOption(editingGroupModalName, true)}
+                    className="py-2 bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/50 text-amber-300 font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Diamond className="w-3.5 h-3.5 fill-amber-400" />
+                    <span>Mark Group as Option</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleGroupBatchSetOption(editingGroupModalName, false)}
+                    className="py-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-zinc-300 font-bold rounded-lg transition text-center cursor-pointer"
+                  >
+                    Mark Group as Standard
+                  </button>
+                </div>
+              </div>
+
+              {/* Batch Category Change & Delete Group */}
+              <div className="p-3 bg-neutral-950/80 border border-neutral-800 rounded-xl space-y-2">
+                <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider block">
+                  4. Category & Group Management
+                </span>
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex items-center gap-2">
+                    <select
+                      id={`group-cat-select-${editingGroupModalName}`}
+                      className="bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs text-white cursor-pointer"
+                    >
+                      <option value="interior">Interior</option>
+                      <option value="exterior">Exterior</option>
+                      <option value="deck">Deck / Stain</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const sel = document.getElementById(`group-cat-select-${editingGroupModalName}`) as HTMLSelectElement;
+                        if (sel) {
+                          handleGroupBatchSetCategory(editingGroupModalName, sel.value as any);
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-zinc-200 hover:text-white rounded-lg transition font-bold cursor-pointer"
+                    >
+                      Apply Category
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleGroupBatchDelete(editingGroupModalName)}
+                    className="px-3 py-1.5 bg-red-950/40 hover:bg-red-900/60 border border-red-800/80 text-red-300 hover:text-white rounded-lg transition font-bold flex items-center gap-1.5 cursor-pointer ml-auto"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Entire Group</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setEditingGroupModalName(null)}
+                className="px-5 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-bold rounded-xl transition cursor-pointer"
+              >
+                Done / Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </APIProvider>
   );
 }

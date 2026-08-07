@@ -1053,7 +1053,6 @@ export default function App() {
     return (
       <ClientSignPortal 
         proposalId={sharedProposalId} 
-        onBackToApp={isAuthorizedUser ? () => setSharedProposalId(null) : undefined} 
       />
     );
   }

@@ -117,6 +117,11 @@ export async function sendProposalEmail({
         errorMessage = parsed.error.message;
       }
     } catch (_) {}
+
+    if (response.status === 401 || errorMessage.toLowerCase().includes('invalid credentials') || errorMessage.toLowerCase().includes('unauthenticated')) {
+      errorMessage = 'Google OAuth session expired or missing permissions. Please re-connect your Google Account.';
+    }
+
     throw new Error(errorMessage);
   }
 

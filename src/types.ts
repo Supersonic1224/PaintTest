@@ -48,6 +48,8 @@ export interface RoomSpec {
 }
 
 export interface EstimateSummary {
+  totalHours?: number;
+  hourlyLaborRate?: number;
   laborCost: number;
   materialCost: number;
   taxRate: number; // e.g. 0.08
@@ -102,6 +104,9 @@ export interface ProjectDetails {
   signatureDataUrl?: string;
   contractorAccessToken?: string;
   installments?: Installment[];
+  viewCount?: number;
+  lastViewedAt?: string;
+  totalViewDurationSec?: number;
 }
 
 export interface ClientLead {
@@ -474,6 +479,10 @@ export const DEFAULT_REAL_PRODUCTS: RealProduct[] = [
   { id: 'rp-4', name: 'Sherwin-Williams ProClassic', defaultSheen: 'Semi-Gloss', categories: ['interior'], builderSpec: 'trim' },
   { id: 'rp-5', name: 'PPG Diamond', defaultSheen: 'Eggshell', categories: ['interior', 'exterior'], builderSpec: 'wall-economy' },
   { id: 'rp-6', name: 'Behr Ultra', defaultSheen: 'Satin', categories: ['interior', 'exterior', 'deck'] },
+  { id: 'rp-7', name: 'Benjamin Moore Regal Select Exterior', defaultSheen: 'Satin', categories: ['exterior'], builderSpec: 'ext-standard' },
+  { id: 'rp-8', name: 'Benjamin Moore Aura Exterior', defaultSheen: 'Satin', categories: ['exterior'], builderSpec: 'ext-premium' },
+  { id: 'rp-9', name: 'PPG Diamond Exterior', defaultSheen: 'Satin', categories: ['exterior'], builderSpec: 'ext-economy' },
+  { id: 'rp-10', name: 'Sherwin-Williams ProClassic Exterior', defaultSheen: 'Semi-Gloss (White)', categories: ['exterior'], builderSpec: 'ext-trim' },
 ];
 
 export const DEFAULT_PRODUCT_TYPE_COLOURS: ProductTypeColourDefaults = {
@@ -493,14 +502,121 @@ export const DEFAULT_PROPOSAL_SETTINGS: ProposalSettings = {
     { title: 'Professional Team', description: 'Dedicated professionals committed to a smooth and stress-free experience.' },
     { title: 'Your Satisfaction', description: 'Clear communication, transparent pricing, and results you can count on.' },
   ],
-  termsAndConditions: '1. PAYMENT TERMS: A 30% deposit is required to schedule the project. Balance is due immediately upon completion of work.\n2. SCHEDULING: Weather permitting for exterior jobs. Any schedule delays will be communicated promptly.\n3. WARRANTY: We provide a 2-year warranty on workmanship. Warranty does not cover normal wear and tear, abuse, or structural settlement.',
+  termsAndConditions: `Terms and Conditions
+
+1. Scope of Work
+Capstone Painting will provide all necessary labour, materials, and supplies as specified in the proposal. The Customer should review the proposal carefully, as Capstone is only responsible for the tasks outlined. Any changes to the scope of work must be approved in writing before proceeding.
+
+2. Paint and Materials
+Colour selections must be confirmed at least one week before work begins. Changes made after work has started may result in additional costs, which will be communicated to the Customer before proceeding.
+
+Unless otherwise specified in the proposal, the estimate includes all paint and materials required to complete the work. Where the Customer supplies paint or materials, Capstone is not responsible for the quality, coverage, or performance of those materials, and any warranty on labour may be limited or excluded as a result. Some accent colours may require more than two coats; the Customer will be informed of any associated additional costs before work begins.
+
+3. Unforeseen Conditions
+If unexpected issues arise during the project (such as hidden defects or deteriorated surfaces), Capstone will notify the Customer and provide a revised estimate for any additional work required. Work will not proceed beyond the original scope without the Customer's approval.
+
+Lead-Based Paint: If lead-based paint is encountered during the project, Capstone Painting will not paint those surfaces. Lead remediation requires specialized handling by a certified contractor, which is outside the scope of our services. The hiring and associated costs of a certified lead remediation contractor are the sole responsibility of the Customer. Capstone Painting assumes no liability for costs or delays related to lead remediation.
+
+4. Customer Responsibilities
+• Ensure the work area is reasonably clear of personal belongings, furniture, and debris before the crew arrives.
+• Keep the work area free of other trades or obstructions during the project.
+• Be available for a final walkthrough with the project supervisor on the last day of work.
+
+5. Work Standards
+Capstone's painters follow industry-standard protocols and are committed to delivering a professional finish. Capstone may utilize qualified subcontractors as needed to complete the work efficiently and to our quality standards.
+
+6. Warranty
+Capstone provides a 3-year warranty on labour and materials, beginning on the project completion date. Warranty service consists of up to one day of labour per year, free of charge, to address any qualifying defects.
+
+Warranty Exclusions — the warranty does not cover:
+• Crack repairs in non-temperature-controlled areas (e.g., garages, unheated basements).
+• Horizontal surfaces (e.g., floors, decks, patios).
+• Damage caused by external factors such as weather, moisture intrusion, or structural movement.
+• Projects where the Customer supplies paint, requests minimal preparation, or selects low-quality paint products.
+• Projects where the Customer supplies paint or materials, in which case the labour warranty is limited or excluded as noted in Section 2.
+
+Warranty work is limited to repainting affected areas. Full wall repaints are only covered where more than 60% of the surface area is failing.
+
+7. Payment Terms
+Deposit: A deposit is required to secure the Customer's place in Capstone's schedule. No work will be scheduled or started until the deposit is received.
+Final Payment: The remaining balance is due upon project completion. The warranty is not activated until final payment is received in full.
+Late Payments: Payments not received within 20 days of the due date will incur a 5% late fee, plus interest at a rate of 18% per annum on the outstanding balance.
+
+8. Cancellation
+The Customer may cancel this agreement within 3 business days of accepting the proposal without penalty, provided that no materials have been purchased or work has begun on their behalf.
+If cancellation occurs after materials have been ordered or work has commenced, the Customer will be responsible for the cost of any materials purchased and any labour performed up to the date of cancellation. A restocking or disposal fee may apply for materials that cannot be returned or reused.
+Cancellations must be submitted in writing to be considered valid.
+
+9. Termination
+For Cause: Capstone may terminate this agreement if the Customer fails to make payment or materially breaches these terms. Written notice will be provided prior to termination.
+For Convenience: Either party may terminate this agreement with 7 days' written notice. In such cases, the Customer is responsible for payment of all work completed and materials purchased up to the termination date.
+
+10. Force Majeure
+Neither party will be held liable for failure to perform any obligation resulting from circumstances beyond their reasonable control, including natural disasters, severe weather, or government-imposed restrictions.
+
+11. Liability
+Capstone will take reasonable care to protect the Customer's property throughout the project. Capstone is not liable for damage resulting from pre-existing structural issues, weather events, or conditions outside our control. Any damage caused by Capstone's negligence will be addressed promptly.
+
+12. Additional Charges
+Any changes to the approved scope of work or costs arising from unforeseen conditions will be billed on a time-and-materials basis with a standard 15% markup for overhead and profit. All additional charges will be communicated and approved before work proceeds.
+
+13. Entire Agreement
+This document, together with the associated proposal, constitutes the entire agreement between the parties. Any prior verbal or written understandings are superseded by this agreement.
+
+14. Severability
+If any provision of this agreement is found to be invalid or unenforceable, the remaining provisions will continue in full force and effect.
+
+15. Acceptance
+By signing or digitally approving this agreement, the Customer confirms they have read, understood, and agreed to these terms and conditions.`,
   interiorGeneralNotes: 'All interior surfaces will be fully prepared prior to painting. This includes filling nail holes, minor caulking, and dust protection for furniture and flooring. Premium quality materials will be used.',
   exteriorGeneralNotes: 'Exterior preparation includes pressure washing to remove dirt and loose paint, scraping peeling areas, priming bare wood, and caulking joints as specified. Premium weather-resistant paint will be applied.',
-  woodStainingGeneralNotes: 'Wood surfaces will be thoroughly cleaned/stripped if needed. Staining will be applied in thin, even coats to preserve wood grain and protect from elements.',
+  woodStainingGeneralNotes: `Wood Staining General Notes & Project Expectations
+
+Surface Preparation - Capstone will:
+• Wash wood surfaces to remove dirt, dust, and mildew, ensuring the stain can adhere properly. (if selected)
+• Lightly sand surfaces to remove rough areas and promote adhesion. (if selected)
+• Strip existing coatings where required for a proper, consistent finish. (if selected)
+• Apply wood reviver/brightener to restore the wood's natural colour and open the grain for better stain absorption. (if selected)
+
+Customer Responsibilities:
+• Remove or relocate any items that could obstruct access to the selected staining areas, including furniture, planters, equipment, and personal belongings. Capstone will not be responsible for items left in the work area.
+• Confirm all stain colour and product selections prior to work beginning. Changes to colour or product after work has begun may result in additional charges.
+
+Dry Time & Weather Requirements:
+Wood staining requires a minimum of 2 consecutive days of dry, sunny weather to ensure surfaces are fully dry prior to application. Capstone will schedule work accordingly and will communicate any weather-related delays to the customer promptly.
+
+Site Protection - Capstone will:
+• Set up drop cloths to protect landscaping, plants, and surrounding surfaces.
+• Mask or cover nearby brick, siding, windows, and composite decking to prevent drips or spills.
+
+Unforeseen Conditions:
+Any unforeseen damage or repairs discovered during the project that fall outside the original scope will be communicated to the customer before proceeding and will be subject to an additional charge unless otherwise stated in the proposal.
+
+Daily Set-up and Clean-up:
+Clean up all work areas daily and upon final completion, leaving the property free from job-related debris and materials. Crew will organize all materials before leaving each day.
+
+Final Walkthrough:
+Your project supervisor will perform a final walkthrough upon completion to ensure customer satisfaction and address any remaining questions or concerns. Any required touch-ups will be completed within a reasonable timeframe following the walkthrough.
+
+Deposit & Payment Information:
+Deposit — due upon approval of proposal (30%):
+Payable by e-transfer to pay@capstonepainting.ca (recipient: Capstone Painting Inc.)
+
+Additional payment options:
+• Cheque made out to Capstone Painting Inc.
+• Credit card (2.4% surcharge)
+• Cash
+
+Deposit must be paid to hold your place in our schedule. No work will begin until the deposit is received.
+The remaining balance is due upon project completion, prior to the final walkthrough sign-off.`,
   brickStainingGeneralNotes: 'Brick surfaces will be cleaned and masonry-grade staining or breathing silicate coatings will be applied to guarantee high durability without trapping moisture.',
   realProducts: DEFAULT_REAL_PRODUCTS,
   rates: DEFAULT_PROPOSAL_RATES,
   discountPresets: [
+    { id: 'dp-lawn-sign', name: 'Lawn Sign for 2 Weeks', amount: 100, type: 'fixed' },
+    { id: 'dp-same-day', name: 'Same Day Scheduling', amount: 5, type: 'percentage' },
+    { id: 'dp-flyer', name: 'Flyer Discount', amount: 200, type: 'fixed' },
+    { id: 'dp-winter', name: 'Winter Preschedule', amount: 5, type: 'percentage' },
     { id: 'dp-1', name: 'Referral Special (10%)', amount: 10, type: 'percentage' },
     { id: 'dp-2', name: 'Spring Promo ($250 Off)', amount: 250, type: 'fixed' },
     { id: 'dp-3', name: 'Senior Discount (5%)', amount: 5, type: 'percentage' },

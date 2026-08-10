@@ -26,7 +26,7 @@ interface SettingsPanelProps {
   onCheckAuth?: () => Promise<void>;
   clients?: any[];
   projects?: any[];
-  onImportBackup?: (clients: any[], projects: any[]) => Promise<void>;
+  onImportBackup?: (clients: any[], projects: any[]) => Promise<{ success?: boolean; message?: string } | void>;
   onPushToSupabase?: () => Promise<{ success: boolean; message: string }>;
 }
 
@@ -149,10 +149,10 @@ export default function SettingsPanel({
         }
         
         if (onImportBackup) {
-          await onImportBackup(parsed.clients, parsed.projects);
+          const res = (await onImportBackup(parsed.clients, parsed.projects)) as { success?: boolean; message?: string } | undefined;
           setImportStatus({
-            success: true,
-            text: `Successfully restored backup with ${parsed.clients.length} clients and ${parsed.projects.length} projects! Your local workspace has been updated.`
+            success: res?.success !== false,
+            text: res?.message || `Successfully restored backup with ${parsed.clients.length} clients and ${parsed.projects.length} projects! CRM database updated.`
           });
         }
       } catch (err: any) {
@@ -1322,44 +1322,20 @@ ON CONFLICT (email) DO NOTHING;`;
                 You are successfully logged into Supabase Auth, but your user account email is currently <strong>unauthorized</strong> to access CRM resources because it is not registered in your database's <code>authorized_users</code> table yet.
               </p>
 
-              {/* Method A: Quick Self-Authorize */}
-              <div className="p-3 bg-neutral-900 border border-neutral-800 rounded-xl space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[8px] font-bold rounded uppercase">Method A</span>
-                  <h4 className="text-[11px] font-bold text-white">⚡ Quick Self-Authorize</h4>
+              {/* Restricted Self-Authorization Notice */}
+              <div className="p-3.5 bg-amber-950/20 border border-amber-900/40 rounded-xl space-y-2">
+                <div className="flex items-center gap-2 text-amber-400">
+                  <ShieldAlert className="w-4 h-4 shrink-0" />
+                  <h4 className="text-[11px] font-bold">Access Restricted — Pending Administrator Approval</h4>
                 </div>
-                <p className="text-[10px] text-zinc-500 leading-normal">
-                  If your database tables are already initialized, register and authorize your email instantly:
+                <p className="text-[10px] text-zinc-400 leading-relaxed">
+                  Self-authorization is disabled to protect financial figures and proposals. An existing CRM administrator must grant your email (<span className="text-white font-mono">{supabaseUser.email}</span>) permission in the Admin Access Portal before full numbers and estimates will be accessible.
                 </p>
-                <button
-                  onClick={handleSelfAuthorize}
-                  disabled={selfAuthLoading}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold rounded-lg transition disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
-                >
-                  {selfAuthLoading ? (
-                    <>
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                      Authorizing...
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck className="w-3 h-3" />
-                      Self-Authorize My Account
-                    </>
-                  )}
-                </button>
-
-                {userActionError && (
-                  <div className="p-2.5 bg-red-950/20 border border-red-950/30 text-red-400 text-[10px] rounded-lg mt-2 leading-relaxed font-sans">
-                    {userActionError}
-                  </div>
-                )}
-
-                {userActionSuccess && (
-                  <div className="p-2.5 bg-emerald-950/20 border border-emerald-900/50 text-emerald-400 text-[10px] rounded-lg mt-2 leading-relaxed font-sans">
-                    {userActionSuccess}
-                  </div>
-                )}
+                <div className="pt-1">
+                  <span className="inline-block text-[9px] bg-neutral-900 text-amber-300 font-mono font-semibold px-2.5 py-1 rounded-lg border border-amber-900/30">
+                    Contact Administrator: daniel@capstonepainting.ca
+                  </span>
+                </div>
               </div>
 
               {/* Method B: SQL DDL */}
@@ -2615,6 +2591,174 @@ ON CONFLICT (email) DO NOTHING;`;
                                 }}
                                 className="p-1.5 bg-red-950/20 text-red-400 hover:bg-red-900/30 rounded border border-red-950/50 cursor-pointer transition"
                                 title="Delete Area Preset"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* SECTION 8: PAINT PRODUCTS CATALOG & MATERIAL PRICING */}
+            <div className="space-y-4 pt-6 border-t border-neutral-850">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-xs font-bold text-blue-400 uppercase font-mono tracking-wider">8. Paint Products Catalog & Material Specifications</h4>
+                  <p className="text-zinc-500 text-[11px] mt-0.5">Manage real paint products (brands, sheens, prices, coverage) that can be assigned directly to project rooms and surfaces.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      saveProposalSettings({
+                        ...proposalSettings,
+                        realProducts: DEFAULT_REAL_PRODUCTS
+                      });
+                    }}
+                    className="px-3 py-1.5 bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 text-zinc-400 hover:text-white text-xs font-semibold rounded-lg transition flex items-center gap-1.5 cursor-pointer font-mono"
+                  >
+                    Reset Defaults
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const currentProds = proposalSettings.realProducts || DEFAULT_REAL_PRODUCTS;
+                      const newProd: RealProduct = {
+                        id: `rp-${Date.now()}`,
+                        name: 'New Paint Product',
+                        defaultSheen: 'Eggshell',
+                        categories: ['interior'],
+                        price: 75,
+                        coverage: 350
+                      };
+                      saveProposalSettings({
+                        ...proposalSettings,
+                        realProducts: [...currentProds, newProd]
+                      });
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer font-mono"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Add Paint Product
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto border border-neutral-800 rounded-xl bg-neutral-950">
+                <table className="w-full text-left font-mono text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-neutral-900 text-zinc-300 text-[10px] uppercase font-bold tracking-wider border-b border-neutral-800">
+                      <th className="p-3 border-r border-neutral-800">Brand / Product Name</th>
+                      <th className="p-3 border-r border-neutral-800">Default Sheen</th>
+                      <th className="p-3 border-r border-neutral-800">Categories</th>
+                      <th className="p-3 border-r border-neutral-800">Price ($/gal)</th>
+                      <th className="p-3 border-r border-neutral-800">Coverage (sqft/gal)</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-850 text-zinc-200">
+                    {(proposalSettings.realProducts || DEFAULT_REAL_PRODUCTS).length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-6 text-center text-zinc-500 text-xs italic">
+                          No paint products defined yet. Click "+ Add Paint Product" to add one.
+                        </td>
+                      </tr>
+                    ) : (
+                      (proposalSettings.realProducts || DEFAULT_REAL_PRODUCTS).map((prod, idx) => {
+                        const currentProds = proposalSettings.realProducts || DEFAULT_REAL_PRODUCTS;
+                        return (
+                          <tr key={prod.id} className="hover:bg-neutral-900/50 transition">
+                            <td className="p-2.5 border-r border-neutral-800">
+                              <input
+                                type="text"
+                                value={prod.name}
+                                onChange={(e) => {
+                                  const updated = [...currentProds];
+                                  updated[idx] = { ...prod, name: e.target.value };
+                                  saveProposalSettings({ ...proposalSettings, realProducts: updated });
+                                }}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-sans font-semibold"
+                                placeholder="e.g. Benjamin Moore Regal Select"
+                              />
+                            </td>
+                            <td className="p-2.5 border-r border-neutral-800">
+                              <input
+                                type="text"
+                                value={prod.defaultSheen}
+                                onChange={(e) => {
+                                  const updated = [...currentProds];
+                                  updated[idx] = { ...prod, defaultSheen: e.target.value };
+                                  saveProposalSettings({ ...proposalSettings, realProducts: updated });
+                                }}
+                                className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-zinc-300 font-sans"
+                                placeholder="e.g. Eggshell"
+                              />
+                            </td>
+                            <td className="p-2.5 border-r border-neutral-800">
+                              <div className="flex items-center gap-2 text-[10px] font-sans">
+                                {(['interior', 'exterior', 'deck'] as const).map(cat => {
+                                  const isSelected = (prod.categories || []).includes(cat);
+                                  return (
+                                    <label key={cat} className="flex items-center gap-1 cursor-pointer text-zinc-400 hover:text-white capitalize">
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={(e) => {
+                                          const updated = [...currentProds];
+                                          const newCats = e.target.checked
+                                            ? [...(prod.categories || []), cat]
+                                            : (prod.categories || []).filter(c => c !== cat);
+                                          updated[idx] = { ...prod, categories: newCats };
+                                          saveProposalSettings({ ...proposalSettings, realProducts: updated });
+                                        }}
+                                        className="rounded border-neutral-700 text-blue-500 focus:ring-0"
+                                      />
+                                      {cat}
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </td>
+                            <td className="p-2.5 border-r border-neutral-800">
+                              <div className="flex items-center gap-1">
+                                <span className="text-zinc-500 font-bold">$</span>
+                                <input
+                                  type="number"
+                                  value={prod.price || 80}
+                                  onChange={(e) => {
+                                    const updated = [...currentProds];
+                                    updated[idx] = { ...prod, price: parseFloat(e.target.value) || 0 };
+                                    saveProposalSettings({ ...proposalSettings, realProducts: updated });
+                                  }}
+                                  className="w-20 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-emerald-400 font-mono font-bold"
+                                />
+                              </div>
+                            </td>
+                            <td className="p-2.5 border-r border-neutral-800">
+                              <input
+                                type="number"
+                                value={prod.coverage || 350}
+                                onChange={(e) => {
+                                  const updated = [...currentProds];
+                                  updated[idx] = { ...prod, coverage: parseInt(e.target.value, 10) || 350 };
+                                  saveProposalSettings({ ...proposalSettings, realProducts: updated });
+                                }}
+                                className="w-20 bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-xs text-white font-mono"
+                              />
+                            </td>
+                            <td className="p-2.5 text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = currentProds.filter(p => p.id !== prod.id);
+                                  saveProposalSettings({ ...proposalSettings, realProducts: updated });
+                                }}
+                                className="p-1.5 bg-red-950/20 text-red-400 hover:bg-red-900/30 rounded border border-red-950/50 cursor-pointer transition"
+                                title="Delete Product"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>

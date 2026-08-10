@@ -5,6 +5,7 @@ import { sendProposalEmail } from '../gmailService';
 import { generateProposalPDF, generateReceiptPDF } from '../pdfGenerator';
 import { uploadProjectPhotoToSupabaseBucket } from '../supabaseService';
 import { getUniqueRoomName } from '../utils/roomUtils';
+import { calculateRoomPricing, getAreaCoatMultiplier, getItemCoatHours, getProductForSurface, DEFAULT_REAL_PRODUCTS } from '../utils/pricing';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import { 
   ArrowLeft, 
@@ -1409,396 +1410,37 @@ export default function ProjectDetails({
   // DYNAMIC ESTIMATOR CALCULATION ENGINE
   // -------------------------------------------------------------
   const liveSummary = useMemo(() => {
-    // If the project ID is 26061001 and we are viewing initial state, lock precisely to the mockup numbers!
-    const isMockBaseline = project.id === '26061001' && 
-                           rooms.length === 1 && 
-                           rooms[0].name === 'Entrance' &&
-                           rooms[0].length === 15 &&
-                           rooms[0].width === 12 &&
-                           rooms[0].height === 9 &&
-                           hourlyLaborRate === 101.13;
-
-    if (isMockBaseline) {
-      return {
-        hours: 46.0,
-        laborCost: 4649.00,
-        materialCost: 979.00,
-        subtotal: 5628.04,
-        hst: 731.65,
-        total: 6359.69,
-        deposit: 1907.91,
-        balance: 4451.78,
-        roomCosts: {
-          'room-entrance': 1076.00
-        }
-      };
-    }
-
-    // Otherwise, execute our comprehensive math formula!
-    const r = proposalSettings?.rates || {
-      hourlyLaborRate: 85.00,
-      setupHours: 5.0,
-      setupMaterials: 50.00,
-      
-      wallsSpeed: 150,
-      wallsCoverage: 350,
-      wallsMaterialCost: 45,
-      
-      ceilingsSpeed: 140,
-      ceilingsCoverage: 350,
-      ceilingsMaterialCost: 40,
-      
-      baseboardsSpeed: 40,
-      baseboardsCoverage: 200,
-      baseboardsMaterialCost: 25,
-      
-      windowsHoursPerCoat: 0.75,
-      windowsMaterialCostPerCoat: 7.00,
-      
-      doorsHoursPerCoat: 0.8,
-      doorsMaterialCostPerCoat: 9.00,
-      
-      doorFramesHoursPerCoat: 0.5,
-      doorFramesMaterialCostPerCoat: 5.00,
-
-      sidingSpeed: 180,
-      sidingCoverage: 350,
-      sidingMaterialCost: 55,
-      
-      brickSpeed: 120,
-      brickCoverage: 250,
-      brickMaterialCost: 65,
-      
-      porchFloorSpeed: 150,
-      porchFloorCoverage: 350,
-      porchFloorMaterialCost: 50,
-      
-      soffitsSpeed: 50,
-      soffitsCoverage: 200,
-      soffitsMaterialCost: 40,
-      
-      guttersSpeed: 60,
-      guttersCoverage: 250,
-      guttersMaterialCost: 40,
-      
-      fasciaSpeed: 60,
-      fasciaCoverage: 250,
-      fasciaMaterialCost: 40,
-      
-      trimsSpeed: 60,
-      trimsCoverage: 250,
-      trimsMaterialCost: 40,
-      
-      garageHoursPerCoat: 0.75,
-      garageMaterialCostPerCoat: 7.50,
-      
-      extDoorsHoursPerCoat: 0.75,
-      extDoorsMaterialCostPerCoat: 7.50,
-      
-      windowsFixedHoursPerCoat: 0.50,
-      windowsFixedMaterialCostPerCoat: 6.00,
-      
-      railingsSpeed: 40,
-      railingsCoverage: 200,
-      railingsMaterialCost: 35,
-      
-      shuttersHoursPerCoat: 0.50,
-      shuttersMaterialCostPerCoat: 5.00,
-
-      washingSpeed: 200,
-      washingMaterialCostPerSqft: 0.08,
-      
-      strippingSpeed: 100,
-      strippingMaterialCostPerSqft: 0.175,
-      
-      revivingSpeed: 150,
-      revivingMaterialCostPerSqft: 0.10,
-      
-      sandingSpeed: 80,
-      sandingMaterialCostFlat: 30,
-      
-      stainingSpeed: 80,
-      stainingCoverage: 250,
-      stainingMaterialCost: 60,
-    };
-
     let totalHours = 0;
     let totalMaterials = 0;
     const roomCosts: Record<string, number> = {};
     const roomHours: Record<string, number> = {};
     const roomMaterials: Record<string, number> = {};
 
+    const rates = proposalSettings?.rates;
+    const realProducts = proposalSettings?.realProducts || DEFAULT_REAL_PRODUCTS;
+
     rooms.forEach(room => {
-      let rHours = 0;
-      let rMaterials = 0;
+      const breakdown = calculateRoomPricing(room, rates, realProducts);
+      roomCosts[room.id] = breakdown.totalCost;
+      roomHours[room.id] = breakdown.hours;
+      roomMaterials[room.id] = breakdown.materialCost;
 
-      const rL = Number(room.length) || 12;
-      const rW = Number(room.width) || 12;
-      const rH = Number(room.height) || 9;
-
-      // Area calculations
-      const wArea = 2 * rH * (rL + rW);
-      const cArea = rL * rW;
-      const perimeter = 2 * (rL + rW);
-
-      const category = room.category || 'interior';
-
-      if (category === 'exterior') {
-        // Siding
-        const rSiding = (room as any)['ext-siding'] || { checked: false, coats: 2 };
-        if (rSiding.checked) {
-          rHours += (wArea / r.sidingSpeed) * rSiding.coats;
-          rMaterials += (wArea / r.sidingCoverage) * rSiding.coats * r.sidingMaterialCost;
-        }
-
-        // Brick Stain
-        const rBrick = (room as any)['ext-brick-stain'] || { checked: false, coats: 2 };
-        if (rBrick.checked) {
-          rHours += (wArea / r.brickSpeed) * rBrick.coats;
-          rMaterials += (wArea / r.brickCoverage) * rBrick.coats * r.brickMaterialCost;
-        }
-
-        // Porch Floor
-        const rPorchFloor = (room as any)['ext-porch-floor'] || { checked: false, coats: 2 };
-        if (rPorchFloor.checked) {
-          rHours += (cArea / r.porchFloorSpeed) * rPorchFloor.coats;
-          rMaterials += (cArea / r.porchFloorCoverage) * rPorchFloor.coats * r.porchFloorMaterialCost;
-        }
-
-        // Soffits
-        const rSoffits = (room as any)['ext-soffits'] || { checked: false, coats: 2 };
-        if (rSoffits.checked) {
-          rHours += (perimeter / r.soffitsSpeed) * rSoffits.coats;
-          rMaterials += (perimeter / r.soffitsCoverage) * rSoffits.coats * r.soffitsMaterialCost;
-        }
-
-        // Gutters
-        const rGutters = (room as any)['ext-gutters'] || { checked: false, coats: 2 };
-        if (rGutters.checked) {
-          rHours += (perimeter / r.guttersSpeed) * rGutters.coats;
-          rMaterials += (perimeter / r.guttersCoverage) * rGutters.coats * r.guttersMaterialCost;
-        }
-
-        // Fascia
-        const rFascia = (room as any)['ext-fascia'] || { checked: false, coats: 2 };
-        if (rFascia.checked) {
-          rHours += (perimeter / r.fasciaSpeed) * rFascia.coats;
-          rMaterials += (perimeter / r.fasciaCoverage) * rFascia.coats * r.fasciaMaterialCost;
-        }
-
-        // Trims
-        const rTrims = (room as any)['ext-trims'] || { checked: false, coats: 2 };
-        if (rTrims.checked) {
-          rHours += (perimeter / r.trimsSpeed) * rTrims.coats;
-          rMaterials += (perimeter / r.trimsCoverage) * rTrims.coats * r.trimsMaterialCost;
-        }
-
-        // Garage Door
-        const rGarage = (room as any)['ext-garage-door'] || { checked: false, qty: 1, coats: 2 };
-        if (rGarage.checked) {
-          const qty = Number(rGarage.qty) || 1;
-          rHours += qty * r.garageHoursPerCoat * rGarage.coats;
-          rMaterials += qty * r.garageMaterialCostPerCoat * rGarage.coats;
-        }
-
-        // Front Doors
-        const rExtDoors = (room as any)['ext-doors'] || { checked: false, qty: 1, coats: 2 };
-        if (rExtDoors.checked) {
-          const qty = Number(rExtDoors.qty) || 1;
-          rHours += qty * r.extDoorsHoursPerCoat * rExtDoors.coats;
-          rMaterials += qty * r.extDoorsMaterialCostPerCoat * rExtDoors.coats;
-        }
-
-        // Windows Fixed
-        const rExtWin = (room as any)['ext-windows-fixed'] || { checked: false, qty: 2, coats: 2 };
-        if (rExtWin.checked) {
-          const qty = Number(rExtWin.qty) || 2;
-          rHours += qty * r.windowsFixedHoursPerCoat * rExtWin.coats;
-          rMaterials += qty * r.windowsFixedMaterialCostPerCoat * rExtWin.coats;
-        }
-
-        // Railings
-        const rRailings = (room as any)['ext-railings'] || { checked: false, coats: 2 };
-        if (rRailings.checked) {
-          rHours += (perimeter / r.railingsSpeed) * rRailings.coats;
-          rMaterials += (perimeter / r.railingsCoverage) * rRailings.coats * r.railingsMaterialCost;
-        }
-
-        // Shutters
-        const rShutters = (room as any)['ext-shutters'] || { checked: false, qty: 2, coats: 2 };
-        if (rShutters.checked) {
-          const qty = Number(rShutters.qty) || 2;
-          rHours += qty * r.shuttersHoursPerCoat * rShutters.coats;
-          rMaterials += qty * r.shuttersMaterialCostPerCoat * rShutters.coats;
-        }
-      } else if (category === 'deck') {
-        // Washing
-        const rWashing = (room as any)['washing'] || { checked: false, coats: 1 };
-        if (rWashing.checked) {
-          rHours += cArea / r.washingSpeed;
-          rMaterials += cArea * r.washingMaterialCostPerSqft;
-        }
-
-        // Stripping
-        const rStripping = (room as any)['stripping'] || { checked: false, coats: 1 };
-        if (rStripping.checked) {
-          rHours += cArea / r.strippingSpeed;
-          rMaterials += cArea * r.strippingMaterialCostPerSqft;
-        }
-
-        // Reviving
-        const rReviving = (room as any)['reviving'] || { checked: false, coats: 1 };
-        if (rReviving.checked) {
-          rHours += cArea / r.revivingSpeed;
-          rMaterials += cArea * r.revivingMaterialCostPerSqft;
-        }
-
-        // Sanding
-        const rSanding = (room as any)['sanding'] || { checked: false, coats: 1 };
-        if (rSanding.checked) {
-          rHours += cArea / r.sandingSpeed;
-          rMaterials += r.sandingMaterialCostFlat;
-        }
-
-        // Staining
-        const rStaining = (room as any)['staining'] || { checked: false, coats: 2 };
-        if (rStaining.checked) {
-          rHours += (cArea / r.stainingSpeed) * rStaining.coats;
-          rMaterials += (cArea / r.stainingCoverage) * rStaining.coats * r.stainingMaterialCost;
-        }
-      } else {
-        // Extract specific selections with proper default checked state matching UI
-        const rWalls = (room as any).walls || { checked: true, qty: 'auto', coats: 2 };
-        const rCeilings = (room as any).ceilings || { checked: true, qty: 'auto', coats: 2 };
-        const rBaseboards = (room as any).baseboards || { checked: true, qty: 'auto', coats: 2 };
-        const rWindows = (room as any).windows || { checked: false, qty: 2, coats: 2 };
-        const rDoors = (room as any).doors || { checked: false, qty: 2, coats: 2 };
-        const rDoorFrames = (room as any).doorFrames || { checked: false, qty: 2, coats: 2 };
-
-        // Walls
-        if (rWalls.checked) {
-          rHours += (wArea / r.wallsSpeed) * rWalls.coats;
-          rMaterials += (wArea / r.wallsCoverage) * rWalls.coats * r.wallsMaterialCost;
-        }
-        
-        // Ceilings
-        if (rCeilings.checked) {
-          rHours += (cArea / r.ceilingsSpeed) * rCeilings.coats;
-          rMaterials += (cArea / r.ceilingsCoverage) * rCeilings.coats * r.ceilingsMaterialCost;
-        }
-
-        // Baseboards
-        if (rBaseboards.checked) {
-          rHours += (perimeter / r.baseboardsSpeed) * rBaseboards.coats;
-          rMaterials += (perimeter / r.baseboardsCoverage) * rBaseboards.coats * r.baseboardsMaterialCost;
-        }
-
-        // Windows
-        if (rWindows.checked) {
-          const qty = Number(rWindows.qty) || 0;
-          rHours += qty * r.windowsHoursPerCoat * rWindows.coats;
-          rMaterials += qty * r.windowsMaterialCostPerCoat * rWindows.coats;
-        }
-
-        // Doors
-        if (rDoors.checked) {
-          const qty = Number(rDoors.qty) || 0;
-          rHours += qty * r.doorsHoursPerCoat * rDoors.coats;
-          rMaterials += qty * r.doorsMaterialCostPerCoat * rDoors.coats;
-        }
-
-        // Door Frames
-        if (rDoorFrames.checked) {
-          const qty = Number(rDoorFrames.qty) || 0;
-          rHours += qty * r.doorFramesHoursPerCoat * rDoorFrames.coats;
-          rMaterials += qty * r.doorFramesMaterialCostPerCoat * rDoorFrames.coats;
-        }
-      }
-
-      // Custom Areas Calculation
-      if ((room as any).customAreas) {
-        (room as any).customAreas.forEach((cAreaItem: any) => {
-          if (cAreaItem.checked) {
-            const coats = Number(cAreaItem.coats) || 2;
-            const qty = cAreaItem.qty === 'auto' ? 1 : (Number(cAreaItem.qty) || 1);
-            let hours = 0;
-            let materials = 0;
-
-            const speed = cAreaItem.speed || 150;
-            const coverage = cAreaItem.coverage || 350;
-            const matCost = cAreaItem.materialCost || 25;
-
-            if (cAreaItem.calcType === 'wall') {
-              hours = (wArea / speed) * coats;
-              materials = (wArea / coverage) * coats * matCost;
-            } else if (cAreaItem.calcType === 'ceiling') {
-              hours = (cArea / speed) * coats;
-              materials = (cArea / coverage) * coats * matCost;
-            } else if (cAreaItem.calcType === 'perimeter') {
-              hours = (perimeter / speed) * coats;
-              materials = (perimeter / coverage) * coats * matCost;
-            } else {
-              // item
-              hours = qty * 0.75 * coats;
-              materials = qty * 7.00 * coats;
-            }
-
-            rHours += hours;
-            rMaterials += materials;
-          }
-        });
-      }
-
-      // Surface Category Tasks Calculation
-      const roomTasks = room.surfaceTasks || [];
-      roomTasks.forEach((task) => {
-        if (!task.completed && !task.isOption) {
-          let tHours = 0.75;
-          let tMat = 12.00;
-
-          const textLower = (task.text || '').toLowerCase();
-          const catLower = (task.surfaceCategory || '').toLowerCase();
-
-          if (textLower.includes('wash') || textLower.includes('clean')) {
-            tHours = 0.5;
-            tMat = 8.00;
-          } else if (textLower.includes('patch') || textLower.includes('repair') || textLower.includes('drywall')) {
-            tHours = 1.0;
-            tMat = 15.00;
-          } else if (textLower.includes('prime') || textLower.includes('stain') || textLower.includes('strip')) {
-            tHours = 1.0;
-            tMat = 20.00;
-          } else if (textLower.includes('sand')) {
-            tHours = 0.5;
-            tMat = 10.00;
-          }
-
-          rHours += tHours;
-          rMaterials += tMat;
-        }
-      });
-
-      // Calculate room subtotal
-      const rLabor = rHours * hourlyLaborRate;
-      const rTotal = rLabor + rMaterials;
-      
-      roomCosts[room.id] = Math.round(rTotal);
-      roomHours[room.id] = parseFloat(rHours.toFixed(1));
-      roomMaterials[room.id] = Math.round(rMaterials);
-      
       if (!room.isOption) {
-        totalHours += rHours;
-        totalMaterials += rMaterials;
+        totalHours += breakdown.hours;
+        totalMaterials += breakdown.materialCost;
       }
     });
 
-    // Add a baseline weather/surface preparation factor for any complex workspace
+    // Add baseline site setup & prep work base if project has items
     if (totalHours > 0) {
-      totalHours += r.setupHours; // Standard setup hours site set-up and prep work base
-      totalMaterials += r.setupMaterials; // Paint sundries, masking paper, caulking
+      const setupH = rates?.setupHours ?? 5.0;
+      const setupM = rates?.setupMaterials ?? 50.0;
+      totalHours += setupH;
+      totalMaterials += setupM;
     }
 
-    const subtotal = (totalHours * hourlyLaborRate) + totalMaterials;
+    const laborCost = Math.round(totalHours * hourlyLaborRate);
+    const subtotal = laborCost + Math.round(totalMaterials);
     const discountedSubtotal = Math.max(0, subtotal - discount);
     const hst = discountedSubtotal * taxRate;
     const total = discountedSubtotal + hst;
@@ -1807,7 +1449,7 @@ export default function ProjectDetails({
 
     return {
       hours: parseFloat(totalHours.toFixed(1)),
-      laborCost: Math.round(totalHours * hourlyLaborRate),
+      laborCost,
       materialCost: Math.round(totalMaterials),
       subtotal: parseFloat(subtotal.toFixed(2)),
       discount,
@@ -1821,7 +1463,7 @@ export default function ProjectDetails({
       roomMaterials
     };
 
-  }, [rooms, hourlyLaborRate, taxRate, discount]);
+  }, [rooms, hourlyLaborRate, taxRate, discount, proposalSettings]);
 
   const totalPaid = useMemo(() => {
     return (installments || [])
@@ -1835,92 +1477,8 @@ export default function ProjectDetails({
 
   // Helper to calculate cost details for individual sub-selection items inside a room
   const calculateSubItem = (room: RoomSpec, subKey: string, coats: number, qty: any) => {
-    const r = proposalSettings?.rates || {
-      hourlyLaborRate: 85.00,
-      setupHours: 5.0,
-      setupMaterials: 50.00,
-      
-      wallsSpeed: 150,
-      wallsCoverage: 350,
-      wallsMaterialCost: 45,
-      
-      ceilingsSpeed: 140,
-      ceilingsCoverage: 350,
-      ceilingsMaterialCost: 40,
-      
-      baseboardsSpeed: 40,
-      baseboardsCoverage: 200,
-      baseboardsMaterialCost: 25,
-      
-      windowsHoursPerCoat: 0.75,
-      windowsMaterialCostPerCoat: 7.00,
-      
-      doorsHoursPerCoat: 0.8,
-      doorsMaterialCostPerCoat: 9.00,
-      
-      doorFramesHoursPerCoat: 0.5,
-      doorFramesMaterialCostPerCoat: 5.00,
-
-      sidingSpeed: 180,
-      sidingCoverage: 350,
-      sidingMaterialCost: 55,
-      
-      brickSpeed: 120,
-      brickCoverage: 250,
-      brickMaterialCost: 65,
-      
-      porchFloorSpeed: 150,
-      porchFloorCoverage: 350,
-      porchFloorMaterialCost: 50,
-      
-      soffitsSpeed: 50,
-      soffitsCoverage: 200,
-      soffitsMaterialCost: 40,
-      
-      guttersSpeed: 60,
-      guttersCoverage: 250,
-      guttersMaterialCost: 40,
-      
-      fasciaSpeed: 60,
-      fasciaCoverage: 250,
-      fasciaMaterialCost: 40,
-      
-      trimsSpeed: 60,
-      trimsCoverage: 250,
-      trimsMaterialCost: 40,
-      
-      garageHoursPerCoat: 0.75,
-      garageMaterialCostPerCoat: 7.50,
-      
-      extDoorsHoursPerCoat: 0.75,
-      extDoorsMaterialCostPerCoat: 7.50,
-      
-      windowsFixedHoursPerCoat: 0.50,
-      windowsFixedMaterialCostPerCoat: 6.00,
-      
-      railingsSpeed: 40,
-      railingsCoverage: 200,
-      railingsMaterialCost: 35,
-      
-      shuttersHoursPerCoat: 0.50,
-      shuttersMaterialCostPerCoat: 5.00,
-
-      washingSpeed: 200,
-      washingMaterialCostPerSqft: 0.08,
-      
-      strippingSpeed: 100,
-      strippingMaterialCostPerSqft: 0.175,
-      
-      revivingSpeed: 150,
-      revivingMaterialCostPerSqft: 0.10,
-      
-      sandingSpeed: 80,
-      sandingMaterialCostFlat: 30,
-      
-      stainingSpeed: 80,
-      stainingCoverage: 250,
-      stainingMaterialCost: 60,
-    };
+    const r = proposalSettings?.rates;
+    const realProducts = proposalSettings?.realProducts || DEFAULT_REAL_PRODUCTS;
 
     const rL = Number(room.length) || 12;
     const rW = Number(room.width) || 12;
@@ -1933,104 +1491,195 @@ export default function ProjectDetails({
     let hours = 0;
     let materials = 0;
 
+    const coatMult = getAreaCoatMultiplier(coats);
+    const assignedProd = getProductForSurface(subKey, room, realProducts);
+
     switch (subKey) {
       // Interior
-      case 'walls':
-        hours = (wArea / r.wallsSpeed) * coats;
-        materials = (wArea / r.wallsCoverage) * coats * r.wallsMaterialCost;
+      case 'walls': {
+        const speed = r?.wallsSpeed ?? 175;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.wallsCoverage ?? 350;
+        const matCost = assignedProd?.pricePerGal ?? r?.wallsMaterialCost ?? 78;
+        hours = (wArea / speed) * coatMult;
+        materials = (wArea / coverage) * coatMult * matCost;
         break;
-      case 'ceilings':
-        hours = (cArea / r.ceilingsSpeed) * coats;
-        materials = (cArea / r.ceilingsCoverage) * coats * r.ceilingsMaterialCost;
+      }
+      case 'ceilings': {
+        const speed = r?.ceilingsSpeed ?? 100;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.ceilingsCoverage ?? 350;
+        const matCost = assignedProd?.pricePerGal ?? r?.ceilingsMaterialCost ?? 78;
+        hours = (cArea / speed) * coatMult;
+        materials = (cArea / coverage) * coatMult * matCost;
         break;
-      case 'baseboards':
-        hours = (perimeter / r.baseboardsSpeed) * coats;
-        materials = (perimeter / r.baseboardsCoverage) * coats * r.baseboardsMaterialCost;
+      }
+      case 'baseboards': {
+        const speed = r?.baseboardsSpeed ?? 65;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.baseboardsCoverage ?? 200;
+        const matCost = assignedProd?.pricePerGal ?? r?.baseboardsMaterialCost ?? 85;
+        hours = (perimeter / speed) * coatMult;
+        materials = (perimeter / coverage) * coatMult * matCost;
         break;
-      case 'windows':
-        hours = qty * r.windowsHoursPerCoat * coats;
-        materials = qty * r.windowsMaterialCostPerCoat * coats;
+      }
+      case 'windows': {
+        const q = Number(qty) || 0;
+        const hPerCoat = getItemCoatHours('windows', coats);
+        const matCostPerCoat = r?.windowsMaterialCostPerCoat ?? 7.00;
+        hours = q * hPerCoat * coats;
+        materials = q * matCostPerCoat * coats;
         break;
-      case 'doors':
-        hours = qty * r.doorsHoursPerCoat * coats;
-        materials = qty * r.doorsMaterialCostPerCoat * coats;
+      }
+      case 'doors': {
+        const q = Number(qty) || 0;
+        const hPerCoat = getItemCoatHours('doors', coats);
+        const matCostPerCoat = r?.doorsMaterialCostPerCoat ?? 9.00;
+        hours = q * hPerCoat * coats;
+        materials = q * matCostPerCoat * coats;
         break;
-      case 'doorFrames':
-        hours = qty * r.doorFramesHoursPerCoat * coats;
-        materials = qty * r.doorFramesMaterialCostPerCoat * coats;
+      }
+      case 'doorFrames': {
+        const q = Number(qty) || 0;
+        const hPerCoat = getItemCoatHours('doorFrames', coats);
+        const matCostPerCoat = r?.doorFramesMaterialCostPerCoat ?? 5.00;
+        hours = q * hPerCoat * coats;
+        materials = q * matCostPerCoat * coats;
         break;
+      }
 
       // Exterior
-      case 'ext-siding':
-        hours = (wArea / r.sidingSpeed) * coats;
-        materials = (wArea / r.sidingCoverage) * coats * r.sidingMaterialCost;
+      case 'ext-siding': {
+        const speed = r?.sidingSpeed ?? 180;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.sidingCoverage ?? 350;
+        const matCost = assignedProd?.pricePerGal ?? r?.sidingMaterialCost ?? 78;
+        hours = (wArea / speed) * coatMult;
+        materials = (wArea / coverage) * coatMult * matCost;
         break;
-      case 'ext-brick-stain':
-        hours = (wArea / r.brickSpeed) * coats;
-        materials = (wArea / r.brickCoverage) * coats * r.brickMaterialCost;
+      }
+      case 'ext-brick-stain': {
+        const speed = r?.brickSpeed ?? 120;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.brickCoverage ?? 250;
+        const matCost = assignedProd?.pricePerGal ?? r?.brickMaterialCost ?? 85;
+        hours = (wArea / speed) * coatMult;
+        materials = (wArea / coverage) * coatMult * matCost;
         break;
-      case 'ext-porch-floor':
-        hours = (cArea / r.porchFloorSpeed) * coats;
-        materials = (cArea / r.porchFloorCoverage) * coats * r.porchFloorMaterialCost;
+      }
+      case 'ext-porch-floor': {
+        const speed = r?.porchFloorSpeed ?? 150;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.porchFloorCoverage ?? 350;
+        const matCost = assignedProd?.pricePerGal ?? r?.porchFloorMaterialCost ?? 78;
+        hours = (cArea / speed) * coatMult;
+        materials = (cArea / coverage) * coatMult * matCost;
         break;
-      case 'ext-soffits':
-        hours = (perimeter / r.soffitsSpeed) * coats;
-        materials = (perimeter / r.soffitsCoverage) * coats * r.soffitsMaterialCost;
+      }
+      case 'ext-soffits': {
+        const speed = r?.soffitsSpeed ?? 50;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.soffitsCoverage ?? 200;
+        const matCost = assignedProd?.pricePerGal ?? r?.soffitsMaterialCost ?? 78;
+        hours = (perimeter / speed) * coatMult;
+        materials = (perimeter / coverage) * coatMult * matCost;
         break;
-      case 'ext-gutters':
-        hours = (perimeter / r.guttersSpeed) * coats;
-        materials = (perimeter / r.guttersCoverage) * coats * r.guttersMaterialCost;
+      }
+      case 'ext-gutters': {
+        const speed = r?.guttersSpeed ?? 60;
+        const coverage = r?.guttersCoverage ?? 250;
+        const matCost = r?.guttersMaterialCost ?? 40;
+        hours = (perimeter / speed) * coatMult;
+        materials = (perimeter / coverage) * coatMult * matCost;
         break;
-      case 'ext-fascia':
-        hours = (perimeter / r.fasciaSpeed) * coats;
-        materials = (perimeter / r.fasciaCoverage) * coats * r.fasciaMaterialCost;
+      }
+      case 'ext-fascia': {
+        const speed = r?.fasciaSpeed ?? 60;
+        const coverage = r?.fasciaCoverage ?? 250;
+        const matCost = r?.fasciaMaterialCost ?? 40;
+        hours = (perimeter / speed) * coatMult;
+        materials = (perimeter / coverage) * coatMult * matCost;
         break;
-      case 'ext-trims':
-        hours = (perimeter / r.trimsSpeed) * coats;
-        materials = (perimeter / r.trimsCoverage) * coats * r.trimsMaterialCost;
+      }
+      case 'ext-trims': {
+        const speed = r?.trimsSpeed ?? 60;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.trimsCoverage ?? 250;
+        const matCost = assignedProd?.pricePerGal ?? r?.trimsMaterialCost ?? 85;
+        hours = (perimeter / speed) * coatMult;
+        materials = (perimeter / coverage) * coatMult * matCost;
         break;
-      case 'ext-garage-door':
-        hours = qty * r.garageHoursPerCoat * coats;
-        materials = qty * r.garageMaterialCostPerCoat * coats;
+      }
+      case 'ext-garage-door': {
+        const q = Number(qty) || 1;
+        const hPerCoat = r?.garageHoursPerCoat ?? 0.75;
+        const mPerCoat = r?.garageMaterialCostPerCoat ?? 7.50;
+        hours = q * hPerCoat * coats;
+        materials = q * mPerCoat * coats;
         break;
-      case 'ext-doors':
-        hours = qty * r.extDoorsHoursPerCoat * coats;
-        materials = qty * r.extDoorsMaterialCostPerCoat * coats;
+      }
+      case 'ext-doors': {
+        const q = Number(qty) || 1;
+        const hPerCoat = r?.extDoorsHoursPerCoat ?? 0.75;
+        const mPerCoat = r?.extDoorsMaterialCostPerCoat ?? 7.50;
+        hours = q * hPerCoat * coats;
+        materials = q * mPerCoat * coats;
         break;
-      case 'ext-windows-fixed':
-        hours = qty * r.windowsFixedHoursPerCoat * coats;
-        materials = qty * r.windowsFixedMaterialCostPerCoat * coats;
+      }
+      case 'ext-windows-fixed': {
+        const q = Number(qty) || 2;
+        const hPerCoat = r?.windowsFixedHoursPerCoat ?? 0.50;
+        const mPerCoat = r?.windowsFixedMaterialCostPerCoat ?? 6.00;
+        hours = q * hPerCoat * coats;
+        materials = q * mPerCoat * coats;
         break;
-      case 'ext-railings':
-        hours = (perimeter / r.railingsSpeed) * coats;
-        materials = (perimeter / r.railingsCoverage) * coats * r.railingsMaterialCost;
+      }
+      case 'ext-railings': {
+        const speed = r?.railingsSpeed ?? 40;
+        const coverage = r?.railingsCoverage ?? 200;
+        const matCost = r?.railingsMaterialCost ?? 35;
+        hours = (perimeter / speed) * coatMult;
+        materials = (perimeter / coverage) * coatMult * matCost;
         break;
-      case 'ext-shutters':
-        hours = qty * r.shuttersHoursPerCoat * coats;
-        materials = qty * r.shuttersMaterialCostPerCoat * coats;
+      }
+      case 'ext-shutters': {
+        const q = Number(qty) || 2;
+        const hPerCoat = r?.shuttersHoursPerCoat ?? 0.50;
+        const mPerCoat = r?.shuttersMaterialCostPerCoat ?? 5.00;
+        hours = q * hPerCoat * coats;
+        materials = q * mPerCoat * coats;
         break;
+      }
 
       // Deck
-      case 'washing':
-        hours = cArea / r.washingSpeed;
-        materials = cArea * r.washingMaterialCostPerSqft;
+      case 'washing': {
+        const speed = r?.washingSpeed ?? 200;
+        const matCostSqft = r?.washingMaterialCostPerSqft ?? 0.08;
+        hours = cArea / speed;
+        materials = cArea * matCostSqft;
         break;
-      case 'stripping':
-        hours = cArea / r.strippingSpeed;
-        materials = cArea * r.strippingMaterialCostPerSqft;
+      }
+      case 'stripping': {
+        const speed = r?.strippingSpeed ?? 100;
+        const matCostSqft = r?.strippingMaterialCostPerSqft ?? 0.175;
+        hours = cArea / speed;
+        materials = cArea * matCostSqft;
         break;
-      case 'reviving':
-        hours = cArea / r.revivingSpeed;
-        materials = cArea * r.revivingMaterialCostPerSqft;
+      }
+      case 'reviving': {
+        const speed = r?.revivingSpeed ?? 150;
+        const matCostSqft = r?.revivingMaterialCostPerSqft ?? 0.10;
+        hours = cArea / speed;
+        materials = cArea * matCostSqft;
         break;
-      case 'sanding':
-        hours = cArea / r.sandingSpeed;
-        materials = r.sandingMaterialCostFlat;
+      }
+      case 'sanding': {
+        const speed = r?.sandingSpeed ?? 80;
+        const flatMat = r?.sandingMaterialCostFlat ?? 30;
+        hours = cArea / speed;
+        materials = flatMat;
         break;
-      case 'staining':
-        hours = (cArea / r.stainingSpeed) * coats;
-        materials = (cArea / r.stainingCoverage) * coats * r.stainingMaterialCost;
+      }
+      case 'staining': {
+        const speed = r?.stainingSpeed ?? 80;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.stainingCoverage ?? 250;
+        const matCost = assignedProd?.pricePerGal ?? r?.stainingMaterialCost ?? 60;
+        hours = (cArea / speed) * coatMult;
+        materials = (cArea / coverage) * coatMult * matCost;
         break;
+      }
       default:
         if (subKey.startsWith('custom-')) {
           const customItem = ((room as any).customAreas || []).find((c: any) => c.key === subKey);
@@ -2041,14 +1690,14 @@ export default function ProjectDetails({
             const qtyVal = qty === 'auto' ? 1 : (Number(qty) || 1);
 
             if (customItem.calcType === 'wall') {
-              hours = (wArea / speed) * coats;
-              materials = (wArea / coverage) * coats * matCost;
+              hours = (wArea / speed) * coatMult;
+              materials = (wArea / coverage) * coatMult * matCost;
             } else if (customItem.calcType === 'ceiling') {
-              hours = (cArea / speed) * coats;
-              materials = (cArea / coverage) * coats * matCost;
+              hours = (cArea / speed) * coatMult;
+              materials = (cArea / coverage) * coatMult * matCost;
             } else if (customItem.calcType === 'perimeter') {
-              hours = (perimeter / speed) * coats;
-              materials = (perimeter / coverage) * coats * matCost;
+              hours = (perimeter / speed) * coatMult;
+              materials = (perimeter / coverage) * coatMult * matCost;
             } else {
               hours = qtyVal * 0.75 * coats;
               materials = qtyVal * 7.00 * coats;
@@ -2089,6 +1738,8 @@ export default function ProjectDetails({
       signedDate,
       installments,
       summary: {
+        totalHours: liveSummary.hours,
+        hourlyLaborRate: hourlyLaborRate,
         laborCost: liveSummary.laborCost,
         materialCost: liveSummary.materialCost,
         taxRate,
@@ -2132,6 +1783,8 @@ export default function ProjectDetails({
       installments: updatedProject.installments || installments,
       contractorAccessToken: driveToken || updatedProject.contractorAccessToken,
       summary: {
+        totalHours: liveSummary.hours,
+        hourlyLaborRate: hourlyLaborRate,
         laborCost: liveSummary.laborCost,
         materialCost: liveSummary.materialCost,
         taxRate,
@@ -2880,6 +2533,32 @@ export default function ProjectDetails({
       {/* 3. SCROLLABLE CORE WORKSPACE FRAME */}
       <div className="flex-grow p-6 space-y-6 overflow-y-auto max-w-full pb-32 md:pb-32">
 
+        {/* PROPOSAL VIEW ENGAGEMENT METRICS BANNER */}
+        {(project.lastViewedAt || (project.totalViewDurationSec && project.totalViewDurationSec > 0) || project.viewCount) && (
+          <div className="bg-blue-950/40 border border-blue-900/60 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Eye className="w-4 h-4 text-blue-400 shrink-0" />
+              <span className="font-bold text-blue-200">Client Proposal Engagement:</span>
+              <span className="text-zinc-300">
+                Viewed {project.viewCount || 1} {project.viewCount === 1 ? 'time' : 'times'}
+              </span>
+              <span className="text-zinc-500">•</span>
+              <span className="text-zinc-300">
+                Total Review Duration: <strong className="text-white font-mono">{
+                  (project.totalViewDurationSec && project.totalViewDurationSec > 0)
+                    ? (project.totalViewDurationSec < 60 ? `${project.totalViewDurationSec}s` : `${Math.floor(project.totalViewDurationSec / 60)}m ${project.totalViewDurationSec % 60}s`)
+                    : (project.lastViewedAt || project.viewCount ? '< 15s' : '0s')
+                }</strong>
+              </span>
+            </div>
+            {project.lastViewedAt && (
+              <span className="text-[11px] text-blue-300/80 font-mono">
+                Last Viewed: {new Date(project.lastViewedAt).toLocaleString()}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* METADATA QUICK ACTIONS ROW */}
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
           
@@ -3094,73 +2773,114 @@ export default function ProjectDetails({
               </div>
 
               {/* Dimension Settings controls row */}
-              <div className="p-5 flex flex-wrap items-center gap-x-6 gap-y-4 border-b border-[#222222] bg-[#121212]/30 text-xs">
+              <div className="p-5 flex flex-wrap items-center justify-between gap-x-6 gap-y-4 border-b border-[#222222] bg-[#121212]/30 text-xs">
                 
-                {/* Length ft */}
-                <div className="flex items-center gap-2">
-                  <span className="text-zinc-400 font-medium font-mono">Length</span>
-                  <div className="flex items-center bg-neutral-950 border border-[#222222] rounded-xl overflow-hidden px-1 py-0.5">
-                    <button 
-                      type="button"
-                      onClick={() => setCfgLength(prev => Math.max(1, prev - 1))}
-                      className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-r border-[#222222] cursor-pointer"
-                    >
-                      -
-                    </button>
-                    <span className="px-3 font-bold text-white font-mono">{cfgLength} <span className="text-[10px] text-zinc-500 font-normal">ft</span></span>
-                    <button 
-                      type="button"
-                      onClick={() => setCfgLength(prev => Math.min(200, prev + 1))}
-                      className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-l border-[#222222] cursor-pointer"
-                    >
-                      +
-                    </button>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
+                  {/* Length ft */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-400 font-medium font-mono">Length</span>
+                    <div className="flex items-center bg-neutral-950 border border-[#222222] rounded-xl overflow-hidden px-1 py-0.5">
+                      <button 
+                        type="button"
+                        onClick={() => setCfgLength(prev => Math.max(1, prev - 1))}
+                        className="p-1 px-2 text-zinc-400 hover:text-white hover:bg-neutral-900 border-r border-[#222222] cursor-pointer"
+                      >
+                        -
+                      </button>
+                      <input 
+                        type="number"
+                        min="1"
+                        max="300"
+                        value={cfgLength}
+                        onChange={(e) => setCfgLength(Math.max(1, Number(e.target.value) || 0))}
+                        className="w-14 bg-transparent text-center font-bold text-white font-mono focus:outline-none py-0.5"
+                      />
+                      <span className="text-[10px] text-zinc-500 pr-1 font-mono">ft</span>
+                      <button 
+                        type="button"
+                        onClick={() => setCfgLength(prev => Math.min(300, prev + 1))}
+                        className="p-1 px-2 text-zinc-400 hover:text-white hover:bg-neutral-900 border-l border-[#222222] cursor-pointer"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Width ft */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-400 font-medium font-mono">Width</span>
+                    <div className="flex items-center bg-neutral-950 border border-[#222222] rounded-xl overflow-hidden px-1 py-0.5">
+                      <button 
+                        type="button"
+                        onClick={() => setCfgWidth(prev => Math.max(1, prev - 1))}
+                        className="p-1 px-2 text-zinc-400 hover:text-white hover:bg-neutral-900 border-r border-[#222222] cursor-pointer"
+                      >
+                        -
+                      </button>
+                      <input 
+                        type="number"
+                        min="1"
+                        max="300"
+                        value={cfgWidth}
+                        onChange={(e) => setCfgWidth(Math.max(1, Number(e.target.value) || 0))}
+                        className="w-14 bg-transparent text-center font-bold text-white font-mono focus:outline-none py-0.5"
+                      />
+                      <span className="text-[10px] text-zinc-500 pr-1 font-mono">ft</span>
+                      <button 
+                        type="button"
+                        onClick={() => setCfgWidth(prev => Math.min(300, prev + 1))}
+                        className="p-1 px-2 text-zinc-400 hover:text-white hover:bg-neutral-900 border-l border-[#222222] cursor-pointer"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Height ft */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-400 font-medium font-mono">{cfgCategory === 'interior' ? 'Ceiling' : 'Height'}</span>
+                    <div className="flex items-center bg-neutral-950 border border-[#222222] rounded-xl overflow-hidden px-1 py-0.5">
+                      <button 
+                        type="button"
+                        onClick={() => setCfgCeilingHeight(prev => Math.max(6, prev - 1))}
+                        className="p-1 px-2 text-zinc-400 hover:text-white hover:bg-neutral-900 border-r border-[#222222] cursor-pointer"
+                      >
+                        -
+                      </button>
+                      <input 
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={cfgCeilingHeight}
+                        onChange={(e) => setCfgCeilingHeight(Math.max(1, Number(e.target.value) || 0))}
+                        className="w-14 bg-transparent text-center font-bold text-white font-mono focus:outline-none py-0.5"
+                      />
+                      <span className="text-[10px] text-zinc-500 pr-1 font-mono">ft</span>
+                      <button 
+                        type="button"
+                        onClick={() => setCfgCeilingHeight(prev => Math.min(100, prev + 1))}
+                        className="p-1 px-2 text-zinc-400 hover:text-white hover:bg-neutral-900 border-l border-[#222222] cursor-pointer"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Width ft */}
-                <div className="flex items-center gap-2">
-                  <span className="text-zinc-400 font-medium font-mono">Width</span>
-                  <div className="flex items-center bg-neutral-950 border border-[#222222] rounded-xl overflow-hidden px-1 py-0.5">
-                    <button 
-                      type="button"
-                      onClick={() => setCfgWidth(prev => Math.max(1, prev - 1))}
-                      className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-r border-[#222222] cursor-pointer"
-                    >
-                      -
-                    </button>
-                    <span className="px-3 font-bold text-white font-mono">{cfgWidth} <span className="text-[10px] text-zinc-500 font-normal">ft</span></span>
-                    <button 
-                      type="button"
-                      onClick={() => setCfgWidth(prev => Math.min(200, prev + 1))}
-                      className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-l border-[#222222] cursor-pointer"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                {/* Height ft */}
-                <div className="flex items-center gap-2">
-                  <span className="text-zinc-400 font-medium font-mono">{cfgCategory === 'interior' ? 'Ceiling' : 'Height'}</span>
-                  <div className="flex items-center bg-neutral-950 border border-[#222222] rounded-xl overflow-hidden px-1 py-0.5">
-                    <button 
-                      type="button"
-                      onClick={() => setCfgCeilingHeight(prev => Math.max(6, prev - 1))}
-                      className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-r border-[#222222] cursor-pointer"
-                    >
-                      -
-                    </button>
-                    <span className="px-3 font-bold text-white font-mono">{cfgCeilingHeight} <span className="text-[10px] text-zinc-500 font-normal">ft</span></span>
-                    <button 
-                      type="button"
-                      onClick={() => setCfgCeilingHeight(prev => Math.min(30, prev + 1))}
-                      className="p-1 px-2.5 text-zinc-400 hover:text-white hover:bg-neutral-900 border-l border-[#222222] cursor-pointer"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
+                {/* Surface Area Realtime Calculation Banner */}
+                {(() => {
+                  const wArea = Math.round(2 * cfgCeilingHeight * (cfgLength + cfgWidth));
+                  const cArea = Math.round(cfgLength * cfgWidth);
+                  const totalArea = wArea + cArea;
+                  return (
+                    <div className="flex items-center gap-3 bg-neutral-900/80 border border-neutral-800 rounded-xl px-3 py-1.5 font-mono text-[11px]">
+                      <span className="text-zinc-400">Surface Area:</span>
+                      <span className="text-blue-400 font-bold">{totalArea.toLocaleString()} <span className="text-[9px] text-zinc-500 font-normal">sq ft</span></span>
+                      <span className="text-zinc-600">|</span>
+                      <span className="text-zinc-400 text-[10px]">Walls: {wArea} sqft • Ceiling: {cArea} sqft</span>
+                    </div>
+                  );
+                })()}
 
                 {/* Wall Paint / Coating */}
                 <div className="flex items-center gap-2">
@@ -3716,11 +3436,7 @@ export default function ProjectDetails({
                       onChange={(e) => {
                         const val = e.target.value;
                         if (!val) return;
-                        const presets = proposalSettings.discountPresets || [
-                          { id: 'dp-1', name: 'Referral Special (10%)', amount: 10, type: 'percentage' },
-                          { id: 'dp-2', name: 'Spring Promo ($250 Off)', amount: 250, type: 'fixed' },
-                          { id: 'dp-3', name: 'Senior Discount (5%)', amount: 5, type: 'percentage' },
-                        ];
+                        const presets = proposalSettings.discountPresets || DEFAULT_PROPOSAL_SETTINGS.discountPresets || [];
                         const preset = presets.find(p => p.id === val);
                         if (preset) {
                           if (preset.type === 'percentage') {
@@ -3737,11 +3453,7 @@ export default function ProjectDetails({
                       className="w-full bg-neutral-950 border border-neutral-850 focus:border-blue-500 rounded-lg py-1.5 px-2 text-xs text-white outline-none cursor-pointer"
                     >
                       <option value="">-- Choose Preset Discount --</option>
-                      {(proposalSettings.discountPresets || [
-                        { id: 'dp-1', name: 'Referral Special (10%)', amount: 10, type: 'percentage' },
-                        { id: 'dp-2', name: 'Spring Promo ($250 Off)', amount: 250, type: 'fixed' },
-                        { id: 'dp-3', name: 'Senior Discount (5%)', amount: 5, type: 'percentage' },
-                      ]).map(preset => (
+                      {(proposalSettings.discountPresets || DEFAULT_PROPOSAL_SETTINGS.discountPresets || []).map(preset => (
                         <option key={preset.id} value={preset.id}>
                           {preset.name} ({preset.type === 'percentage' ? `${preset.amount}%` : `$${preset.amount}`})
                         </option>
@@ -4258,6 +3970,31 @@ export default function ProjectDetails({
                                   </div>
 
                                 </div>
+
+                                {/* Surface Area Breakdown Callout Banner */}
+                                {(() => {
+                                  const rL = room.length || 0;
+                                  const rW = room.width || 0;
+                                  const rH = room.height || 0;
+                                  const wArea = Math.round(2 * rH * (rL + rW));
+                                  const cArea = Math.round(rL * rW);
+                                  const totalArea = wArea + cArea;
+                                  const perimeter = Math.round(2 * (rL + rW));
+                                  return (
+                                    <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-zinc-400 font-bold">Calculated Surface Area:</span>
+                                        <span className="text-blue-400 font-extrabold text-xs">{totalArea.toLocaleString()} sq ft</span>
+                                        <span className="text-zinc-600">•</span>
+                                        <span className="text-zinc-400">Walls: <strong className="text-zinc-200">{wArea} sqft</strong></span>
+                                        <span className="text-zinc-600">•</span>
+                                        <span className="text-zinc-400">Ceiling: <strong className="text-zinc-200">{cArea} sqft</strong></span>
+                                        <span className="text-zinc-600">•</span>
+                                        <span className="text-zinc-400">Perimeter: <strong className="text-zinc-200">{perimeter} linear ft</strong></span>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
 
                                 {/* Direct area checklist checkboxes inside expanded room replaced with expandable table */}
                                 {(() => {
@@ -5446,7 +5183,7 @@ export default function ProjectDetails({
                   <button
                     type="button"
                     onClick={() => {
-                      const text = proposalSettings.woodStainingGeneralNotes || DEFAULT_PROPOSAL_SETTINGS.woodStainingGeneralNotes || 'Wood surfaces will be thoroughly cleaned/stripped if needed. Staining will be applied in thin, even coats to preserve wood grain and protect from elements.';
+                      const text = proposalSettings.woodStainingGeneralNotes || DEFAULT_PROPOSAL_SETTINGS.woodStainingGeneralNotes || '';
                       setGeneralNotes(text);
                       triggerNotification('Loaded Wood Staining preset!', 'success');
                     }}

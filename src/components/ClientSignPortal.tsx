@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { ProjectDetails, ClientLead, RoomSpec, PaintColor } from '../types';
-import { fetchSingleProjectFromFirestore, fetchSingleClientFromFirestore, updateProjectSignatureInFirestore } from '../firebaseService';
-import { fetchSingleProjectFromSupabase, fetchSingleClientFromSupabase, updateProjectSignatureInSupabase } from '../supabaseService';
+import { calculateRoomPricing, DEFAULT_REAL_PRODUCTS } from '../utils/pricing';
+import { fetchSingleProjectFromFirestore, fetchSingleClientFromFirestore, updateProjectSignatureInFirestore, saveProjectToFirestore } from '../firebaseService';
+import { fetchSingleProjectFromSupabase, fetchSingleClientFromSupabase, updateProjectSignatureInSupabase, saveProjectToSupabase } from '../supabaseService';
 import { generateProposalPDF, generateReceiptPDF } from '../pdfGenerator';
 import { sendProposalEmail } from '../gmailService';
 import { 
@@ -50,8 +51,8 @@ interface RoomCostDetail {
   }[];
 }
 
-function computeDetailedRoomBreakdownMap(rooms: RoomSpec[], proposalSubtotal: number): Record<string, RoomCostDetail> {
-  const hourlyLaborRate = 65;
+function computeDetailedRoomBreakdownMap(rooms: RoomSpec[], proposalSubtotal: number, projectHourlyRate: number = 85): Record<string, RoomCostDetail> {
+  const hourlyLaborRate = projectHourlyRate || 85;
   const rawBreakdowns: Record<string, {
     roomId: string;
     roomName: string;
@@ -244,9 +245,10 @@ function computeDetailedRoomBreakdownMap(rooms: RoomSpec[], proposalSubtotal: nu
       });
     }
 
-    const rawLabor = Math.round(rHours * hourlyLaborRate);
-    const rawMaterial = Math.round(rMat);
-    const rawTotal = Math.max(85, rawLabor + rawMaterial);
+    const roomPricing = calculateRoomPricing(room);
+    const rawLabor = roomPricing.laborCost;
+    const rawMaterial = roomPricing.materialCost;
+    const rawTotal = roomPricing.totalCost;
 
     if (!room.isOption) {
       sumRawNonOptionTotals += rawTotal;
@@ -349,8 +351,23 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
           setLoading(false);
           return;
         }
-        setProject(proj);
+        const nowIso = new Date().toISOString();
+        const newViewCount = (proj.viewCount || 0) + 1;
+        const updatedProj = {
+          ...proj,
+          viewCount: newViewCount,
+          lastViewedAt: nowIso,
+        };
+
+        setProject(updatedProj);
         setFoundProvider(provider);
+
+        // Async register initial view event in database
+        if (provider === 'firestore') {
+          saveProjectToFirestore('public_portal', updatedProj).catch(() => {});
+        } else {
+          saveProjectToSupabase('public_portal', updatedProj).catch(() => {});
+        }
         
         if (proj.clientId) {
           let cli = null;
@@ -379,6 +396,36 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
     }
     loadPortalData();
   }, [proposalId]);
+
+  // Track active reading & review duration on the proposal page
+  useEffect(() => {
+    if (!project?.id) return;
+    let accumulatedSec = 0;
+
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        accumulatedSec += 5;
+        setProject(prev => {
+          if (!prev) return prev;
+          const currentDur = prev.totalViewDurationSec || 0;
+          const newDur = currentDur + 5;
+          const updated = { ...prev, totalViewDurationSec: newDur };
+
+          // Persist view time to cloud DB every 15 seconds
+          if (accumulatedSec % 15 === 0) {
+            if (foundProvider === 'firestore') {
+              saveProjectToFirestore('public_portal', updated).catch(() => {});
+            } else {
+              saveProjectToSupabase('public_portal', updated).catch(() => {});
+            }
+          }
+          return updated;
+        });
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [project?.id, foundProvider]);
 
   // Adjust canvas size when signature modal is opened
   useEffect(() => {
@@ -430,7 +477,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
     try {
       const total = project.summary?.totalPrice || 0;
       const subtotal = total / 1.13;
-      const roomBreakdownMap = computeDetailedRoomBreakdownMap(project.rooms || [], subtotal);
+      const roomBreakdownMap = computeDetailedRoomBreakdownMap(project.rooms || [], subtotal, project.summary?.hourlyLaborRate);
       const roomCosts: Record<string, number> = {};
       Object.keys(roomBreakdownMap).forEach(id => {
         roomCosts[id] = roomBreakdownMap[id].totalCost;
@@ -862,7 +909,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
     const deposit = total * 0.30;
     const balance = total - deposit;
 
-    const roomBreakdownMap = computeDetailedRoomBreakdownMap(project.rooms || [], subtotal);
+    const roomBreakdownMap = computeDetailedRoomBreakdownMap(project.rooms || [], subtotal, project.summary?.hourlyLaborRate);
     const optionalTotal = Object.values(roomBreakdownMap)
       .filter(r => r.isOption)
       .reduce((sum, r) => sum + r.totalCost, 0);
@@ -1000,101 +1047,126 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
                 <span className="text-[11px] text-slate-500 font-mono font-semibold">Base Proposal Scope</span>
               </div>
 
-              {/* Standard Rooms List */}
-              <div className="space-y-4">
+              {/* Standard Rooms List Grouped by Surface Category */}
+              <div className="space-y-6">
                 {standardRooms.length > 0 ? (
-                  standardRooms.map((room) => {
-                    const roomDetail = roomBreakdownMap[room.id];
-                    const roomPrice = roomDetail ? roomDetail.totalCost : 0;
+                  [
+                    { id: 'interior', title: 'Interior Scope of Work', bg: 'bg-indigo-50/80 border-indigo-200 text-indigo-950', bar: 'bg-indigo-600', badge: 'Interior' },
+                    { id: 'exterior', title: 'Exterior Scope of Work', bg: 'bg-amber-50/80 border-amber-200 text-amber-950', bar: 'bg-amber-600', badge: 'Exterior' },
+                    { id: 'deck', title: 'Deck & Staining Scope of Work', bg: 'bg-emerald-50/80 border-emerald-200 text-emerald-950', bar: 'bg-emerald-600', badge: 'Deck & Staining' },
+                  ].map((cat) => {
+                    const catRooms = standardRooms.filter(r => (r.category || 'interior') === cat.id);
+                    if (catRooms.length === 0) return null;
 
                     return (
-                      <div key={room.id} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm hover:shadow-md transition">
-                        {/* Room Header */}
-                        <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between border-b border-slate-800 text-xs">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-white text-sm font-display">{room.name}</span>
-                            {room.groupName && (
-                              <span className="text-[10px] bg-slate-800 text-blue-300 px-2 py-0.5 rounded font-mono border border-slate-700">
-                                {room.groupName}
-                              </span>
-                            )}
+                      <div key={cat.id} className="space-y-3">
+                        <div className={`flex items-center justify-between p-3 rounded-xl border ${cat.bg}`}>
+                          <div className="flex items-center gap-2.5">
+                            <span className={`w-2 h-4 rounded-full ${cat.bar}`} />
+                            <h4 className="text-xs font-bold font-mono uppercase tracking-wider">{cat.title}</h4>
                           </div>
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono text-zinc-400 text-[11px] hidden sm:inline">
-                              {room.length}' × {room.width}' × {room.height}' ft
-                            </span>
-                            <div className="bg-blue-600 text-white font-mono font-bold px-3 py-1 rounded-lg text-xs shadow">
-                              ${roomPrice.toLocaleString()}
-                            </div>
-                          </div>
+                          <span className="text-[11px] font-mono font-bold px-2.5 py-0.5 bg-white rounded-lg border border-slate-200 text-slate-700 shadow-xs">
+                            {catRooms.length} {catRooms.length === 1 ? 'Area' : 'Areas'}
+                          </span>
                         </div>
 
-                        {/* Room Breakdown Details */}
-                        <div className="p-4 space-y-4 text-xs">
-                          {/* Surfaces & Coatings Breakdown Table */}
-                          {roomDetail && roomDetail.surfaceItems.length > 0 && (
-                            <div className="space-y-2">
-                              <span className="text-[10px] uppercase font-bold text-slate-500 font-mono tracking-wider block">
-                                Surfaces & Coating Schedule Breakdown
-                              </span>
-                              <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100">
-                                {roomDetail.surfaceItems.map((s, idx) => (
-                                  <div key={idx} className="p-2.5 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
-                                    <div className="flex items-center gap-2 font-medium text-slate-800">
-                                      <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
-                                      <span className="font-bold">{s.label}</span>
-                                      <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 font-mono font-semibold">
-                                        {s.coats} Coat(s)
+                        <div className="space-y-4">
+                          {catRooms.map((room) => {
+                            const roomDetail = roomBreakdownMap[room.id];
+                            const roomPrice = roomDetail ? roomDetail.totalCost : 0;
+
+                            return (
+                              <div key={room.id} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm hover:shadow-md transition">
+                                {/* Room Header */}
+                                <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between border-b border-slate-800 text-xs">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-white text-sm font-display">{room.name}</span>
+                                    {room.groupName && (
+                                      <span className="text-[10px] bg-slate-800 text-blue-300 px-2 py-0.5 rounded font-mono border border-slate-700">
+                                        {room.groupName}
                                       </span>
-                                      <span className="text-[10px] text-slate-500 font-mono">({s.qtyOrArea})</span>
-                                    </div>
-
-                                    {s.paint && (
-                                      <div className="flex items-center gap-1.5 text-[11px] text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
-                                        {s.paint.hex && (
-                                          <div className="w-3 h-3 rounded-full border border-slate-300 shrink-0" style={{ backgroundColor: s.paint.hex }} />
-                                        )}
-                                        <span className="font-semibold text-slate-800">{s.paint.brand}</span>
-                                        <span>— {s.paint.colorName}</span>
-                                        <span className="text-slate-400 font-mono">({s.paint.finish})</span>
-                                      </div>
                                     )}
-
-                                    <div className="font-mono font-bold text-slate-900 ml-auto">
-                                      ${s.cost.toLocaleString()}
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <span className="font-mono text-zinc-400 text-[11px] hidden sm:inline">
+                                      {room.length}' × {room.width}' × {room.height}' ft
+                                    </span>
+                                    <div className="bg-blue-600 text-white font-mono font-bold px-3 py-1 rounded-lg text-xs shadow">
+                                      ${roomPrice.toLocaleString()}
                                     </div>
                                   </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                                </div>
 
-                          {/* Prep & Repair Tasks */}
-                          {roomDetail && roomDetail.taskItems.length > 0 && (
-                            <div className="space-y-1.5 pt-1">
-                              <span className="text-[10px] uppercase font-bold text-slate-500 font-mono tracking-wider block">
-                                Prep & Repair Tasks Included
-                              </span>
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                {roomDetail.taskItems.map((t, tIdx) => (
-                                  <div key={tIdx} className="bg-slate-50 p-2 rounded-lg border border-slate-200/80 flex items-center justify-between text-[11px]">
-                                    <span className="text-slate-700 flex items-center gap-1.5">
-                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                      <span>{t.text}</span>
-                                    </span>
-                                    <span className="font-mono font-bold text-slate-600">${t.cost}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                                {/* Room Breakdown Details */}
+                                <div className="p-4 space-y-4 text-xs">
+                                  {/* Surfaces & Coatings Breakdown Table */}
+                                  {roomDetail && roomDetail.surfaceItems.length > 0 && (
+                                    <div className="space-y-2">
+                                      <span className="text-[10px] uppercase font-bold text-slate-500 font-mono tracking-wider block">
+                                        Surfaces & Coating Schedule Breakdown
+                                      </span>
+                                      <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100">
+                                        {roomDetail.surfaceItems.map((s, idx) => (
+                                          <div key={idx} className="p-2.5 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
+                                            <div className="flex items-center gap-2 font-medium text-slate-800">
+                                              <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
+                                              <span className="font-bold">{s.label}</span>
+                                              <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 font-mono font-semibold">
+                                                {s.coats} Coat(s)
+                                              </span>
+                                              <span className="text-[10px] text-slate-500 font-mono">({s.qtyOrArea})</span>
+                                            </div>
 
-                          {/* Room Notes */}
-                          {room.notes && (
-                            <p className="text-[11px] text-slate-600 italic bg-amber-50/50 p-2 rounded border border-amber-200/60">
-                              Note: {room.notes}
-                            </p>
-                          )}
+                                            {s.paint && (
+                                              <div className="flex items-center gap-1.5 text-[11px] text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                                {s.paint.hex && (
+                                                  <div className="w-3 h-3 rounded-full border border-slate-300 shrink-0" style={{ backgroundColor: s.paint.hex }} />
+                                                )}
+                                                <span className="font-semibold text-slate-800">{s.paint.brand}</span>
+                                                <span>— {s.paint.colorName}</span>
+                                                <span className="text-slate-400 font-mono">({s.paint.finish})</span>
+                                              </div>
+                                            )}
+
+                                            <div className="font-mono font-bold text-slate-900 ml-auto">
+                                              ${s.cost.toLocaleString()}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Prep & Repair Tasks */}
+                                  {roomDetail && roomDetail.taskItems.length > 0 && (
+                                    <div className="space-y-1.5 pt-1">
+                                      <span className="text-[10px] uppercase font-bold text-slate-500 font-mono tracking-wider block">
+                                        Prep & Repair Tasks Included
+                                      </span>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {roomDetail.taskItems.map((t, tIdx) => (
+                                          <div key={tIdx} className="bg-slate-50 p-2 rounded-lg border border-slate-200/80 flex items-center justify-between text-[11px]">
+                                            <span className="text-slate-700 flex items-center gap-1.5">
+                                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                              <span>{t.text}</span>
+                                            </span>
+                                            <span className="font-mono font-bold text-slate-600">${t.cost}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Room Notes */}
+                                  {room.notes && (
+                                    <p className="text-[11px] text-slate-600 italic bg-amber-50/50 p-2 rounded border border-amber-200/60">
+                                      Note: {room.notes}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );

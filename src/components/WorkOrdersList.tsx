@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { ProjectDetails, ClientLead, RoomSpec, SurfaceTask, ProjectTask } from '../types';
 import { generateWorkOrderPDF } from '../pdfGenerator';
 import { getUniqueRoomName } from '../utils/roomUtils';
+import { getWorkOrderNumber } from '../utils/workOrderUtils';
 import { 
   Wrench, 
   CheckCircle, 
@@ -236,7 +237,7 @@ export default function WorkOrdersList({
   const [specialConditions, setSpecialConditions] = useState<string>('');
   const [teamNotes, setTeamNotes] = useState<string>('');
 
-  const [laborRatePerHour, setLaborRatePerHour] = useState<number>(65);
+  const [laborRatePerHour, setLaborRatePerHour] = useState<number>(100);
   const [sundriesPerRoom, setSundriesPerRoom] = useState<number>(12);
   const [taxRatePercent, setTaxRatePercent] = useState<number>(13);
   const [discountAmount, setDiscountAmount] = useState<number>(0);
@@ -284,6 +285,7 @@ export default function WorkOrdersList({
       setClientAddress(client?.address || '123 Main Street, Guelph, ON');
       setDiscountAmount(selectedProject.summary?.discount || 0);
       setTaxRatePercent((selectedProject.summary?.taxRate ?? 0.13) * 100);
+      setLaborRatePerHour(selectedProject.summary?.hourlyLaborRate || 100);
 
       // Seed contract notes, inclusions, exclusions, and descriptions
       setProjectDescription(selectedProject.description || 'Full surface prep, patching, and two full coats of premium paint specification.');
@@ -357,11 +359,21 @@ export default function WorkOrdersList({
     const sundriesBudget = rooms.length * sundriesPerRoom;
     const materialCost = Math.max(50, sumPaintMaterial + sundriesBudget);
 
-    // Use labor cost from proposal summary if defined, ensuring 1:1 parity between Estimate and Work Order!
-    const summaryLabor = selectedProject.summary?.laborCost;
-    const baseLabor = Math.round((totalSqFt * 1.85) + (totalItemsQty * 45));
-    const laborCost = (summaryLabor && summaryLabor > 0) ? summaryLabor : Math.max(150, baseLabor);
-    const totalHours = Math.max(0.5, Math.round((laborCost / (laborRatePerHour || 85)) * 10) / 10);
+    // EXACT USER LABOR FORMULA: Labor = 100 (rate) x 85 (Number of hours)
+    let totalHours = 0;
+    if (selectedProject.summary?.totalHours && selectedProject.summary.totalHours > 0) {
+      totalHours = selectedProject.summary.totalHours;
+    } else if (selectedProject.summary?.laborCost && selectedProject.summary.laborCost > 0) {
+      const storedRate = selectedProject.summary.hourlyLaborRate || 100;
+      totalHours = Math.round((selectedProject.summary.laborCost / storedRate) * 10) / 10;
+    } else {
+      const estHours = (totalSqFt / 150) + (totalItemsQty * 0.5) + (trimLnft / 50);
+      totalHours = Math.max(0.5, Math.round(estHours * 10) / 10);
+    }
+
+    const currentRate = laborRatePerHour || 100;
+    const laborCost = Math.round(totalHours * currentRate);
+
     const subtotal = Math.max(0, laborCost + materialCost - discountAmount);
     const hst = Math.round(subtotal * (taxRatePercent / 100) * 100) / 100;
     const totalCost = Math.round(subtotal + hst);
@@ -570,7 +582,7 @@ export default function WorkOrdersList({
       onSaveProject(updatedProject);
     }
     setSelectedProject(updatedProject);
-    triggerToast(`Saved Work Order WO-#${selectedProject.id} changes!`);
+    triggerToast(`Saved Work Order ${getWorkOrderNumber(selectedProject.id, selectedScopeFilter)} changes!`);
   };
 
   return (
@@ -623,7 +635,7 @@ export default function WorkOrdersList({
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <span className="text-[10px] font-mono text-blue-400 uppercase font-bold tracking-wider block">
-                      WO-#{project.id}
+                      {getWorkOrderNumber(project.id)}
                     </span>
                     <h3 className="font-bold text-white text-base group-hover:text-blue-400 transition">
                       {project.title || client?.name || 'Painting Work Order'}
@@ -698,7 +710,7 @@ export default function WorkOrdersList({
                         <Edit3 className="w-2.5 h-2.5" /> Live
                       </span>
                     </h3>
-                    <p className="text-[11px] text-zinc-400 font-mono">WO-#{selectedProject.id} &bull; {activeRoomsForScope.length} Scope Area(s)</p>
+                    <p className="text-[11px] text-zinc-400 font-mono">{getWorkOrderNumber(selectedProject.id, selectedScopeFilter)} &bull; {activeRoomsForScope.length} Scope Area(s)</p>
                   </div>
                 </div>
 
@@ -808,7 +820,7 @@ export default function WorkOrdersList({
                       if (pdf.blobUrl) {
                         const a = document.createElement('a');
                         a.href = pdf.blobUrl;
-                        a.download = `Master_WorkOrder_${selectedProject.id}_${selectedScopeFilter.toUpperCase()}.pdf`;
+                        a.download = `Master_WorkOrder_${getWorkOrderNumber(selectedProject.id, selectedScopeFilter)}.pdf`;
                         a.click();
                       }
                       triggerToast(`Downloaded ${selectedScopeFilter.toUpperCase()} Work Order PDF!`);
@@ -858,7 +870,7 @@ export default function WorkOrdersList({
                       if (pdf.blobUrl) {
                         const a = document.createElement('a');
                         a.href = pdf.blobUrl;
-                        a.download = `PainterCrew_WorkOrder_${selectedProject.id}_${selectedScopeFilter.toUpperCase()}.pdf`;
+                        a.download = `PainterCrew_WorkOrder_${getWorkOrderNumber(selectedProject.id, selectedScopeFilter)}.pdf`;
                         a.click();
                       }
                       triggerToast(`Downloaded Painter Crew Copy (No Prices) for ${selectedScopeFilter.toUpperCase()}!`);
@@ -966,7 +978,7 @@ export default function WorkOrdersList({
                         <span>WORK ORDER</span>
                       </h2>
                       <p className="text-xs font-bold font-mono text-slate-600 mt-0.5">
-                        NO: <span className="text-blue-700">WO-#{selectedProject.id}</span>
+                        NO: <span className="text-blue-700">{getWorkOrderNumber(selectedProject.id, selectedScopeFilter)}</span>
                       </p>
                     </div>
 
@@ -1707,48 +1719,116 @@ export default function WorkOrdersList({
 
                               {/* Surface Checkboxes Grid */}
                               <div className="grid grid-cols-2 gap-2 text-[11px] bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                                <label className="flex items-center gap-1.5 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={room.walls?.checked !== false}
-                                    onChange={(e) => handleUpdateRoomField(roomIdx, { 
-                                      walls: { checked: e.target.checked, qty: room.walls?.qty ?? 'auto', coats: room.walls?.coats || 2 } 
-                                    })}
-                                    className="w-4 h-4 text-blue-600 rounded"
-                                  />
-                                  <span className="font-bold text-slate-900">Walls</span>
-                                  <span className="text-[10px] text-slate-500 font-bold">({wallSqFt.toFixed(0)}sf)</span>
-                                </label>
+                                <div className="space-y-1">
+                                  <label className="flex items-center gap-1.5 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={room.walls?.checked !== false}
+                                      onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                        walls: { checked: e.target.checked, qty: room.walls?.qty ?? 'auto', coats: room.walls?.coats || 2 } 
+                                      })}
+                                      className="w-4 h-4 text-blue-600 rounded"
+                                    />
+                                    <span className="font-bold text-slate-900">Walls</span>
+                                    <span className="text-[10px] text-slate-500 font-bold">({wallSqFt.toFixed(0)}sf)</span>
+                                  </label>
+                                  <div className="flex items-center gap-1 text-[10px] pl-5 text-slate-600">
+                                    <span className="font-bold">Coats:</span>
+                                    <select
+                                      value={room.walls?.coats || 2}
+                                      onChange={(e) => handleUpdateRoomField(roomIdx, {
+                                        walls: { checked: room.walls?.checked !== false, qty: room.walls?.qty ?? 'auto', coats: Number(e.target.value) }
+                                      })}
+                                      className="bg-white border border-slate-300 rounded px-1 py-0.5 font-bold outline-none cursor-pointer"
+                                    >
+                                      <option value={1}>1 Coat</option>
+                                      <option value={2}>2 Coats</option>
+                                      <option value={3}>3 Coats</option>
+                                    </select>
+                                  </div>
+                                </div>
 
-                                <label className="flex items-center gap-1.5 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={!!room.ceilings?.checked}
-                                    onChange={(e) => handleUpdateRoomField(roomIdx, { 
-                                      ceilings: { checked: e.target.checked, qty: room.ceilings?.qty ?? 'auto', coats: room.ceilings?.coats || 2 } 
-                                    })}
-                                    className="w-4 h-4 text-indigo-600 rounded"
-                                  />
-                                  <span className="font-bold text-indigo-900">Ceiling</span>
-                                  <span className="text-[10px] text-indigo-500 font-bold">({ceilingSqFt.toFixed(0)}sf)</span>
-                                </label>
+                                <div className="space-y-1">
+                                  <label className="flex items-center gap-1.5 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!room.ceilings?.checked}
+                                      onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                        ceilings: { checked: e.target.checked, qty: room.ceilings?.qty ?? 'auto', coats: room.ceilings?.coats || 2 } 
+                                      })}
+                                      className="w-4 h-4 text-indigo-600 rounded"
+                                    />
+                                    <span className="font-bold text-indigo-900">Ceiling</span>
+                                    <span className="text-[10px] text-indigo-500 font-bold">({ceilingSqFt.toFixed(0)}sf)</span>
+                                  </label>
+                                  <div className="flex items-center gap-1 text-[10px] pl-5 text-slate-600">
+                                    <span className="font-bold">Coats:</span>
+                                    <select
+                                      value={room.ceilings?.coats || 2}
+                                      onChange={(e) => handleUpdateRoomField(roomIdx, {
+                                        ceilings: { checked: !!room.ceilings?.checked, qty: room.ceilings?.qty ?? 'auto', coats: Number(e.target.value) }
+                                      })}
+                                      className="bg-white border border-slate-300 rounded px-1 py-0.5 font-bold outline-none cursor-pointer"
+                                    >
+                                      <option value={1}>1 Coat</option>
+                                      <option value={2}>2 Coats</option>
+                                      <option value={3}>3 Coats</option>
+                                    </select>
+                                  </div>
+                                </div>
 
-                                <label className="flex items-center gap-1.5 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={!!room.baseboards?.checked}
-                                    onChange={(e) => handleUpdateRoomField(roomIdx, { 
-                                      baseboards: { checked: e.target.checked, qty: room.baseboards?.qty ?? 'auto', coats: room.baseboards?.coats || 2 } 
-                                    })}
-                                    className="w-4 h-4 text-slate-700 rounded"
-                                  />
-                                  <span className="text-slate-800 font-medium">Baseboards</span>
-                                </label>
+                                <div className="space-y-1">
+                                  <label className="flex items-center gap-1.5 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={!!room.baseboards?.checked}
+                                      onChange={(e) => handleUpdateRoomField(roomIdx, { 
+                                        baseboards: { checked: e.target.checked, qty: room.baseboards?.qty ?? 'auto', coats: room.baseboards?.coats || 2 } 
+                                      })}
+                                      className="w-4 h-4 text-slate-700 rounded"
+                                    />
+                                    <span className="text-slate-800 font-medium">Baseboards</span>
+                                  </label>
+                                  <div className="flex items-center gap-1 text-[10px] pl-5 text-slate-600">
+                                    <span className="font-bold">Coats:</span>
+                                    <select
+                                      value={room.baseboards?.coats || 2}
+                                      onChange={(e) => handleUpdateRoomField(roomIdx, {
+                                        baseboards: { checked: !!room.baseboards?.checked, qty: room.baseboards?.qty ?? 'auto', coats: Number(e.target.value) }
+                                      })}
+                                      className="bg-white border border-slate-300 rounded px-1 py-0.5 font-bold outline-none cursor-pointer"
+                                    >
+                                      <option value={1}>1 Coat</option>
+                                      <option value={2}>2 Coats</option>
+                                      <option value={3}>3 Coats</option>
+                                    </select>
+                                  </div>
+                                </div>
 
-                                <div className="flex items-center gap-2 text-[10px] text-slate-600 font-bold">
-                                  <span>Win: {typeof room.windows?.qty === 'number' ? room.windows.qty : 2}</span>
-                                  <span>&bull;</span>
-                                  <span>Door: {typeof room.doors?.qty === 'number' ? room.doors.qty : 1}</span>
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2 text-[10px] text-slate-600 font-bold">
+                                    <span>Win: {typeof room.windows?.qty === 'number' ? room.windows.qty : 2}</span>
+                                    <span>&bull;</span>
+                                    <span>Door: {typeof room.doors?.qty === 'number' ? room.doors.qty : 1}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 text-[10px] text-slate-600">
+                                    <span className="font-bold">Coats:</span>
+                                    <select
+                                      value={room.windows?.coats || room.doors?.coats || 2}
+                                      onChange={(e) => {
+                                        const coats = Number(e.target.value);
+                                        handleUpdateRoomField(roomIdx, {
+                                          windows: { checked: !!room.windows?.checked, qty: room.windows?.qty ?? 2, coats },
+                                          doors: { checked: !!room.doors?.checked, qty: room.doors?.qty ?? 1, coats }
+                                        });
+                                      }}
+                                      className="bg-white border border-slate-300 rounded px-1 py-0.5 font-bold outline-none cursor-pointer"
+                                    >
+                                      <option value={1}>1 Coat</option>
+                                      <option value={2}>2 Coats</option>
+                                      <option value={3}>3 Coats</option>
+                                    </select>
+                                  </div>
                                 </div>
                               </div>
 
@@ -1835,8 +1915,8 @@ export default function WorkOrdersList({
                                       </div>
                                     </td>
 
-                                    {/* Walls Checkbox & SqFt */}
-                                    <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                    {/* Walls Checkbox & SqFt & Coats */}
+                                    <td className="p-2 sm:p-2.5 border-r border-slate-200 space-y-1">
                                       <label className="flex items-center gap-1.5 cursor-pointer">
                                         <input
                                           type="checkbox"
@@ -1847,12 +1927,25 @@ export default function WorkOrdersList({
                                           className="w-4 h-4 text-blue-600 rounded"
                                         />
                                         <span className="font-bold text-slate-900">{wallSqFt.toFixed(0)} sqft</span>
-                                        <span className="text-[10px] text-slate-500 font-mono">(2 coats)</span>
                                       </label>
+                                      <div className="flex items-center gap-1 text-[10px] text-slate-600">
+                                        <span className="font-bold">Coats:</span>
+                                        <select
+                                          value={room.walls?.coats || 2}
+                                          onChange={(e) => handleUpdateRoomField(roomIdx, {
+                                            walls: { checked: room.walls?.checked !== false, qty: room.walls?.qty ?? 'auto', coats: Number(e.target.value) }
+                                          })}
+                                          className="bg-white border border-slate-300 rounded px-1 py-0.5 font-bold outline-none cursor-pointer"
+                                        >
+                                          <option value={1}>1 Coat</option>
+                                          <option value={2}>2 Coats</option>
+                                          <option value={3}>3 Coats</option>
+                                        </select>
+                                      </div>
                                     </td>
 
-                                    {/* Ceiling Checkbox & SqFt */}
-                                    <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                    {/* Ceiling Checkbox & SqFt & Coats */}
+                                    <td className="p-2 sm:p-2.5 border-r border-slate-200 space-y-1">
                                       <label className="flex items-center gap-1.5 cursor-pointer">
                                         <input
                                           type="checkbox"
@@ -1863,12 +1956,25 @@ export default function WorkOrdersList({
                                           className="w-4 h-4 text-indigo-600 rounded"
                                         />
                                         <span className="font-bold text-indigo-900">{ceilingSqFt.toFixed(0)} sqft</span>
-                                        <span className="text-[10px] text-indigo-500 font-mono">(2 coats)</span>
                                       </label>
+                                      <div className="flex items-center gap-1 text-[10px] text-slate-600">
+                                        <span className="font-bold">Coats:</span>
+                                        <select
+                                          value={room.ceilings?.coats || 2}
+                                          onChange={(e) => handleUpdateRoomField(roomIdx, {
+                                            ceilings: { checked: !!room.ceilings?.checked, qty: room.ceilings?.qty ?? 'auto', coats: Number(e.target.value) }
+                                          })}
+                                          className="bg-white border border-slate-300 rounded px-1 py-0.5 font-bold outline-none cursor-pointer"
+                                        >
+                                          <option value={1}>1 Coat</option>
+                                          <option value={2}>2 Coats</option>
+                                          <option value={3}>3 Coats</option>
+                                        </select>
+                                      </div>
                                     </td>
 
-                                    {/* Baseboard Checkbox */}
-                                    <td className="p-2 sm:p-2.5 border-r border-slate-200">
+                                    {/* Baseboard Checkbox & Coats */}
+                                    <td className="p-2 sm:p-2.5 border-r border-slate-200 space-y-1">
                                       <label className="flex items-center gap-1.5 cursor-pointer">
                                         <input
                                           type="checkbox"
@@ -1880,17 +1986,45 @@ export default function WorkOrdersList({
                                         />
                                         <span className="text-slate-800 font-medium">Baseboards</span>
                                       </label>
+                                      <div className="flex items-center gap-1 text-[10px] text-slate-600">
+                                        <span className="font-bold">Coats:</span>
+                                        <select
+                                          value={room.baseboards?.coats || 2}
+                                          onChange={(e) => handleUpdateRoomField(roomIdx, {
+                                            baseboards: { checked: !!room.baseboards?.checked, qty: room.baseboards?.qty ?? 'auto', coats: Number(e.target.value) }
+                                          })}
+                                          className="bg-white border border-slate-300 rounded px-1 py-0.5 font-bold outline-none cursor-pointer"
+                                        >
+                                          <option value={1}>1 Coat</option>
+                                          <option value={2}>2 Coats</option>
+                                          <option value={3}>3 Coats</option>
+                                        </select>
+                                      </div>
                                     </td>
 
-                                    {/* Windows & Doors Locked Quantities */}
+                                    {/* Windows & Doors Quantities & Coats */}
                                     <td className="p-2 sm:p-2.5 border-r border-slate-200 space-y-1 text-[10px]">
                                       <div className="flex items-center justify-between gap-1 bg-slate-100 px-2 py-0.5 rounded border border-slate-200" title="Quantity locked from initial estimate">
-                                        <span className="text-slate-600 font-bold">Win:</span>
-                                        <span className="font-mono font-bold text-slate-900">{typeof room.windows?.qty === 'number' ? room.windows.qty : 2}</span>
+                                        <span className="text-slate-600 font-bold">Win: {typeof room.windows?.qty === 'number' ? room.windows.qty : 2}</span>
+                                        <span className="text-slate-600 font-bold">Door: {typeof room.doors?.qty === 'number' ? room.doors.qty : 1}</span>
                                       </div>
-                                      <div className="flex items-center justify-between gap-1 bg-slate-100 px-2 py-0.5 rounded border border-slate-200" title="Quantity locked from initial estimate">
-                                        <span className="text-slate-600 font-bold">Door:</span>
-                                        <span className="font-mono font-bold text-slate-900">{typeof room.doors?.qty === 'number' ? room.doors.qty : 1}</span>
+                                      <div className="flex items-center gap-1 text-[10px] text-slate-600">
+                                        <span className="font-bold">Coats:</span>
+                                        <select
+                                          value={room.windows?.coats || room.doors?.coats || 2}
+                                          onChange={(e) => {
+                                            const coats = Number(e.target.value);
+                                            handleUpdateRoomField(roomIdx, {
+                                              windows: { checked: !!room.windows?.checked, qty: room.windows?.qty ?? 2, coats },
+                                              doors: { checked: !!room.doors?.checked, qty: room.doors?.qty ?? 1, coats }
+                                            });
+                                          }}
+                                          className="bg-white border border-slate-300 rounded px-1 py-0.5 font-bold outline-none cursor-pointer"
+                                        >
+                                          <option value={1}>1 Coat</option>
+                                          <option value={2}>2 Coats</option>
+                                          <option value={3}>3 Coats</option>
+                                        </select>
                                       </div>
                                     </td>
 
@@ -2212,7 +2346,7 @@ export default function WorkOrdersList({
             {/* Modal Control Footer Bar */}
             <div className="p-4 sm:px-6 border-t border-neutral-800 bg-[#111111] flex items-center justify-between no-print">
               <span className="text-xs text-zinc-400 font-mono">
-                PaintCRM Interactive Document Engine &bull; Official Work Order WO-#{selectedProject.id}
+                PaintCRM Interactive Document Engine &bull; Official Work Order {getWorkOrderNumber(selectedProject.id, selectedScopeFilter)}
               </span>
               <div className="flex items-center gap-2">
                 <button

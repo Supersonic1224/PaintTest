@@ -163,13 +163,58 @@ export default function Dashboard({
           </div>
 
           <div className="space-y-3">
-            {projects.filter(p => p.status === 'Approved' || p.status === 'Completed').length === 0 ? (
-              <div className="text-zinc-500 text-sm py-8 text-center bg-neutral-950/30 rounded-xl border border-dashed border-neutral-850">
-                No active engagement tracking logs yet.
-              </div>
-            ) : (
-              projects.filter(p => p.status === 'Approved' || p.status === 'Completed').map(p => {
+            {(() => {
+              const trackedProjects = projects.filter(p => 
+                ['Sent', 'Approved', 'In Progress', 'Completed', 'Invoiced'].includes(p.status) || 
+                p.lastViewedAt || 
+                (p.totalViewDurationSec && p.totalViewDurationSec > 0)
+              );
+
+              if (trackedProjects.length === 0) {
+                return (
+                  <div className="text-zinc-500 text-sm py-8 text-center bg-neutral-950/30 rounded-xl border border-dashed border-neutral-850">
+                    No active engagement tracking logs yet. Sent proposals will show client view times here.
+                  </div>
+                );
+              }
+
+              return trackedProjects.map(p => {
                 const clientName = clients.find(c => c.id === p.clientId)?.name || p.title;
+                const viewSec = p.totalViewDurationSec || 0;
+                
+                let viewDurText = '0s';
+                if (viewSec > 0) {
+                  if (viewSec < 60) viewDurText = `${viewSec}s`;
+                  else if (viewSec < 3600) {
+                    const m = Math.floor(viewSec / 60);
+                    const s = viewSec % 60;
+                    viewDurText = s > 0 ? `${m}m ${s}s` : `${m}m`;
+                  } else {
+                    viewDurText = `${(viewSec / 3600).toFixed(1)}h`;
+                  }
+                } else if (p.lastViewedAt || p.viewCount) {
+                  viewDurText = '< 15s';
+                }
+
+                let lastViewText = 'Not viewed by client yet';
+                if (p.lastViewedAt) {
+                  const diffSec = Math.max(0, Math.floor((Date.now() - new Date(p.lastViewedAt).getTime()) / 1000));
+                  if (diffSec < 60) lastViewText = 'Last viewed just now';
+                  else if (diffSec < 3600) lastViewText = `Last viewed ${Math.floor(diffSec / 60)}m ago`;
+                  else if (diffSec < 86400) lastViewText = `Last viewed ${Math.floor(diffSec / 3600)}h ago`;
+                  else lastViewText = `Last viewed ${Math.floor(diffSec / 86400)}d ago`;
+                } else if (p.status === 'Approved' || p.status === 'Completed') {
+                  lastViewText = 'Last viewed upon approval';
+                }
+
+                let engTier = 'Unopened';
+                let engColor = 'text-zinc-500';
+                if (viewSec > 0 || p.lastViewedAt) {
+                  if (viewSec < 30) { engTier = 'Quick Skim'; engColor = 'text-amber-400'; }
+                  else if (viewSec < 180) { engTier = 'Moderate Review'; engColor = 'text-blue-400'; }
+                  else { engTier = 'Deep Review'; engColor = 'text-emerald-400'; }
+                }
+
                 return (
                   <div 
                     key={p.id}
@@ -185,27 +230,32 @@ export default function Dashboard({
                           <h4 className="text-sm font-semibold text-white leading-snug group-hover:text-blue-400 transition">
                             {clientName}
                           </h4>
-                          <span className="px-2 py-0.5 text-[8px] font-extrabold bg-emerald-950/60 border border-emerald-900 text-emerald-400 rounded-full select-none tracking-wider font-sans">
-                            ACCEPTED
+                          <span className={`px-2 py-0.5 text-[8px] font-extrabold border rounded-full select-none tracking-wider font-sans ${
+                            p.status === 'Approved' || p.status === 'Completed' ? 'bg-emerald-950/60 border-emerald-900 text-emerald-400' : 'bg-blue-950/60 border-blue-900 text-blue-400'
+                          }`}>
+                            {p.status.toUpperCase()}
                           </span>
+                          {p.viewCount ? (
+                            <span className="text-[10px] text-zinc-400 font-mono">({p.viewCount} {p.viewCount === 1 ? 'view' : 'views'})</span>
+                          ) : null}
                         </div>
                         <p className="text-xs text-zinc-300 font-mono mt-1">
-                          {p.id} • ${p.summary.totalPrice.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                          {p.id} • ${p.summary.totalPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </p>
-                        <span className="text-[10px] text-zinc-400 block mt-1">Last viewed 2 days ago</span>
+                        <span className="text-[10px] text-zinc-400 block mt-1">{lastViewText}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
-                        <span className="text-lg font-extrabold text-white tracking-tight block">30s</span>
-                        <span className="text-[10px] text-zinc-300 font-bold block">Medium</span>
+                        <span className="text-lg font-extrabold text-white tracking-tight block">{viewDurText}</span>
+                        <span className={`text-[10px] font-bold block ${engColor}`}>{engTier}</span>
                       </div>
                       <ArrowUpRight className="w-5 h-5 text-zinc-500 group-hover:text-white transition" />
                     </div>
                   </div>
                 );
-              })
-            )}
+              });
+            })()}
           </div>
         </div>
       </div>

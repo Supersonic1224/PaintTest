@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { ProjectDetails as ProjectType, ClientLead, RoomSpec } from './types';
+import { getWorkOrderNumber } from './utils/workOrderUtils';
 
 interface PDFGeneratorParams {
   project: ProjectType;
@@ -838,33 +839,51 @@ export function generateReceiptPDF({
     doc.text('Included Surface Treatment', pageWidth - 70, y + 5.5);
     y += 8;
 
-    project.rooms.forEach(room => {
+    const invoiceCategories = [
+      { id: 'interior', name: 'INTERIOR SCOPE OF WORK' },
+      { id: 'exterior', name: 'EXTERIOR SCOPE OF WORK' },
+      { id: 'deck', name: 'DECK & STAINING SCOPE OF WORK' }
+    ];
+
+    invoiceCategories.forEach(cat => {
+      const catRooms = project.rooms.filter(r => (r.category || 'interior') === cat.id);
+      if (catRooms.length === 0) return;
+
       ensureSpace(12);
-      doc.setDrawColor(241, 245, 249);
-      doc.line(15, y + 8, pageWidth - 15, y + 8);
-
       doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(30, 41, 59);
-      doc.text(room.name, 18, y + 5);
+      doc.setFontSize(8);
+      doc.setTextColor(30, 58, 138);
+      doc.text(`— ${cat.name} (${catRooms.length} ${catRooms.length === 1 ? 'Area' : 'Areas'}) —`, 18, y + 4);
+      y += 6;
 
-      doc.setFont('Helvetica', 'normal');
-      doc.setTextColor(71, 85, 105);
-      const dims = `${room.length || 0}' x ${room.width || 0}' x ${room.height || 0}'`;
-      const category = (room.category || 'interior').toUpperCase();
-      doc.text(`${category} (${dims})`, pageWidth / 2 - 10, y + 5);
+      catRooms.forEach(room => {
+        ensureSpace(12);
+        doc.setDrawColor(241, 245, 249);
+        doc.line(15, y + 8, pageWidth - 15, y + 8);
 
-      const treatments: string[] = [];
-      if (room.walls) treatments.push('Walls');
-      if (room.ceilings) treatments.push('Ceilings');
-      if (room.baseboards) treatments.push('Baseboards');
-      if (room.windows) treatments.push('Windows');
-      if (room.doors) treatments.push('Doors');
-      doc.text(treatments.length > 0 ? treatments.join(', ') : 'General Coating', pageWidth - 70, y + 5);
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(30, 41, 59);
+        doc.text(room.name, 18, y + 5);
 
-      y += 8;
+        doc.setFont('Helvetica', 'normal');
+        doc.setTextColor(71, 85, 105);
+        const dims = `${room.length || 0}' x ${room.width || 0}' x ${room.height || 0}'`;
+        doc.text(`${dims}`, pageWidth / 2 - 10, y + 5);
+
+        const treatments: string[] = [];
+        if (room.walls) treatments.push('Walls');
+        if (room.ceilings) treatments.push('Ceilings');
+        if (room.baseboards) treatments.push('Baseboards');
+        if (room.windows) treatments.push('Windows');
+        if (room.doors) treatments.push('Doors');
+        doc.text(treatments.length > 0 ? treatments.join(', ') : 'General Coating', pageWidth - 70, y + 5);
+
+        y += 8;
+      });
+      y += 2;
     });
-    y += 6;
+    y += 4;
   }
 
   // 4. How Much It Cost: Project Estimates Summary
@@ -893,8 +912,11 @@ export function generateReceiptPDF({
   doc.setFont('Helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 100, 100);
-  doc.text('Labor & Mobilization:', 18, y + 6);
-  doc.text(`$${laborCost.toLocaleString()}`, 55, y + 6);
+  const laborHoursLabel = project.summary?.totalHours
+    ? `Labor (${project.summary.totalHours} hrs @ $${project.summary.hourlyLaborRate || 85}/hr):`
+    : 'Labor & Mobilization:';
+  doc.text(laborHoursLabel, 18, y + 6);
+  doc.text(`$${laborCost.toLocaleString()}`, 68, y + 6);
 
   doc.text('Materials & Consumables:', 80, y + 6);
   doc.text(`$${materialCost.toLocaleString()}`, 122, y + 6);
@@ -1165,7 +1187,7 @@ export function generateWorkOrderPDF({
 
   doc.setFont('Helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text(`Work Order Ref: WO-#${project.id} | Issued: ${new Date().toLocaleDateString()}`, 15, 24);
+  doc.text(`Work Order Ref: ${getWorkOrderNumber(project.id, scopeCategory)} | Issued: ${new Date().toLocaleDateString()}`, 15, 24);
   doc.text(`Project: ${project.title || 'Painting Work Order'}`, 15, 30);
 
   doc.setFillColor(16, 185, 129); // Emerald
@@ -1344,15 +1366,37 @@ export function generateWorkOrderPDF({
   doc.setFontSize(8);
   doc.setTextColor(255, 255, 255);
   doc.text('Area / Room', 18, y + 5.5);
-  doc.text('Dimensions', 60, y + 5.5);
-  doc.text('Walls & Ceiling Spec', 100, y + 5.5);
-  doc.text('Paint Product', 150, y + 5.5);
+  doc.text('Dimensions', 55, y + 5.5);
+  doc.text('Surface Scope & Coats Breakdown', 90, y + 5.5);
+  doc.text('Paint Product', 152, y + 5.5);
   y += 8;
 
   filteredRooms.forEach((r, idx) => {
+    const specs: string[] = [];
+    if (r.walls?.checked !== false) {
+      specs.push(`Walls: ${r.wallsArea || 0}sf (${r.walls?.coats || 2} coats)`);
+    }
+    if (r.ceilings?.checked) {
+      specs.push(`Ceiling: ${r.ceilingArea || 0}sf (${r.ceilings?.coats || 2} coats)`);
+    }
+    if (r.baseboards?.checked) {
+      specs.push(`Baseboards (${r.baseboards?.coats || 2} coats)`);
+    }
+    if (r.windows?.checked || r.doors?.checked) {
+      const winQty = typeof r.windows?.qty === 'number' ? r.windows.qty : 2;
+      const doorQty = typeof r.doors?.qty === 'number' ? r.doors.qty : 1;
+      const coats = r.windows?.coats || r.doors?.coats || 2;
+      specs.push(`Win (${winQty}) / Door (${doorQty}): (${coats} coats)`);
+    }
+
+    const surfaceSpecStr = specs.length > 0 ? specs.join(', ') : 'General prep & paint';
+    const specLines = doc.splitTextToSize(surfaceSpecStr, 58);
     const noteLines = r.notes ? doc.splitTextToSize(`Notes: ${r.notes.replace(/\n/g, ' ')}`, pageWidth - 36) : [];
-    const rowHeight = r.notes ? 10 + Math.min(noteLines.length, 6) * 3.8 : 10;
+    
+    const baseHeight = Math.max(10, specLines.length * 4 + 2);
+    const rowHeight = r.notes ? baseHeight + Math.min(noteLines.length, 4) * 3.8 : baseHeight;
     ensureSpace(rowHeight + 2);
+
     const bgVal = idx % 2 === 0 ? 255 : 248;
     doc.setFillColor(bgVal, bgVal, bgVal);
     doc.rect(15, y, pageWidth - 30, rowHeight, 'F');
@@ -1362,24 +1406,29 @@ export function generateWorkOrderPDF({
     doc.setFont('Helvetica', 'bold');
     doc.setFontSize(8);
     doc.setTextColor(30, 41, 59);
-    doc.text(`${r.name}`, 18, y + 6);
+    doc.text(`${r.name}`, 18, y + 5.5);
 
     doc.setFont('Helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(100, 100, 100);
-    doc.text(`${r.length || 0}'x${r.width || 0}'x${r.height || 8}'`, 60, y + 6);
+    doc.text(`${r.length || 0}'x${r.width || 0}'x${r.height || 8}'`, 55, y + 5.5);
 
-    const wallSpec = r.walls?.checked !== false ? `${r.wallsArea || 0}sqft (${r.walls?.coats || 2}c)` : '—';
-    doc.text(wallSpec, 100, y + 6);
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(30, 41, 59);
+    doc.text(specLines, 90, y + 5);
 
     const product = r.wallPaintType || 'BM Regal Select Eggshell';
-    doc.text(product.substring(0, 28), 150, y + 6);
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(51, 51, 51);
+    doc.text(product.substring(0, 26), 152, y + 5.5);
 
     if (noteLines.length > 0) {
       doc.setFont('Helvetica', 'normal');
       doc.setFontSize(7);
       doc.setTextColor(180, 83, 9); // Amber text
-      doc.text(noteLines.slice(0, 6), 18, y + 10.5);
+      doc.text(noteLines.slice(0, 4), 18, y + baseHeight + 2);
     }
 
     y += rowHeight;

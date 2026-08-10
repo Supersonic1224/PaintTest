@@ -28,7 +28,7 @@ interface AdminPortalProps {
   onSetDbProvider: (provider: 'firestore' | 'supabase') => void;
   clients?: any[];
   projects?: any[];
-  onImportBackup?: (clients: any[], projects: any[]) => Promise<void>;
+  onImportBackup?: (clients: any[], projects: any[]) => Promise<{ success?: boolean; message?: string } | void>;
   onPushToSupabase?: () => Promise<{ success: boolean; message: string }>;
   onSignIn?: () => Promise<void>;
   onSignOut?: () => Promise<void>;
@@ -117,10 +117,10 @@ export default function AdminPortal({
         }
         
         if (onImportBackup) {
-          await onImportBackup(parsed.clients, parsed.projects);
+          const res = (await onImportBackup(parsed.clients, parsed.projects)) as { success?: boolean; message?: string } | undefined;
           setImportStatus({
-            success: true,
-            text: `Successfully restored backup with ${parsed.clients.length} clients and ${parsed.projects.length} projects! Local database cache refreshed.`
+            success: res?.success !== false,
+            text: res?.message || `Successfully restored backup with ${parsed.clients.length} clients and ${parsed.projects.length} projects! CRM database updated.`
           });
         }
       } catch (err: any) {
@@ -746,45 +746,20 @@ ON CONFLICT (email) DO NOTHING;`;
                     You signed in successfully! However, your email <strong>{userEmail}</strong> is not listed in the <code>authorized_users</code> registry yet. 
                   </p>
 
-                  {/* Method A: Quick Self-Authorize */}
-                  <div className="p-4 bg-neutral-950/80 rounded-xl border border-blue-900/30 space-y-3 text-left">
-                    <div className="flex items-center gap-2">
-                      <span className="px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[9px] font-bold rounded uppercase">Method A</span>
-                      <h4 className="text-xs font-bold text-white">⚡ Quick Self-Authorize / Registration</h4>
+                  {/* Restricted Self-Authorization Notice */}
+                  <div className="p-4 bg-amber-950/20 rounded-xl border border-amber-900/40 space-y-2.5 text-left">
+                    <div className="flex items-center gap-2 text-amber-400">
+                      <ShieldAlert className="w-4 h-4 shrink-0" />
+                      <h4 className="text-xs font-bold">Access Restricted — Pending Administrator Approval</h4>
                     </div>
-                    <p className="text-[11px] text-zinc-500 leading-relaxed">
-                      Authorize your email instantly on the database to start synchronizing:
+                    <p className="text-[11px] text-zinc-400 leading-relaxed">
+                      Your email address (<span className="text-white font-mono">{userEmail}</span>) is signed in, but has not been granted authorization by an administrator. Self-registration has been restricted to ensure pricing and financial figures remain secure.
                     </p>
-                    
-                    <button
-                      onClick={handleSelfAuthorize}
-                      disabled={selfAuthLoading}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
-                    >
-                      {selfAuthLoading ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          Authorizing...
-                        </>
-                      ) : (
-                        <>
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          Self-Authorize & Register My Account
-                        </>
-                      )}
-                    </button>
-
-                    {userActionError && (
-                      <div className="p-3 bg-red-950/30 border border-red-900/40 text-red-400 text-[11px] rounded-lg mt-2 leading-relaxed">
-                        {userActionError}
-                      </div>
-                    )}
-
-                    {userActionSuccess && (
-                      <div className="p-3 bg-emerald-950/20 border border-emerald-900/50 text-emerald-400 text-[11px] rounded-lg mt-2 leading-relaxed">
-                        {userActionSuccess}
-                      </div>
-                    )}
+                    <div className="pt-1">
+                      <p className="text-[10px] text-amber-300 font-mono">
+                        Please ask an administrator (e.g. daniel@capstonepainting.ca) to add your email to the team access registry.
+                      </p>
+                    </div>
                   </div>
 
                   {/* Method B: Complete SQL Editor Script (Supabase only) */}

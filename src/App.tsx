@@ -160,6 +160,9 @@ const DEMO_PROJECTS: ProjectType[] = [
     ],
     createdAt: '2026-06-10T12:00:00.000Z',
     updatedAt: '2026-06-10T12:00:00.000Z',
+    viewCount: 3,
+    lastViewedAt: '2026-08-10T10:15:00.000Z',
+    totalViewDurationSec: 195
   }
 ];
 
@@ -478,11 +481,53 @@ export default function App() {
     }
   };
 
-  const handleImportBackup = async (importedClients: ClientLead[], importedProjects: ProjectType[]) => {
-    setClients(importedClients);
-    setProjects(importedProjects);
-    localStorage.setItem('painter_crm_clients', JSON.stringify(importedClients));
-    localStorage.setItem('painter_crm_projects', JSON.stringify(importedProjects));
+  const handleImportBackup = async (importedClients: ClientLead[], importedProjects: ProjectType[]): Promise<{ success: boolean; message: string }> => {
+    setLoading(true);
+    try {
+      setClients(importedClients);
+      setProjects(importedProjects);
+      localStorage.setItem('painter_crm_clients', JSON.stringify(importedClients));
+      localStorage.setItem('painter_crm_projects', JSON.stringify(importedProjects));
+
+      const activeUid = getActiveUid();
+
+      if (dbProvider === 'firebase' && currentUser) {
+        for (const c of importedClients) {
+          await saveClientToFirestore(currentUser.uid, c).catch(err => console.warn("Firestore backup upload client err:", err));
+        }
+        for (const p of importedProjects) {
+          await saveProjectToFirestore(currentUser.uid, p).catch(err => console.warn("Firestore backup upload project err:", err));
+        }
+        return {
+          success: true,
+          message: `Successfully restored and uploaded backup into Firebase Firestore! (${importedClients.length} clients, ${importedProjects.length} projects synced).`
+        };
+      } else if (dbProvider === 'supabase' && supabaseUser) {
+        for (const c of importedClients) {
+          await saveClientToSupabase(activeUid, c).catch(err => console.warn("Supabase backup upload client err:", err));
+        }
+        for (const p of importedProjects) {
+          await saveProjectToSupabase(activeUid, p).catch(err => console.warn("Supabase backup upload project err:", err));
+        }
+        return {
+          success: true,
+          message: `Successfully restored and uploaded backup into Supabase CRM database! (${importedClients.length} clients, ${importedProjects.length} projects synced).`
+        };
+      }
+
+      return {
+        success: true,
+        message: `Successfully restored backup to local workspace database! (${importedClients.length} clients, ${importedProjects.length} projects loaded).`
+      };
+    } catch (err: any) {
+      console.error("Backup restore error:", err);
+      return {
+        success: false,
+        message: `Failed to upload backup into CRM database: ${err.message || err}`
+      };
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handlePushToSupabase = async (): Promise<{ success: boolean; message: string }> => {
@@ -645,7 +690,7 @@ export default function App() {
 
     // If it is a new client + estimate registration, automatically synthesize a new project
     if (!isEdit) {
-      const projId = 'project-' + Math.random().toString(36).substr(2, 9);
+      const projId = '26' + String(Math.floor(100000 + Math.random() * 900000));
       const newProj: ProjectType = {
         id: projId,
         clientId: clientDetails.id,
@@ -875,7 +920,7 @@ export default function App() {
 
     const clientName = clients.find(c => c.id === clientId)?.name || 'New Paint Project';
     const newProj: ProjectType = {
-      id: 'project-' + Math.random().toString(36).substr(2, 9),
+      id: '26' + String(Math.floor(100000 + Math.random() * 900000)),
       clientId,
       title: 'Interior Painting - ' + clientName,
       status: 'Draft',
@@ -949,7 +994,7 @@ export default function App() {
       updatedAt: new Date().toISOString(),
     };
 
-    const newProjId = 'PR-' + Math.floor(100000 + Math.random() * 900000);
+    const newProjId = '26' + String(Math.floor(100000 + Math.random() * 900000));
     const newProj: ProjectType = {
       id: newProjId,
       clientId: newClientId,

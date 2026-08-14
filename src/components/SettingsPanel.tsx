@@ -102,6 +102,20 @@ export default function SettingsPanel({
     });
   };
 
+  const updateSubstrateCoverageRate = (key: string, val: number) => {
+    const currentSubstrates = rates.substrateCoverageRates || DEFAULT_PROPOSAL_RATES.substrateCoverageRates || {};
+    saveProposalSettings({
+      ...proposalSettings,
+      rates: {
+        ...rates,
+        substrateCoverageRates: {
+          ...currentSubstrates,
+          [key]: val
+        }
+      }
+    });
+  };
+
   const restoreDefaultRates = () => {
     if (window.confirm("Are you sure you want to restore all rates back to system default values?")) {
       saveProposalSettings({
@@ -1721,6 +1735,140 @@ ON CONFLICT (email) DO NOTHING;`;
               >
                 Restore Default Rates
               </button>
+            </div>
+
+            {/* GLOBAL CALCULATION ENGINE TOGGLE */}
+            <div className="bg-neutral-950 border border-blue-900/50 rounded-xl p-5 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-[10px] font-mono font-bold rounded uppercase tracking-wider">Engine Toggle</span>
+                    <h4 className="text-sm font-bold text-white">Global Calculation Formula Engine</h4>
+                  </div>
+                  <p className="text-zinc-400 text-xs mt-1 max-w-2xl">
+                    Choose which calculation engine powers live proposal estimations across all project rooms and customer portals.
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-lg border border-neutral-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updatedRates = { ...proposalSettings.rates, calculationEngine: 'paintnav' as const };
+                      saveProposalSettings({ ...proposalSettings, calculationEngine: 'paintnav', rates: updatedRates as any });
+                    }}
+                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer font-mono ${
+                      (proposalSettings.calculationEngine || proposalSettings.rates?.calculationEngine || 'paintnav') === 'paintnav'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    PaintNav Formula
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updatedRates = { ...proposalSettings.rates, calculationEngine: 'standard' as const };
+                      saveProposalSettings({ ...proposalSettings, calculationEngine: 'standard', rates: updatedRates as any });
+                    }}
+                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer font-mono ${
+                      (proposalSettings.calculationEngine || proposalSettings.rates?.calculationEngine) === 'standard'
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    Standard Formula
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 text-xs">
+                <div className={`p-3 rounded-lg border transition ${
+                  (proposalSettings.calculationEngine || proposalSettings.rates?.calculationEngine || 'paintnav') === 'paintnav'
+                    ? 'bg-blue-950/20 border-blue-500/40 text-blue-200'
+                    : 'bg-neutral-900/50 border-neutral-800 text-zinc-400'
+                }`}>
+                  <div className="font-bold font-mono text-xs text-blue-400 mb-1">PaintNav Engine (Multi-Tier)</div>
+                  <ul className="space-y-1 text-[11px] list-disc list-inside">
+                    <li>Non-linear coat rates (distinct speed per 1/2/3 coats)</li>
+                    <li>Gallons-needed calculation using product tier $/gal</li>
+                    <li>Drywall repair rates ($0.50/sqft, $25 crack, $50 patch)</li>
+                    <li>Textured ceiling coverage adjustments</li>
+                  </ul>
+                </div>
+
+                <div className={`p-3 rounded-lg border transition ${
+                  (proposalSettings.calculationEngine || proposalSettings.rates?.calculationEngine) === 'standard'
+                    ? 'bg-blue-950/20 border-blue-500/40 text-blue-200'
+                    : 'bg-neutral-900/50 border-neutral-800 text-zinc-400'
+                }`}>
+                  <div className="font-bold font-mono text-xs text-zinc-300 mb-1">Standard Engine (Linear)</div>
+                  <ul className="space-y-1 text-[11px] list-disc list-inside">
+                    <li>Linear speed & coverage formula (sqft / speed × coatMultiplier)</li>
+                    <li>Fixed per-surface material cost rates</li>
+                    <li>Traditional item-coat production multiplier</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            {/* SUBSTRATE COVERAGE RATES (PAINTNAV SURFACE MULTIPLIERS) */}
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-[10px] font-mono font-bold rounded uppercase tracking-wider">PaintNav Multipliers</span>
+                    <h4 className="text-xs font-bold text-purple-400 uppercase font-mono tracking-wider">Substrate Surface Area Multipliers</h4>
+                  </div>
+                  <p className="text-zinc-400 text-xs mt-1">
+                    Converts linear feet, unit counts, or room dimensions into paintable surface area (sq ft / unit / coat) to compute required gallons (<code className="text-purple-300 font-mono text-[11px]">sqft / 350 = gal</code>).
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto border border-neutral-800 rounded-xl bg-neutral-950">
+                <table className="w-full text-left font-mono text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-neutral-900 text-zinc-300 text-[10px] uppercase font-bold tracking-wider border-b border-neutral-800">
+                      <th className="p-3 border-r border-neutral-800">SUBSTRATE</th>
+                      <th className="p-3 border-r border-neutral-800 w-36">RATE</th>
+                      <th className="p-3">UNIT</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-850 text-zinc-200">
+                    {[
+                      { key: 'walls', label: 'Walls', unit: 'sq ft / sq ft / coat', defaultVal: 1, step: 0.1 },
+                      { key: 'ceilings', label: 'Ceilings', unit: 'sq ft / sq ft / coat', defaultVal: 1, step: 0.1 },
+                      { key: 'baseboards', label: 'Baseboards', unit: 'sq ft / lin ft / coat', defaultVal: 0.5, step: 0.05 },
+                      { key: 'doors', label: 'Doors', unit: 'sq ft / door / coat', defaultVal: 10.5, step: 0.5 },
+                      { key: 'doorFrames', label: 'Door Frames', unit: 'sq ft / frame / coat', defaultVal: 8, step: 0.5 },
+                      { key: 'windows', label: 'Windows', unit: 'sq ft / window / coat', defaultVal: 6, step: 0.5 },
+                      { key: 'closet', label: 'Small Closet', unit: 'sq ft / closet / coat', defaultVal: 15, step: 1 },
+                      { key: 'crown-moulding', label: 'Crown Moulding', unit: 'sq ft / lin ft / coat', defaultVal: 0.5, step: 0.05 },
+                      { key: 'chair-rail', label: 'Chair Rail', unit: 'sq ft / lin ft / coat', defaultVal: 0.25, step: 0.05 },
+                      { key: 'wainscotting', label: 'Wainscotting', unit: 'sq ft / lin ft / coat', defaultVal: 1, step: 0.1 },
+                      { key: 'stringers', label: 'Stringers', unit: 'sq ft / lin ft / coat', defaultVal: 0.33, step: 0.01 },
+                    ].map((sub) => {
+                      const currentRates = rates.substrateCoverageRates || DEFAULT_PROPOSAL_RATES.substrateCoverageRates || {};
+                      const val = currentRates[sub.key] ?? sub.defaultVal;
+                      return (
+                        <tr key={sub.key} className="hover:bg-neutral-900/50 transition">
+                          <td className="p-2.5 font-bold border-r border-neutral-800 text-white">{sub.label}</td>
+                          <td className="p-2.5 border-r border-neutral-800">
+                            <input
+                              type="number"
+                              step={sub.step}
+                              value={val}
+                              onChange={(e) => updateSubstrateCoverageRate(sub.key, parseFloat(e.target.value) || 0)}
+                              className="w-full bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-xs text-white font-bold font-mono focus:border-purple-500 outline-none"
+                            />
+                          </td>
+                          <td className="p-2.5 text-zinc-400 text-[11px] font-mono">{sub.unit}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* SECTION 1: LABOR BASE & SITE SETUP PRESET */}

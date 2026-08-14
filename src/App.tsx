@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { User } from 'firebase/auth';
-import { ClientLead, ProjectDetails as ProjectType, RoomSpec, ProjectTask } from './types';
+import { ClientLead, ProjectDetails as ProjectType, RoomSpec, ProjectTask, ProposalSettings, DEFAULT_PROPOSAL_SETTINGS } from './types';
 import { 
   initAuth, 
   googleSignIn, 
@@ -45,6 +45,7 @@ import SettingsPanel from './components/SettingsPanel';
 import AdminPortal from './components/AdminPortal';
 import ClientSignPortal from './components/ClientSignPortal';
 import SignInGate from './components/SignInGate';
+import { ProjectProfitabilityHub } from './components/ProjectProfitabilityHub';
 import { motion, AnimatePresence } from 'motion/react';
 
 import { 
@@ -242,14 +243,6 @@ export default function App() {
   // Focus selection variables
   const [selectedClient, setSelectedClient] = useState<ClientLead | undefined>(undefined);
   const [selectedProject, setSelectedProject] = useState<ProjectType | undefined>(undefined);
-
-  // Standalone instant calculator variables
-  const [calcLength, setCalcLength] = useState(14);
-  const [calcWidth, setCalcWidth] = useState(12);
-  const [calcHeight, setCalcHeight] = useState(9);
-  const [calcPricePerGal, setCalcPricePerGal] = useState(55);
-  const [calcLaborRate, setCalcLaborRate] = useState(2.25);
-  const [calcCoats, setCalcCoats] = useState(2);
 
   // Supabase Auth states
   const [supabaseUser, setSupabaseUser] = useState<any | null>(null);
@@ -1058,26 +1051,101 @@ export default function App() {
     setCurrentView('project-details');
   };
 
-  // Standalone Quick calculation metrics
-  const quickCalcMetrics = React.useMemo(() => {
-    const wallArea = Math.round(2 * calcHeight * (Number(calcLength) + Number(calcWidth)));
-    const ceilingArea = Math.round(Number(calcLength) * Number(calcWidth));
-    const totalArea = wallArea + ceilingArea;
-    const standardsGallons = parseFloat(((totalArea / 350) * calcCoats).toFixed(1));
-    const materialsCost = Math.round(standardsGallons * calcPricePerGal);
-    const laborCost = Math.round(totalArea * calcLaborRate);
-    const total = Math.round((materialsCost + laborCost) * 1.08); // with tax
+  // Create new project directly from Instant Paint & Drywall Estimator
+  const handleCreateProjectFromEstimate = async (room: RoomSpec, title?: string) => {
+    if (!isAuthorizedUser) {
+      alert("Access Blocked: Only authorized team members can create new proposals. Request access in the Team Access portal.");
+      return;
+    }
 
-    return {
-      wallArea,
-      ceilingArea,
-      totalArea,
-      standardsGallons,
-      materialsCost,
-      laborCost,
-      total,
+    const newClientId = 'client-' + Math.random().toString(36).substr(2, 9);
+    const newClient: ClientLead = {
+      id: newClientId,
+      name: 'Client (' + (room.name || 'Estimate') + ')',
+      email: '',
+      phone: '',
+      address: '',
+      status: 'Lead',
+      notes: 'Generated from Instant Paint Estimator',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
-  }, [calcLength, calcWidth, calcHeight, calcPricePerGal, calcLaborRate, calcCoats]);
+
+    const newProjId = '26' + String(Math.floor(100000 + Math.random() * 900000));
+    const newProj: ProjectType = {
+      id: newProjId,
+      clientId: newClientId,
+      title: title || ('Interior Painting - ' + room.name),
+      status: 'Draft',
+      description: 'Custom interior painting proposal created via Instant Estimator.',
+      rooms: [room],
+      summary: {
+        materialCost: 0,
+        laborCost: 0,
+        taxRate: 0.13,
+        discount: 0,
+        totalPrice: 0,
+      },
+      tasks: STANDARD_CHECKLIST.map(t => ({ ...t, id: Math.random().toString(36).substr(2, 6) })),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updatedClients = [...clients, newClient];
+    const updatedProjects = [...projects, newProj];
+
+    setClients(updatedClients);
+    setProjects(updatedProjects);
+
+    let savedToCloud = false;
+    if (dbProvider === 'supabase' && getSupabase()) {
+      const activeUid = getActiveUid();
+      await saveClientToSupabase(activeUid, newClient);
+      await saveProjectToSupabase(activeUid, newProj);
+      savedToCloud = true;
+      if (currentUser) {
+        try {
+          await saveClientToFirestore(currentUser.uid, newClient);
+          await saveProjectToFirestore(currentUser.uid, newProj);
+        } catch (err) {
+          console.warn("Could not sync to Firestore backup:", err);
+        }
+      }
+    } else if (!isDemoMode && currentUser) {
+      await saveClientToFirestore(currentUser.uid, newClient);
+      await saveProjectToFirestore(currentUser.uid, newProj);
+      savedToCloud = true;
+      if (getSupabase()) {
+        try {
+          const sUid = supabaseUser?.id || getAnonId();
+          await saveClientToSupabase(sUid, newClient);
+          await saveProjectToSupabase(sUid, newProj);
+        } catch (err) {
+          console.warn("Could not sync to Supabase:", err);
+        }
+      }
+    }
+
+    if (isDemoMode || !savedToCloud) {
+      localStorage.setItem('painter_crm_clients', JSON.stringify(updatedClients));
+      localStorage.setItem('painter_crm_projects', JSON.stringify(updatedProjects));
+    }
+
+    setSelectedProject(newProj);
+    setCurrentView('project-details');
+  };
+
+  const appProposalSettings: ProposalSettings = useMemo(() => {
+    try {
+      const saved = localStorage.getItem('proposal_settings');
+      if (saved) {
+        return { ...DEFAULT_PROPOSAL_SETTINGS, ...JSON.parse(saved) };
+      }
+    } catch (e) {
+      console.warn("Error parsing proposal_settings:", e);
+    }
+    return DEFAULT_PROPOSAL_SETTINGS;
+  }, []);
 
   const activeEmail = currentUser?.email || 'Demo Painter Local Workspace';
 
@@ -1090,7 +1158,7 @@ export default function App() {
     'clients': 'Customer Directory',
     'edit-client': selectedClient ? 'Update Client Portfolio' : 'New Client Lead & Proposal',
     'project-details': 'Proposal Estimator Worksheet',
-    'quick-calc': 'Instant Drywall & Paint Estimator',
+    'quick-calc': 'Financial Gain & Paint Estimator Hub',
     'admin-portal': 'Team Access & Admin Portal'
   }[currentView];
 
@@ -1540,120 +1608,17 @@ export default function App() {
           )}
 
           {currentView === 'quick-calc' && (
-            <div className="max-w-4xl space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                
-                {/* Calculator Specs card */}
-                <div className="bg-neutral-900 border border-[#222222] rounded-2xl p-6 space-y-5">
-                  <h3 className="font-display font-semibold text-white text-sm text-left">Room Physical Dimensions</h3>
-                  
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="space-y-1 text-left">
-                      <label className="text-[10px] font-bold text-zinc-300 uppercase">Length (ft)</label>
-                      <input
-                        type="number"
-                        value={calcLength}
-                        onChange={(e) => setCalcLength(Number(e.target.value))}
-                        className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                    <div className="space-y-1 text-left">
-                      <label className="text-[10px] font-bold text-zinc-300 uppercase">Width (ft)</label>
-                      <input
-                        type="number"
-                        value={calcWidth}
-                        onChange={(e) => setCalcWidth(Number(e.target.value))}
-                        className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                    <div className="space-y-1 text-left">
-                      <label className="text-[10px] font-bold text-zinc-300 uppercase">Height (ft)</label>
-                      <input
-                        type="number"
-                        value={calcHeight}
-                        onChange={(e) => setCalcHeight(Number(e.target.value))}
-                        className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3 pt-2">
-                    <div className="space-y-1 text-left">
-                      <label className="text-[10px] font-bold text-zinc-300 uppercase">Coats</label>
-                      <select
-                        value={calcCoats}
-                        onChange={(e) => setCalcCoats(Number(e.target.value))}
-                        className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-blue-500 selection:bg-neutral-900"
-                      >
-                        <option value={1}>1 Coat</option>
-                        <option value={2}>2 Coats</option>
-                        <option value={3}>3 Coats</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1 text-left">
-                      <label className="text-[10px] font-bold text-zinc-300 uppercase">Labor $/SqFt</label>
-                      <input
-                        type="number"
-                        step="0.05"
-                        value={calcLaborRate}
-                        onChange={(e) => setCalcLaborRate(Number(e.target.value))}
-                        className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                    <div className="space-y-1 text-left">
-                      <label className="text-[10px] font-bold text-zinc-300 uppercase">Paint $/Gal</label>
-                      <input
-                        type="number"
-                        value={calcPricePerGal}
-                        onChange={(e) => setCalcPricePerGal(Number(e.target.value))}
-                        className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Display outputs card */}
-                <div className="bg-neutral-900 border border-[#222222] rounded-2xl p-6 flex flex-col justify-between">
-                  <div className="space-y-4">
-                    <h3 className="font-display font-semibold text-white text-sm text-left">Estimated Resources</h3>
-                    
-                    <div className="grid grid-cols-2 gap-y-4 gap-x-2 text-xs text-left">
-                      <div>
-                        <span className="text-zinc-300 block">Walls Surface Area</span>
-                        <span className="text-sm font-bold text-white font-mono mt-0.5 block">{quickCalcMetrics.wallArea} sqft</span>
-                      </div>
-                      <div>
-                        <span className="text-zinc-300 block">Ceiling Surface Area</span>
-                        <span className="text-sm font-bold text-white font-mono mt-0.5 block">{quickCalcMetrics.ceilingArea} sqft</span>
-                      </div>
-                      <div>
-                        <span className="text-zinc-300 block">Estimate Paint Needed</span>
-                        <span className="text-sm font-bold text-blue-400 font-mono mt-0.5 block">{quickCalcMetrics.standardsGallons} Gals</span>
-                      </div>
-                      <div>
-                        <span className="text-zinc-300 block">Material & Labor</span>
-                        <span className="text-sm font-bold text-white font-mono mt-0.5 block">
-                          M: ${quickCalcMetrics.materialsCost} / L: ${quickCalcMetrics.laborCost}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 p-4 bg-neutral-950/40 border border-neutral-850 rounded-xl flex items-center justify-between">
-                    <div className="text-left">
-                      <span className="text-[10px] text-zinc-300 uppercase font-bold tracking-wider block">Estimated Quote Total</span>
-                      <span className="text-[10px] text-zinc-400 block mt-0.5">Includes 8% standard state tax</span>
-                    </div>
-                    <span className="text-emerald-400 font-display text-2xl font-black">${quickCalcMetrics.total.toLocaleString()}</span>
-                  </div>
-                </div>
-
-              </div>
-
-              <div className="p-4 bg-neutral-950/40 border border-[#222222] rounded-xl text-zinc-500 text-xs text-left leading-relaxed">
-                Estimation assumes standard professional visual paint coverage templates (approx. 350 sqft/gal base coats). Custom designs can be saved to clients directory folder systems directly.
-              </div>
-            </div>
+            <ProjectProfitabilityHub
+              projects={projects}
+              clients={clients}
+              proposalSettings={appProposalSettings}
+              onOpenProject={(proj) => {
+                setSelectedProject(proj);
+                setCurrentView('project-details');
+              }}
+              onCreateProjectFromEstimate={handleCreateProjectFromEstimate}
+              onOpenMenu={() => setMobileMenuOpen(true)}
+            />
           )}
 
         </div>

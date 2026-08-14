@@ -14,6 +14,8 @@ export interface RoomAreaConfig {
   qty: number | 'auto';
   coats: number;
   isOption?: boolean;
+  optionGroupId?: string;
+  optionGroupName?: string;
 }
 
 export interface SurfaceTask {
@@ -22,6 +24,18 @@ export interface SurfaceTask {
   completed: boolean;
   surfaceCategory?: string; // e.g. 'Walls', 'Ceiling', 'Trim', 'General', 'Deck Prep'
   isOption?: boolean;
+  optionGroupId?: string;
+  optionGroupName?: string;
+}
+
+export interface ProjectPhoto {
+  id: string;
+  url: string;
+  caption: string;
+  createdAt: string;
+  uploadedAt?: string;
+  linkedItemId?: string; // e.g. roomId, `${roomId}:${surfaceKey}`, `${roomId}:task:${taskId}`, `task:${taskId}`
+  linkedItemName?: string; // Human readable name e.g. "Master Bedroom → Walls"
 }
 
 export interface RoomSpec {
@@ -41,6 +55,9 @@ export interface RoomSpec {
   doorFrames?: RoomAreaConfig;
   wallPaintType?: string;
   isOption?: boolean;
+  optionGroupId?: string; // Grouping key e.g. "Paint Quality Tier", "Exterior Upgrades"
+  optionGroupName?: string; // Grouping label
+  optionSelectionMode?: 'radio' | 'checkbox'; // 'radio' = pick ONE of group, 'checkbox' = individual multi-select
   category?: 'interior' | 'exterior' | 'deck';
   groupName?: string;
   surfaceTasks?: SurfaceTask[];
@@ -96,7 +113,7 @@ export interface ProjectDetails {
   teamNotes?: string;
   generalNotes?: string;
   termsAndConditions?: string;
-  photos?: { id: string; url: string; caption: string; createdAt: string }[];
+  photos?: ProjectPhoto[];
   clientSigned?: boolean;
   signerName?: string;
   signerTitle?: string;
@@ -155,6 +172,11 @@ export interface RealProduct {
   categories?: RealProductCategory[];
   /** Builder spec product ID this real product is the default for (e.g. 'wall-premium', 'trim', 'ext-standard') */
   builderSpec?: string;
+  brand?: string;
+  price?: number;
+  coverage?: number;
+  pricePerGal?: number;
+  coverageSqFtPerGal?: number;
 }
 
 export interface ProductTypeColourDefaults {
@@ -168,7 +190,26 @@ export interface ProductTypeColourDefaults {
   other: string;
 }
 
+export type CalculationEngine = 'paintnav' | 'standard';
+
+export interface CoatRate {
+  coat1: number;
+  coat2: number;
+  coat3: number;
+}
+
+export interface DrywallRates {
+  skimWallRate?: number;          // sqft/hr (default 40)
+  skimCeilingRate?: number;       // sqft/hr (default 40)
+  crackRepairRate?: number;       // hrs/each (default 1)
+  patchRate?: number;             // hrs/each (default 1)
+  skimMaterialPerSqft?: number;   // $/sqft (default 0.50)
+  crackMaterialEach?: number;     // $/each (default 25)
+  patchMaterialEach?: number;     // $/each (default 50)
+}
+
 export interface ProposalRates {
+  calculationEngine?: CalculationEngine;
   hourlyLaborRate: number;
   setupHours: number;
   setupMaterials: number;
@@ -256,12 +297,28 @@ export interface ProposalRates {
   stainingSpeed: number;
   stainingCoverage: number;
   stainingMaterialCost: number;
+
+  substrateCoverageRates?: Record<string, number>;
 }
 
 export const DEFAULT_PROPOSAL_RATES: ProposalRates = {
-  hourlyLaborRate: 85.00,
-  setupHours: 5.0,
-  setupMaterials: 50.00,
+  calculationEngine: 'paintnav',
+  hourlyLaborRate: 113.13,
+  setupHours: 0,
+  setupMaterials: 0,
+  substrateCoverageRates: {
+    'walls': 1.0,
+    'ceilings': 1.0,
+    'baseboards': 0.5,
+    'doors': 10.5,
+    'doorFrames': 8.0,
+    'windows': 6.0,
+    'closet': 15.0,
+    'crown-moulding': 0.5,
+    'chair-rail': 0.25,
+    'wainscotting': 1.0,
+    'stringers': 0.33,
+  },
   
   wallsSpeed: 150,
   wallsCoverage: 350,
@@ -370,6 +427,7 @@ export interface ScopeAreaPreset {
 
 export interface ProposalSettings {
   threeUniques: UniqueCard[];
+  calculationEngine?: CalculationEngine;
   termsAndConditions?: string;
   interiorGeneralNotes?: string;
   exteriorGeneralNotes?: string;
@@ -440,16 +498,6 @@ export interface CustomSubstrateDefinition {
 }
 
 export type CeilingTexture = 'smooth' | 'textured';
-
-export interface DrywallRates {
-  skimWallRate: number;          // sqft/hr (default 40)
-  skimCeilingRate: number;       // sqft/hr (default 40)
-  crackRepairRate: number;       // hrs/each (default 1)
-  patchRate: number;             // hrs/each (default 1)
-  skimMaterialPerSqft: number;   // $/sqft (default 0.50)
-  crackMaterialEach: number;     // $/each (default 25)
-  patchMaterialEach: number;     // $/each (default 50)
-}
 
 export interface AppRates {
   hourlyRate: number;
@@ -568,8 +616,78 @@ If any provision of this agreement is found to be invalid or unenforceable, the 
 
 15. Acceptance
 By signing or digitally approving this agreement, the Customer confirms they have read, understood, and agreed to these terms and conditions.`,
-  interiorGeneralNotes: 'All interior surfaces will be fully prepared prior to painting. This includes filling nail holes, minor caulking, and dust protection for furniture and flooring. Premium quality materials will be used.',
-  exteriorGeneralNotes: 'Exterior preparation includes pressure washing to remove dirt and loose paint, scraping peeling areas, priming bare wood, and caulking joints as specified. Premium weather-resistant paint will be applied.',
+  interiorGeneralNotes: `General Project Expectations & Notes
+
+Room Prep - Capstone will:
+• Cover all floors with drop cloths or protective coverings to prevent damage or spills.
+• Protect furniture and fixtures with plastic sheeting or appropriate coverings to shield them from dust and paint splatter.
+• Remove receptacle covers, switch plates, and other easily detachable hardware to ensure clean, professional edges around these areas.
+
+Preparation for Painting - Capstone will:
+• Lightly sand surfaces to remove imperfections and promote proper paint adhesion.
+• Clean surfaces to remove dust, dirt, and grease prior to painting.
+• Fill dents and nail holes, caulk cracks and gaps, and repair other minor surface defects.
+• Apply primer to bare wood, new drywall, repaired areas, and any stained surfaces as required.
+
+Customer Responsibilities:
+• Remove small décor, wall hangings, and fragile items prior to crew arrival. Capstone will not be responsible for items left in the work area.
+• Confirm all colour selections prior to painting. Changes to colour after work has begun may result in additional charges.
+
+Daily Set-up and Clean-up:
+Clean up all work areas daily and upon final completion, leaving the space free from job-related debris and materials. Painting crew will organize all materials before leaving each day.
+
+Final Walkthrough:
+Your project supervisor will perform a final walkthrough upon completion to ensure customer satisfaction and address any remaining questions or concerns. Any required touch-ups will be completed within a reasonable timeframe following the walkthrough.
+
+Deposit & Payment Information
+Deposit — due upon approval of proposal (30%):
+Payable by e-transfer to pay@capstonepainting.ca (recipient: Capstone Painting Inc.)
+
+Additional payment options:
+• Cheque made out to Capstone Painting Inc.
+• Credit card (2.4% surcharge)
+• Cash
+
+Deposit must be paid to hold your place in our schedule. No work will begin until the deposit is received.
+
+The remaining balance is due upon project completion.`,
+  exteriorGeneralNotes: `General Project Expectations & Notes
+
+Standard Exterior Preparation - Capstone will:
+• Wash all exterior surfaces prior to painting to remove dirt, mildew, and surface contaminants.
+• Scrape and sand to remove loose or peeling paint.
+• Caulk cracks, gaps, and holes as needed.
+• Spot prime bare and repaired surfaces as required.
+• Mask and protect windows, doors, fixtures, and landscaping from paint overspray.
+
+Customer Responsibilities:
+• Remove or relocate any items that could obstruct access to the selected painting areas, including patio furniture, vehicles, equipment, and personal belongings. Capstone will not be responsible for items left in the work area.
+• Confirm all colour selections prior to painting. Changes to colour after work has begun may result in additional charges.
+
+Unforeseen Conditions:
+Any unforeseen damage or repairs discovered during the project that fall outside the original scope will be communicated to the customer before proceeding and will be subject to an additional charge unless otherwise stated in the proposal.
+
+Weather:
+Exterior work is subject to weather conditions. Capstone will reschedule affected work days as needed and will communicate any changes to the project timeline promptly.
+
+Daily Set-up and Clean-up:
+Clean up all work areas daily and upon final completion, leaving the property free from job-related debris and materials. Painting crew will organize all materials before leaving each day.
+
+Final Walkthrough:
+Your project supervisor will perform a final walkthrough upon completion to ensure customer satisfaction and address any remaining questions or concerns. Any required touch-ups will be completed within a reasonable timeframe following the walkthrough.
+
+Deposit & Payment Information
+Deposit — due upon approval of proposal (30%):
+Payable by e-transfer to pay@capstonepainting.ca (recipient: Capstone Painting Inc.)
+
+Additional payment options:
+• Cheque made out to Capstone Painting Inc.
+• Credit card (2.4% surcharge)
+• Cash
+
+Deposit must be paid to hold your place in our schedule. No work will begin until the deposit is received.
+
+The remaining balance is due upon project completion.`,
   woodStainingGeneralNotes: `Wood Staining General Notes & Project Expectations
 
 Surface Preparation - Capstone will:
@@ -610,6 +728,7 @@ Additional payment options:
 Deposit must be paid to hold your place in our schedule. No work will begin until the deposit is received.
 The remaining balance is due upon project completion, prior to the final walkthrough sign-off.`,
   brickStainingGeneralNotes: 'Brick surfaces will be cleaned and masonry-grade staining or breathing silicate coatings will be applied to guarantee high durability without trapping moisture.',
+  calculationEngine: 'paintnav',
   realProducts: DEFAULT_REAL_PRODUCTS,
   rates: DEFAULT_PROPOSAL_RATES,
   discountPresets: [

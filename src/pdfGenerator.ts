@@ -2,6 +2,31 @@ import { jsPDF } from 'jspdf';
 import { ProjectDetails as ProjectType, ClientLead, RoomSpec } from './types';
 import { getWorkOrderNumber } from './utils/workOrderUtils';
 
+/**
+ * Draws the official Capstone Painting logo in jsPDF vector format.
+ * Features bold lettering with the electric blue triangle in the 'A'.
+ */
+function drawCapstoneLogo(doc: jsPDF, x: number, y: number, textColor = [255, 255, 255]) {
+  // Letter C
+  doc.setFont('Helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+  doc.text('C', x, y);
+
+  // Electric Blue Triangle for A (apex at top, base flat at bottom)
+  doc.setFillColor(0, 112, 243); // Electric Blue #0070F3
+  doc.triangle(x + 5.5, y + 0.5, x + 8.6, y - 5.1, x + 11.7, y + 0.5, 'F');
+
+  // Letters PSTONE
+  doc.setFont('Helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+  doc.text('PSTONE', x + 12.8, y);
+
+  // Word PAINTING
+  doc.text('PAINTING', x + 44, y);
+}
+
 interface PDFGeneratorParams {
   project: ProjectType;
   client: ClientLead;
@@ -76,35 +101,39 @@ export function generateProposalPDF({
 
   const addHeader = () => {
     // Header background bar
-    doc.setFillColor(30, 41, 59); // Slate-800
-    doc.rect(0, 0, pageWidth, 40, 'F');
+    doc.setFillColor(17, 24, 39); // Slate-900 / Dark
+    doc.rect(0, 0, pageWidth, 42, 'F');
 
-    doc.setTextColor(255, 255, 255);
+    // Draw Capstone Painting logo
+    drawCapstoneLogo(doc, 15, 18, [255, 255, 255]);
+
     doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(22);
-    doc.text('PAINTNAV PROPOSAL & ESTIMATE', 15, 18);
+    doc.setFontSize(11);
+    doc.setTextColor(243, 244, 246);
+    doc.text('PROPOSAL & ESTIMATE', 15, 27);
 
     doc.setFont('Helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.text(`Proposal Reference: #${proposalNo}`, 15, 26);
-    doc.text(`Date Generated: ${projectDate}`, 15, 32);
+    doc.setFontSize(8.5);
+    doc.setTextColor(203, 213, 225);
+    doc.text(`Proposal Reference: #${proposalNo}`, 15, 33);
+    doc.text(`Date Generated: ${projectDate}`, 15, 38);
 
     // Right-aligned status
-    doc.setFontSize(11);
+    doc.setFontSize(10);
     doc.setFont('Helvetica', 'bold');
     if (clientSigned) {
       doc.setFillColor(16, 185, 129); // Emerald-500
-      doc.rect(pageWidth - 65, 12, 50, 8, 'F');
+      doc.rect(pageWidth - 65, 14, 50, 8, 'F');
       doc.setTextColor(255, 255, 255);
-      doc.text('SIGNED & ACCEPTED', pageWidth - 60, 17.5);
+      doc.text('SIGNED & ACCEPTED', pageWidth - 60, 19.5);
     } else {
       doc.setFillColor(245, 158, 11); // Amber-500
-      doc.rect(pageWidth - 65, 12, 50, 8, 'F');
+      doc.rect(pageWidth - 65, 14, 50, 8, 'F');
       doc.setTextColor(255, 255, 255);
-      doc.text('PENDING ACCEPTANCE', pageWidth - 62, 17.5);
+      doc.text('PENDING ACCEPTANCE', pageWidth - 62, 19.5);
     }
 
-    y = 52;
+    y = 54;
   };
 
   addHeader();
@@ -118,7 +147,7 @@ export function generateProposalPDF({
       doc.setFont('Helvetica', 'italic');
       doc.setFontSize(8);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Proposal #${proposalNo} - Continued`, 15, y);
+      doc.text(`Capstone Painting Proposal #${proposalNo} - Continued`, 15, y);
       y += 10;
     }
   };
@@ -127,7 +156,7 @@ export function generateProposalPDF({
   ensureSpace(40);
   // Contractor Details
   doc.setFont('Helvetica', 'bold');
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(120, 120, 120);
   doc.text('PREPARED BY', 15, y);
   doc.text('PREPARED FOR', pageWidth / 2 + 10, y);
@@ -135,24 +164,24 @@ export function generateProposalPDF({
 
   doc.setTextColor(30, 41, 59);
   doc.setFont('Helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text('PaintNav CRM Services', 15, y);
+  doc.setFontSize(10.5);
+  doc.text('Capstone Painting Inc.', 15, y);
   doc.text(client.name || 'Client', pageWidth / 2 + 10, y);
   y += 5;
 
   doc.setFont('Helvetica', 'normal');
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(100, 100, 100);
-  doc.text('Toronto Siding & Framing Division', 15, y);
-  doc.text(clientAddress, pageWidth / 2 + 10, y);
+  doc.text('Professional Interior & Exterior Painting', 15, y);
+  doc.text(clientAddress || 'Job Site Address', pageWidth / 2 + 10, y);
   y += 5;
 
-  doc.text('Email: support@paintnav.com', 15, y);
-  doc.text(`Phone: ${clientPhone}`, pageWidth / 2 + 10, y);
+  doc.text('Email: pay@capstonepainting.ca', 15, y);
+  doc.text(`Phone: ${clientPhone || 'N/A'}`, pageWidth / 2 + 10, y);
   y += 5;
 
-  doc.text('Tel: (416) 555-0199', 15, y);
-  doc.text(`Email: ${clientEmail}`, pageWidth / 2 + 10, y);
+  doc.text('Licensed & Fully Insured', 15, y);
+  doc.text(`Email: ${clientEmail || 'N/A'}`, pageWidth / 2 + 10, y);
   y += 10;
 
   // Divider
@@ -367,46 +396,99 @@ export function generateProposalPDF({
 
   // General Notes Section
   if (generalNotes) {
-    ensureSpace(38);
+    ensureSpace(25);
     doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(9.5);
     doc.setTextColor(30, 41, 59);
-    doc.text('GENERAL ESTIMATE NOTES', 15, y);
+    doc.text('GENERAL PROJECT EXPECTATIONS & NOTES', 15, y);
     y += 5;
-
-    doc.setFillColor(248, 250, 252);
-    doc.rect(15, y, pageWidth - 30, 22, 'F');
-    doc.setDrawColor(226, 232, 240);
-    doc.rect(15, y, pageWidth - 30, 22, 'S');
 
     doc.setFont('Helvetica', 'normal');
     doc.setFontSize(8);
-    doc.setTextColor(71, 85, 105);
-    const lines = doc.splitTextToSize(generalNotes, pageWidth - 40);
-    doc.text(lines.slice(0, 4), 18, y + 6);
-    y += 28;
+    const lines = doc.splitTextToSize(generalNotes, pageWidth - 36);
+    const lineHeight = 3.6;
+    let lineIdx = 0;
+
+    while (lineIdx < lines.length) {
+      // Calculate how many lines fit on the current page before the margin
+      const maxAvailableSpace = (pageHeight - 20) - y;
+      if (maxAvailableSpace < 16) {
+        doc.addPage();
+        y = 15;
+        doc.setFont('Helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text(`Capstone Painting Proposal #${proposalNo} - Notes (Continued)`, 15, y);
+        y += 8;
+      }
+
+      const availableSpace = (pageHeight - 20) - y;
+      const countToTake = Math.min(lines.length - lineIdx, Math.max(1, Math.floor((availableSpace - 8) / lineHeight)));
+      const chunk = lines.slice(lineIdx, lineIdx + countToTake);
+      const chunkBoxHeight = (chunk.length * lineHeight) + 6;
+
+      doc.setFillColor(248, 250, 252);
+      doc.rect(15, y, pageWidth - 30, chunkBoxHeight, 'F');
+      doc.setDrawColor(226, 232, 240);
+      doc.rect(15, y, pageWidth - 30, chunkBoxHeight, 'S');
+
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(51, 65, 85);
+      doc.text(chunk, 18, y + 4.5);
+
+      y += chunkBoxHeight + 4;
+      lineIdx += countToTake;
+    }
+    y += 2;
   }
 
   // Terms and Conditions Section
   if (termsAndConditions) {
-    ensureSpace(45);
+    ensureSpace(25);
     doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(9.5);
     doc.setTextColor(30, 41, 59);
     doc.text('TERMS & CONDITIONS', 15, y);
     y += 5;
 
-    doc.setFillColor(248, 250, 252);
-    doc.rect(15, y, pageWidth - 30, 32, 'F');
-    doc.setDrawColor(226, 232, 240);
-    doc.rect(15, y, pageWidth - 30, 32, 'S');
-
     doc.setFont('Helvetica', 'normal');
     doc.setFontSize(7.5);
-    doc.setTextColor(100, 100, 100);
-    const lines = doc.splitTextToSize(termsAndConditions, pageWidth - 40);
-    doc.text(lines.slice(0, 6), 18, y + 6);
-    y += 38;
+    const lines = doc.splitTextToSize(termsAndConditions, pageWidth - 36);
+    const lineHeight = 3.3;
+    let lineIdx = 0;
+
+    while (lineIdx < lines.length) {
+      const maxAvailableSpace = (pageHeight - 20) - y;
+      if (maxAvailableSpace < 16) {
+        doc.addPage();
+        y = 15;
+        doc.setFont('Helvetica', 'italic');
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text(`Capstone Painting Proposal #${proposalNo} - Terms (Continued)`, 15, y);
+        y += 8;
+      }
+
+      const availableSpace = (pageHeight - 20) - y;
+      const countToTake = Math.min(lines.length - lineIdx, Math.max(1, Math.floor((availableSpace - 8) / lineHeight)));
+      const chunk = lines.slice(lineIdx, lineIdx + countToTake);
+      const chunkBoxHeight = (chunk.length * lineHeight) + 6;
+
+      doc.setFillColor(248, 250, 252);
+      doc.rect(15, y, pageWidth - 30, chunkBoxHeight, 'F');
+      doc.setDrawColor(226, 232, 240);
+      doc.rect(15, y, pageWidth - 30, chunkBoxHeight, 'S');
+
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(80, 80, 80);
+      doc.text(chunk, 18, y + 4.5);
+
+      y += chunkBoxHeight + 4;
+      lineIdx += countToTake;
+    }
+    y += 2;
   }
 
   // Payment Schedule & Totals Section
@@ -793,23 +875,23 @@ export function generateReceiptPDF({
 
   doc.setTextColor(30, 41, 59);
   doc.setFont('Helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text('PaintNav CRM Services', 15, y);
+  doc.setFontSize(10.5);
+  doc.text('Capstone Painting Inc.', 15, y);
   doc.text(client?.name || 'Client', pageWidth / 2 + 10, y);
   y += 5;
 
   doc.setFont('Helvetica', 'normal');
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(100, 100, 100);
-  doc.text('Toronto Siding & Framing Division', 15, y);
+  doc.text('Professional Interior & Exterior Painting', 15, y);
   doc.text(client?.address || 'N/A', pageWidth / 2 + 10, y);
   y += 5;
 
-  doc.text('Email: support@paintnav.com', 15, y);
+  doc.text('Email: pay@capstonepainting.ca', 15, y);
   doc.text(`Phone: ${client?.phone || 'N/A'}`, pageWidth / 2 + 10, y);
   y += 5;
 
-  doc.text('Tel: (416) 555-0199', 15, y);
+  doc.text('Licensed & Fully Insured', 15, y);
   doc.text(`Email: ${client?.email || 'N/A'}`, pageWidth / 2 + 10, y);
   y += 10;
 

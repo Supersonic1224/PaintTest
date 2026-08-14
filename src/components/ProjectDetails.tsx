@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ClientLead, ProjectDetails as ProjectType, RoomSpec, ProjectTask, SurfaceTask, PaintColor, ProposalSettings, DEFAULT_PROPOSAL_SETTINGS, Installment } from '../types';
+import { ClientLead, ProjectDetails as ProjectType, RoomSpec, ProjectTask, SurfaceTask, PaintColor, ProposalSettings, DEFAULT_PROPOSAL_SETTINGS, Installment, ProjectPhoto } from '../types';
 import { googleSignIn, setAccessToken } from '../firebase';
 import { sendProposalEmail } from '../gmailService';
 import { generateProposalPDF, generateReceiptPDF } from '../pdfGenerator';
 import { uploadProjectPhotoToSupabaseBucket } from '../supabaseService';
 import { getUniqueRoomName } from '../utils/roomUtils';
 import { calculateRoomPricing, getAreaCoatMultiplier, getItemCoatHours, getProductForSurface, DEFAULT_REAL_PRODUCTS } from '../utils/pricing';
-import { APIProvider } from '@vis.gl/react-google-maps';
+import { CapstoneLogo } from './CapstoneLogo';
 import { 
   ArrowLeft, 
   Trash2, 
@@ -14,42 +14,44 @@ import {
   Save, 
   CheckSquare, 
   Paintbrush, 
-  Sparkles,
-  MapPin,
-  Phone,
-  Mail,
-  Calendar,
-  Hash,
-  DollarSign,
-  ChevronRight,
-  ChevronDown,
-  Copy,
-  X,
-  Send,
-  Share2,
-  Eye,
-  Download,
-  RefreshCw,
-  Clock,
-  ArrowUpRight,
-  CheckCircle2,
-  Camera,
-  Upload,
-  FileText,
-  CreditCard,
-  Menu,
-  ShieldAlert,
-  Globe,
-  ExternalLink,
-  Diamond,
-  FolderPlus,
-  Folder,
-  FolderOpen,
-  Target,
-  ListTodo,
-  Edit3,
-  Layers,
-  Sliders
+  Sparkles, 
+  MapPin, 
+  Phone, 
+  Mail, 
+  Calendar, 
+  Hash, 
+  DollarSign, 
+  ChevronRight, 
+  ChevronDown, 
+  Copy, 
+  X, 
+  Send, 
+  Share2, 
+  Eye, 
+  Download, 
+  RefreshCw, 
+  Clock, 
+  ArrowUpRight, 
+  CheckCircle2, 
+  Camera, 
+  Upload, 
+  FileText, 
+  CreditCard, 
+  Menu, 
+  ShieldAlert, 
+  Globe, 
+  ExternalLink, 
+  Diamond, 
+  FolderPlus, 
+  Folder, 
+  FolderOpen, 
+  Target, 
+  ListTodo, 
+  Edit3, 
+  Layers, 
+  Sliders,
+  Paperclip,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -210,12 +212,6 @@ export default function ProjectDetails({
     }
   }, [driveToken]);
 
-  // Google Maps Platform Integration States
-  const [isVerifyingAddress, setIsVerifyingAddress] = useState<boolean>(false);
-  const [addressVerified, setAddressVerified] = useState<boolean>(false);
-  const [showMapsConfigModal, setShowMapsConfigModal] = useState<boolean>(false);
-  const [mapsErrorType, setMapsErrorType] = useState<'NONE' | 'BILLING' | 'DENIED'>('NONE');
-  const [showOfflineFallbackModal, setShowOfflineFallbackModal] = useState<boolean>(false);
   const [showSendProposalEmailModal, setShowSendProposalEmailModal] = useState<boolean>(false);
   const [presetTab, setPresetTab] = useState<'interior' | 'exterior' | 'deck'>('interior');
 
@@ -224,135 +220,6 @@ export default function ProjectDetails({
   const [stripeInvoiceUrl, setStripeInvoiceUrl] = useState<string | null>(null);
   const [stripeError, setStripeError] = useState<string | null>(null);
   const [showStripeConfigModal, setShowStripeConfigModal] = useState<boolean>(false);
-
-  const GOOGLE_MAPS_API_KEY =
-    process.env.GOOGLE_MAPS_PLATFORM_KEY ||
-    (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
-    '';
-
-  const hasMapsKey = Boolean(GOOGLE_MAPS_API_KEY) && GOOGLE_MAPS_API_KEY !== 'YOUR_API_KEY';
-
-  const formatAddressLocally = (addr: string): string => {
-    if (!addr) return '';
-    let clean = addr.replace(/\s+/g, ' ').trim();
-    const segments = clean.split(',').map(seg => {
-      let s = seg.trim();
-      let words = s.split(' ').map(word => {
-        if (!word) return '';
-        const lowerWord = word.toLowerCase();
-        
-        // State/province codes (2-letter abbreviations)
-        if (lowerWord.length === 2 && /^(on|qc|ns|nb|mb|bc|pe|sk|ab|nl|yt|nt|nu|ny|ca|tx|fl|il|pa|oh|ga|nc|mi|nj|va|wa|az|ma|co|md|tn|wi|mn|co|hi|or|ok|ar|la|ms|al|sc|ky|wv|in|ia|mo|ne|ks|sd|nd|wy|mt|id|nv|ut|nm|wy)$/i.test(lowerWord)) {
-          return lowerWord.toUpperCase();
-        }
-        
-        // Common street suffixes
-        if (/^(st|ave|rd|blvd|dr|ln|pkwy|ct|crt|pl|sq|ter|way|hwy|cl|cres)$/i.test(lowerWord)) {
-          return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-        }
-
-        // Postal Codes or Zip Codes
-        if (/^[a-z]\d[a-z]$/i.test(lowerWord) || /^\d[a-z]\d$/i.test(lowerWord) || /^\d{5}(-\d{4})?$/.test(lowerWord)) {
-          return lowerWord.toUpperCase();
-        }
-        
-        // Default: Capitalize first letter
-        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-      });
-      return words.join(' ');
-    });
-    
-    return segments.join(', ');
-  };
-
-  const handleApplyOfflineFallback = () => {
-    const formatted = formatAddressLocally(clientAddress);
-    if (formatted) {
-      setClientAddress(formatted);
-      setAddressVerified(true);
-      triggerNotification('Address auto-corrected locally (Smart Fallback Mode)!', 'success');
-    }
-    setShowOfflineFallbackModal(false);
-  };
-
-  const handleVerifyAddress = () => {
-    if (!hasMapsKey) {
-      setMapsErrorType('NONE');
-      setShowMapsConfigModal(true);
-      return;
-    }
-
-    if (!clientAddress.trim()) {
-      triggerNotification('Please enter an address to verify.', 'error');
-      return;
-    }
-
-    setIsVerifyingAddress(true);
-    setMapsErrorType('NONE');
-    
-    const processGeocodeResult = (results: any, status: any) => {
-      setIsVerifyingAddress(false);
-      if (status === 'OK' && results && results[0]) {
-        const formatted = results[0].formatted_address;
-        setClientAddress(formatted);
-        setAddressVerified(true);
-        triggerNotification('Address auto-corrected and verified successfully via Google Maps!', 'success');
-      } else {
-        console.error('Geocoding status:', status);
-        
-        // Auto-apply local formatting fallback immediately so user has a working polished address
-        const formatted = formatAddressLocally(clientAddress);
-        if (formatted) {
-          setClientAddress(formatted);
-          setAddressVerified(true);
-        }
-
-        // Check for billing or denial issues
-        if (status === 'REQUEST_DENIED' || (status && status.toString().includes('billing'))) {
-          setMapsErrorType('BILLING');
-          setShowMapsConfigModal(true);
-          triggerNotification('Billing or API Key restriction detected. Auto-corrected via local fallback!', 'success');
-        } else {
-          triggerNotification(`Maps API returned: ${status}. Auto-corrected via local fallback!`, 'success');
-        }
-      }
-    };
-
-    const win = window as any;
-    if (typeof window !== 'undefined' && win.google && win.google.maps) {
-      try {
-        const geocoder = new win.google.maps.Geocoder();
-        geocoder.geocode({ address: clientAddress }, (results: any, status: any) => {
-          processGeocodeResult(results, status);
-        });
-      } catch (err) {
-        setIsVerifyingAddress(false);
-        console.error('Geocoding error:', err);
-        setShowOfflineFallbackModal(true);
-        triggerNotification('Address verification encountered an issue. Showing offline fallback.', 'error');
-      }
-    } else {
-      // Lazy load retry
-      setTimeout(() => {
-        if (typeof window !== 'undefined' && win.google && win.google.maps) {
-          try {
-            const geocoder = new win.google.maps.Geocoder();
-            geocoder.geocode({ address: clientAddress }, (results: any, status: any) => {
-              processGeocodeResult(results, status);
-            });
-          } catch (e) {
-            setIsVerifyingAddress(false);
-            setShowOfflineFallbackModal(true);
-            triggerNotification('Address verification engine is initializing. Showing offline fallback.', 'success');
-          }
-        } else {
-          setIsVerifyingAddress(false);
-          setShowOfflineFallbackModal(true);
-          triggerNotification('Google Maps script is loading. Showing offline fallback.', 'success');
-        }
-      }, 1200);
-    }
-  };
 
   // State parameter for Labor hourly rate - precisely customized to the reference
   const [hourlyLaborRate, setHourlyLaborRate] = useState<number>(() => {
@@ -412,15 +279,19 @@ export default function ProjectDetails({
   const [addingAreaRoomId, setAddingAreaRoomId] = useState<string | null>(null);
 
   const [generalNotes, setGeneralNotes] = useState(() => {
-    if (project.generalNotes !== undefined) return project.generalNotes;
+    if (project.generalNotes !== undefined && project.generalNotes !== '') return project.generalNotes;
     const saved = localStorage.getItem('proposal_settings');
+    let loadedSettings: ProposalSettings = DEFAULT_PROPOSAL_SETTINGS;
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
-        return parsed.interiorGeneralNotes || parsed.generalNotes || '';
+        loadedSettings = { ...DEFAULT_PROPOSAL_SETTINGS, ...JSON.parse(saved) };
       } catch (e) {}
     }
-    return '';
+    const isExteriorProject = (project.rooms || []).some(r => r.category === 'exterior' || r.category === 'deck');
+    if (isExteriorProject) {
+      return loadedSettings.exteriorGeneralNotes || DEFAULT_PROPOSAL_SETTINGS.exteriorGeneralNotes || '';
+    }
+    return loadedSettings.interiorGeneralNotes || (loadedSettings as any).generalNotes || DEFAULT_PROPOSAL_SETTINGS.interiorGeneralNotes || '';
   });
 
   const [termsAndConditions, setTermsAndConditions] = useState(() => {
@@ -553,6 +424,10 @@ export default function ProjectDetails({
   const [showShareModal, setShowShareModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [alertText, setAlertText] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Expandable proposal PDF preview sections
+  const [isPdfGeneralNotesExpanded, setIsPdfGeneralNotesExpanded] = useState(true);
+  const [isPdfTermsExpanded, setIsPdfTermsExpanded] = useState(false);
 
   // Expanded room accordion indices track
   const [expandedRoomIds, setExpandedRoomIds] = useState<Record<string, boolean>>({
@@ -806,7 +681,7 @@ export default function ProjectDetails({
   };
 
   // Photos tracker: State with automated persistence
-  const [photos, setPhotos] = useState<{ id: string; url: string; caption: string; createdAt: string }[]>(() => {
+  const [photos, setPhotos] = useState<ProjectPhoto[]>(() => {
     // 1. First priority: Check if the project object itself contains photos (loaded from Supabase / Firestore)
     if (project.photos && project.photos.length > 0) {
       return project.photos;
@@ -827,13 +702,17 @@ export default function ProjectDetails({
           id: 'photo-1',
           url: 'https://images.unsplash.com/photo-1562259949-e8e7689d7828?auto=format&fit=crop&w=400&q=80',
           caption: 'Foyer plaster repairs and tape preparation',
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          linkedItemId: '26061001-r1:walls',
+          linkedItemName: 'Foyer & Hallway → Walls'
         },
         {
           id: 'photo-2',
           url: 'https://images.unsplash.com/photo-1589939705384-5185137a7f0f?auto=format&fit=crop&w=400&q=80',
           caption: 'Premium primer baseboards coating application',
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          linkedItemId: '26061001-r1:baseboards',
+          linkedItemName: 'Foyer & Hallway → Baseboards'
         }
       ];
     }
@@ -850,8 +729,58 @@ export default function ProjectDetails({
     }
   }, [photos, project.id]);
 
+  // Compute linkable line items for photo attachments
+  const linkableItems = useMemo(() => {
+    const list: { id: string; label: string; group: string }[] = [
+      { id: '', label: '📌 General Project (No specific line item)', group: 'General' }
+    ];
+
+    rooms.forEach(r => {
+      list.push({ id: r.id, label: `🏠 ${r.name} (Entire Area)`, group: 'Rooms & Areas' });
+
+      // Standard surfaces
+      const surfaceKeys: Array<{ key: string; label: string }> = [
+        { key: 'walls', label: 'Walls' },
+        { key: 'ceilings', label: 'Ceilings' },
+        { key: 'baseboards', label: 'Baseboards' },
+        { key: 'doors', label: 'Doors' },
+        { key: 'doorFrames', label: 'Door Frames' },
+        { key: 'windows', label: 'Windows' },
+        { key: 'siding', label: 'Siding' },
+        { key: 'brick', label: 'Brick' },
+        { key: 'porchFloor', label: 'Porch Floor' },
+        { key: 'soffits', label: 'Soffits' },
+        { key: 'gutters', label: 'Gutters' },
+        { key: 'fascia', label: 'Fascia' },
+        { key: 'trims', label: 'Trims' },
+        { key: 'railings', label: 'Railings' },
+        { key: 'deckFloor', label: 'Deck Floor' },
+        { key: 'stairs', label: 'Stairs' },
+      ];
+
+      surfaceKeys.forEach(s => {
+        const area = (r as any)[s.key];
+        if (area && area.checked) {
+          list.push({ id: `${r.id}:${s.key}`, label: `${r.name} → ${s.label}`, group: `${r.name} Surfaces` });
+        }
+      });
+
+      // Surface Tasks
+      (r.surfaceTasks || []).forEach(t => {
+        list.push({ id: `${r.id}:task:${t.id}`, label: `${r.name} → Prep: ${t.text}`, group: `${r.name} Tasks` });
+      });
+    });
+
+    // Global tasks
+    project.tasks?.forEach(t => {
+      list.push({ id: `task:${t.id}`, label: `📋 Task: ${t.text}`, group: 'Global Tasks' });
+    });
+
+    return list;
+  }, [rooms, project.tasks]);
+
   // Handle local image uploads via client-side base64 FileReader with optional Supabase bucket upload
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>, targetItemId?: string, targetItemName?: string) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -863,11 +792,13 @@ export default function ProjectDetails({
         try {
           triggerNotification(`Uploading "${file.name}" to Supabase storage...`, 'success');
           const publicUrl = await uploadProjectPhotoToSupabaseBucket(project.id, file);
-          const newPhoto = {
+          const newPhoto: ProjectPhoto = {
             id: `photo-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             url: publicUrl,
             caption: file.name.split('.')[0] || 'Uncaptioned site photo',
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            linkedItemId: targetItemId || undefined,
+            linkedItemName: targetItemName || undefined
           };
           setPhotos(prev => [...prev, newPhoto]);
           triggerNotification(`Photo "${file.name}" saved to Supabase successfully.`);
@@ -882,11 +813,13 @@ export default function ProjectDetails({
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
-          const newPhoto = {
+          const newPhoto: ProjectPhoto = {
             id: `photo-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
             url: event.target.result as string,
             caption: file.name.split('.')[0] || 'Uncaptioned site photo',
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            linkedItemId: targetItemId || undefined,
+            linkedItemName: targetItemName || undefined
           };
           setPhotos(prev => [...prev, newPhoto]);
           triggerNotification(`Photo "${file.name}" uploaded successfully.`);
@@ -896,19 +829,74 @@ export default function ProjectDetails({
     });
   };
 
-  // Track if changes have been made to rooms config vs the original rooms list
+  // Track if changes have been made vs the original project state
   const isDirty = useMemo(() => {
-    if (project.rooms.length !== rooms.length) return true;
-    if (project.id !== '26061001' && hourlyLaborRate !== 85.00) return true;
-    for (let i = 0; i < rooms.length; i++) {
-      const orig = project.rooms[i];
-      if (!orig) return true;
-      if (rooms[i].length !== orig.length) return true;
-      if (rooms[i].width !== orig.width) return true;
-      if (rooms[i].height !== orig.height) return true;
-    }
-    return false;
-  }, [rooms, hourlyLaborRate, project.rooms]);
+    if (!project) return false;
+    // Check rooms count
+    if ((project.rooms || []).length !== rooms.length) return true;
+    
+    // Check hourly labor rate
+    if (hourlyLaborRate !== (project.summary?.hourlyLaborRate || 85.00)) return true;
+
+    // Check discount
+    if (discount !== (project.summary?.discount || 0)) return true;
+
+    // Check scope texts & terms
+    if (inclusions !== (project.inclusions || '')) return true;
+    if (exclusions !== (project.exclusions || '')) return true;
+    if (specialConditions !== (project.specialConditions || '')) return true;
+    if (generalNotes !== (project.generalNotes || '')) return true;
+    if (termsAndConditions !== (project.termsAndConditions || '')) return true;
+
+    // Compare room details JSON
+    const origRoomsStr = JSON.stringify((project.rooms || []).map(r => ({
+      id: r.id,
+      name: r.name,
+      length: r.length,
+      width: r.width,
+      height: r.height,
+      walls: r.walls,
+      ceilings: r.ceilings,
+      baseboards: r.baseboards,
+      windows: r.windows,
+      doors: r.doors,
+      doorFrames: r.doorFrames,
+      isOption: r.isOption,
+      paints: r.paints,
+      surfaceTasks: r.surfaceTasks,
+      notes: r.notes,
+    })));
+
+    const currentRoomsStr = JSON.stringify(rooms.map(r => ({
+      id: r.id,
+      name: r.name,
+      length: r.length,
+      width: r.width,
+      height: r.height,
+      walls: r.walls,
+      ceilings: r.ceilings,
+      baseboards: r.baseboards,
+      windows: r.windows,
+      doors: r.doors,
+      doorFrames: r.doorFrames,
+      isOption: r.isOption,
+      paints: r.paints,
+      surfaceTasks: r.surfaceTasks,
+      notes: r.notes,
+    })));
+
+    return origRoomsStr !== currentRoomsStr;
+  }, [
+    rooms,
+    hourlyLaborRate,
+    discount,
+    inclusions,
+    exclusions,
+    specialConditions,
+    generalNotes,
+    termsAndConditions,
+    project
+  ]);
 
   const getRoomsBreakdownText = () => {
     return rooms.map(room => {
@@ -1350,37 +1338,26 @@ export default function ProjectDetails({
           className: 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/10'
         };
       case 'Sent':
-        if (isDirty) {
-          return {
-            label: 'Send Change Order',
-            onClick: async () => {
+        return {
+          label: 'Send Invoice',
+          onClick: async () => {
+            if (isDirty) {
               const updated = getLatestProjectPayload('Sent');
               await handleSaveBoth(updated);
-              triggerNotification('Change Order CO-1 submitted successfully!');
-            },
-            className: 'bg-orange-600 hover:bg-orange-700 text-white shadow-orange-600/10'
-          };
-        }
-        return {
-          label: 'Mark Approved',
-          onClick: async () => {
-            setStatus('Approved');
-            const updated = getLatestProjectPayload('Approved');
-            await handleSaveBoth(updated, 'Approved');
-            triggerNotification('Proposal accepted! Launching Stripe auto-billing for 30% upfront deposit...', 'success');
-            await sendStripeBill(liveSummary.deposit, false);
+            }
+            handleOpenInvoiceModalWithPreset(30, 'Upfront Deposit (30%)');
           },
-          className: 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/10'
+          className: 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-600/10'
         };
       case 'Approved':
         return {
           label: 'Send Invoice',
           onClick: async () => {
-            setStatus('Invoiced');
-            const updated = getLatestProjectPayload('Invoiced');
-            await handleSaveBoth(updated, 'Invoiced');
-            triggerNotification('Launching Stripe final billing for 70% balance...', 'success');
-            await sendStripeBill(liveSummary.balance, false);
+            if (isDirty) {
+              const updated = getLatestProjectPayload('Approved');
+              await handleSaveBoth(updated);
+            }
+            handleOpenInvoiceModalWithPreset(70, 'Final Balance (70%)');
           },
           className: 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-600/10'
         };
@@ -1394,17 +1371,17 @@ export default function ProjectDetails({
         };
       default:
         return {
-          label: 'Sync Progress',
+          label: 'Send Invoice',
           onClick: async () => {
-            await handleSave();
+            handleOpenInvoiceModalWithPreset(30, 'Upfront Deposit (30%)');
           },
-          className: 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/10'
+          className: 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-600/10'
         };
     }
   };
 
   const btnConfig = getProgressSendButtonConfig();
-  const showChangeOrderBanner = (project.status === 'Sent' || project.status === 'Approved') && isDirty;
+  const showChangeOrderBanner = project.status !== 'Draft' && isDirty;
 
   // -------------------------------------------------------------
   // DYNAMIC ESTIMATOR CALCULATION ENGINE
@@ -1418,9 +1395,10 @@ export default function ProjectDetails({
 
     const rates = proposalSettings?.rates;
     const realProducts = proposalSettings?.realProducts || DEFAULT_REAL_PRODUCTS;
+    const calculationEngine = proposalSettings?.calculationEngine || proposalSettings?.rates?.calculationEngine || 'paintnav';
 
     rooms.forEach(room => {
-      const breakdown = calculateRoomPricing(room, rates, realProducts);
+      const breakdown = calculateRoomPricing(room, { ...rates, calculationEngine }, realProducts);
       roomCosts[room.id] = breakdown.totalCost;
       roomHours[room.id] = breakdown.hours;
       roomMaterials[room.id] = breakdown.materialCost;
@@ -1431,10 +1409,10 @@ export default function ProjectDetails({
       }
     });
 
-    // Add baseline site setup & prep work base if project has items
+    // Add baseline site setup & prep work base if project has items and setupHours is explicitly configured
     if (totalHours > 0) {
-      const setupH = rates?.setupHours ?? 5.0;
-      const setupM = rates?.setupMaterials ?? 50.0;
+      const setupH = rates?.setupHours ?? 0;
+      const setupM = rates?.setupMaterials ?? 0;
       totalHours += setupH;
       totalMaterials += setupM;
     }
@@ -1492,30 +1470,30 @@ export default function ProjectDetails({
     let materials = 0;
 
     const coatMult = getAreaCoatMultiplier(coats);
-    const assignedProd = getProductForSurface(subKey, room, realProducts);
+    const assignedProd = getProductForSurface(room, subKey, realProducts);
 
     switch (subKey) {
       // Interior
       case 'walls': {
         const speed = r?.wallsSpeed ?? 175;
-        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.wallsCoverage ?? 350;
-        const matCost = assignedProd?.pricePerGal ?? r?.wallsMaterialCost ?? 78;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? assignedProd?.coverage ?? r?.wallsCoverage ?? 350;
+        const matCost = assignedProd?.pricePerGal ?? assignedProd?.price ?? r?.wallsMaterialCost ?? 78;
         hours = (wArea / speed) * coatMult;
         materials = (wArea / coverage) * coatMult * matCost;
         break;
       }
       case 'ceilings': {
         const speed = r?.ceilingsSpeed ?? 100;
-        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.ceilingsCoverage ?? 350;
-        const matCost = assignedProd?.pricePerGal ?? r?.ceilingsMaterialCost ?? 78;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? assignedProd?.coverage ?? r?.ceilingsCoverage ?? 350;
+        const matCost = assignedProd?.pricePerGal ?? assignedProd?.price ?? r?.ceilingsMaterialCost ?? 78;
         hours = (cArea / speed) * coatMult;
         materials = (cArea / coverage) * coatMult * matCost;
         break;
       }
       case 'baseboards': {
         const speed = r?.baseboardsSpeed ?? 65;
-        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.baseboardsCoverage ?? 200;
-        const matCost = assignedProd?.pricePerGal ?? r?.baseboardsMaterialCost ?? 85;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? assignedProd?.coverage ?? r?.baseboardsCoverage ?? 200;
+        const matCost = assignedProd?.pricePerGal ?? assignedProd?.price ?? r?.baseboardsMaterialCost ?? 85;
         hours = (perimeter / speed) * coatMult;
         materials = (perimeter / coverage) * coatMult * matCost;
         break;
@@ -1548,32 +1526,32 @@ export default function ProjectDetails({
       // Exterior
       case 'ext-siding': {
         const speed = r?.sidingSpeed ?? 180;
-        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.sidingCoverage ?? 350;
-        const matCost = assignedProd?.pricePerGal ?? r?.sidingMaterialCost ?? 78;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? assignedProd?.coverage ?? r?.sidingCoverage ?? 350;
+        const matCost = assignedProd?.pricePerGal ?? assignedProd?.price ?? r?.sidingMaterialCost ?? 78;
         hours = (wArea / speed) * coatMult;
         materials = (wArea / coverage) * coatMult * matCost;
         break;
       }
       case 'ext-brick-stain': {
         const speed = r?.brickSpeed ?? 120;
-        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.brickCoverage ?? 250;
-        const matCost = assignedProd?.pricePerGal ?? r?.brickMaterialCost ?? 85;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? assignedProd?.coverage ?? r?.brickCoverage ?? 250;
+        const matCost = assignedProd?.pricePerGal ?? assignedProd?.price ?? r?.brickMaterialCost ?? 85;
         hours = (wArea / speed) * coatMult;
         materials = (wArea / coverage) * coatMult * matCost;
         break;
       }
       case 'ext-porch-floor': {
         const speed = r?.porchFloorSpeed ?? 150;
-        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.porchFloorCoverage ?? 350;
-        const matCost = assignedProd?.pricePerGal ?? r?.porchFloorMaterialCost ?? 78;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? assignedProd?.coverage ?? r?.porchFloorCoverage ?? 350;
+        const matCost = assignedProd?.pricePerGal ?? assignedProd?.price ?? r?.porchFloorMaterialCost ?? 78;
         hours = (cArea / speed) * coatMult;
         materials = (cArea / coverage) * coatMult * matCost;
         break;
       }
       case 'ext-soffits': {
         const speed = r?.soffitsSpeed ?? 50;
-        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.soffitsCoverage ?? 200;
-        const matCost = assignedProd?.pricePerGal ?? r?.soffitsMaterialCost ?? 78;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? assignedProd?.coverage ?? r?.soffitsCoverage ?? 200;
+        const matCost = assignedProd?.pricePerGal ?? assignedProd?.price ?? r?.soffitsMaterialCost ?? 78;
         hours = (perimeter / speed) * coatMult;
         materials = (perimeter / coverage) * coatMult * matCost;
         break;
@@ -1596,8 +1574,8 @@ export default function ProjectDetails({
       }
       case 'ext-trims': {
         const speed = r?.trimsSpeed ?? 60;
-        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.trimsCoverage ?? 250;
-        const matCost = assignedProd?.pricePerGal ?? r?.trimsMaterialCost ?? 85;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? assignedProd?.coverage ?? r?.trimsCoverage ?? 250;
+        const matCost = assignedProd?.pricePerGal ?? assignedProd?.price ?? r?.trimsMaterialCost ?? 85;
         hours = (perimeter / speed) * coatMult;
         materials = (perimeter / coverage) * coatMult * matCost;
         break;
@@ -1674,8 +1652,8 @@ export default function ProjectDetails({
       }
       case 'staining': {
         const speed = r?.stainingSpeed ?? 80;
-        const coverage = assignedProd?.coverageSqFtPerGal ?? r?.stainingCoverage ?? 250;
-        const matCost = assignedProd?.pricePerGal ?? r?.stainingMaterialCost ?? 60;
+        const coverage = assignedProd?.coverageSqFtPerGal ?? assignedProd?.coverage ?? r?.stainingCoverage ?? 250;
+        const matCost = assignedProd?.pricePerGal ?? assignedProd?.price ?? r?.stainingMaterialCost ?? 60;
         hours = (cArea / speed) * coatMult;
         materials = (cArea / coverage) * coatMult * matCost;
         break;
@@ -1846,67 +1824,82 @@ export default function ProjectDetails({
         const inclusionsHTML = inclusions ? `<div style="margin-bottom: 12px;"><strong>Inclusions:</strong><br/>${inclusions.replace(/\n/g, '<br/>')}</div>` : '';
         const exclusionsHTML = exclusions ? `<div style="margin-bottom: 12px;"><strong>Exclusions:</strong><br/>${exclusions.replace(/\n/g, '<br/>')}</div>` : '';
         const specialHTML = specialConditions ? `<div style="margin-bottom: 12px;"><strong>Special Conditions:</strong><br/>${specialConditions.replace(/\n/g, '<br/>')}</div>` : '';
+        const generalNotesHTML = generalNotes ? `
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <h4 style="margin-top: 0; margin-bottom: 8px; color: #0f172a;">General Project Expectations & Notes</h4>
+            <div style="font-size: 12px; color: #475569; line-height: 1.6; white-space: pre-line;">${generalNotes}</div>
+          </div>
+        ` : '';
 
         const htmlBody = `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333; line-height: 1.6;">
-            <h2 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">PaintNav Proposal & Estimate</h2>
-            <p>Dear ${clientName},</p>
-            <p>${gmailMessage.replace(/\n/g, '<br/>')}</p>
-
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="${window.location.origin}/?proposalId=${project.id}&action=sign" 
-                 style="background-color: #2563eb; color: #ffffff !important; padding: 14px 28px; text-decoration: none; border-radius: 12px; font-weight: bold; display: inline-block; font-size: 15px; box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);"
-                 target="_blank">
-                ✍️ Review & Sign Proposal Online
-              </a>
+          <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; color: #333; line-height: 1.6;">
+            <div style="background-color: #0f172a; padding: 18px 24px; border-radius: 12px 12px 0 0; text-align: left;">
+              <h2 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">CAPSTONE PAINTING</h2>
+              <p style="color: #94a3b8; margin: 4px 0 0 0; font-size: 11px; text-transform: uppercase; font-family: monospace;">Official Proposal & Estimate #${proposalNo}</p>
             </div>
             
-            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-              <h3 style="margin-top: 0; color: #0f172a;">Summary of Estimate #${proposalNo}</h3>
-              <p><strong>Date:</strong> ${projectDate}</p>
-              <p><strong>Client:</strong> ${clientName}</p>
-              <p><strong>Address:</strong> ${clientAddress}</p>
-            </div>
+            <div style="padding: 20px 4px;">
+              <p>Dear ${clientName},</p>
+              <p>${gmailMessage.replace(/\n/g, '<br/>')}</p>
 
-            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-              <thead>
-                <tr style="background-color: #f1f5f9;">
-                  <th style="padding: 10px; text-align: left; border-bottom: 2px solid #cbd5e1;">Room / Option</th>
-                  <th style="padding: 10px; text-align: left; border-bottom: 2px solid #cbd5e1;">Details</th>
-                  <th style="padding: 10px; text-align: right; border-bottom: 2px solid #cbd5e1;">Cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${roomsList || '<tr><td colspan="3" style="padding: 10px; text-align: center; color: #999;">No standard scope items</td></tr>'}
-                ${optionsList}
-              </tbody>
-            </table>
-
-            <div style="text-align: right; margin-bottom: 25px; padding-top: 10px; border-top: 2px solid #e2e8f0;">
-              <p style="margin: 4px 0;"><strong>Subtotal:</strong> $${liveSummary.subtotal.toLocaleString()}</p>
-              <p style="margin: 4px 0;"><strong>HST (13%):</strong> $${liveSummary.hst.toLocaleString()}</p>
-              <h3 style="margin: 8px 0; color: #166534;">Grand Total: $${liveSummary.total.toLocaleString()}</h3>
-              <p style="font-size: 11px; color: #666; margin: 4px 0;">30% Deposit Due: $${liveSummary.deposit.toLocaleString()}</p>
-            </div>
-
-            ${inclusionsHTML || exclusionsHTML || specialHTML ? `
-              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                <h4 style="margin-top: 0; margin-bottom: 10px; color: #0f172a;">Scope Comments</h4>
-                ${inclusionsHTML}
-                ${exclusionsHTML}
-                ${specialHTML}
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${window.location.origin}/?proposalId=${project.id}&action=sign" 
+                   style="background-color: #0070f3; color: #ffffff !important; padding: 14px 28px; text-decoration: none; border-radius: 12px; font-weight: bold; display: inline-block; font-size: 15px; box-shadow: 0 4px 10px rgba(0, 112, 243, 0.25);"
+                   target="_blank">
+                  ✍️ Review & Sign Proposal Online
+                </a>
               </div>
-            ` : ''}
+              
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <h3 style="margin-top: 0; color: #0f172a;">Summary of Estimate #${proposalNo}</h3>
+                <p style="margin: 4px 0;"><strong>Date:</strong> ${projectDate}</p>
+                <p style="margin: 4px 0;"><strong>Client:</strong> ${clientName}</p>
+                <p style="margin: 4px 0;"><strong>Address:</strong> ${clientAddress}</p>
+              </div>
 
-            <div style="text-align: center; margin-top: 35px; border-top: 1px solid #e2e8f0; padding-top: 20px;">
-              <p style="font-size: 13px; font-weight: bold; color: #1e3a8a;">This proposal is ready for your signature online.</p>
-              <p style="font-size: 11px; color: #999; margin-top: 15px;">Powered securely by PaintNav Painting Estimator.</p>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                <thead>
+                  <tr style="background-color: #f1f5f9;">
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #cbd5e1;">Room / Option</th>
+                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #cbd5e1;">Details</th>
+                    <th style="padding: 10px; text-align: right; border-bottom: 2px solid #cbd5e1;">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${roomsList || '<tr><td colspan="3" style="padding: 10px; text-align: center; color: #999;">No standard scope items</td></tr>'}
+                  ${optionsList}
+                </tbody>
+              </table>
+
+              <div style="text-align: right; margin-bottom: 25px; padding-top: 10px; border-top: 2px solid #e2e8f0;">
+                <p style="margin: 4px 0;"><strong>Subtotal:</strong> $${liveSummary.subtotal.toLocaleString()}</p>
+                <p style="margin: 4px 0;"><strong>HST (13%):</strong> $${liveSummary.hst.toLocaleString()}</p>
+                <h3 style="margin: 8px 0; color: #166534;">Grand Total: $${liveSummary.total.toLocaleString()}</h3>
+                <p style="font-size: 11px; color: #666; margin: 4px 0;">30% Deposit Due: $${liveSummary.deposit.toLocaleString()}</p>
+              </div>
+
+              ${inclusionsHTML || exclusionsHTML || specialHTML ? `
+                <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                  <h4 style="margin-top: 0; margin-bottom: 10px; color: #0f172a;">Scope Comments</h4>
+                  ${inclusionsHTML}
+                  ${exclusionsHTML}
+                  ${specialHTML}
+                </div>
+              ` : ''}
+
+              ${generalNotesHTML}
+
+              <div style="text-align: center; margin-top: 35px; border-top: 1px solid #e2e8f0; padding-top: 20px;">
+                <p style="font-size: 13px; font-weight: bold; color: #0f172a;">Capstone Painting Inc. • pay@capstonepainting.ca</p>
+                <p style="font-size: 11px; color: #999; margin-top: 8px;">Official painting proposal ready for online review and digital signature.</p>
+              </div>
             </div>
           </div>
         `;
 
+        const latestPayload = getLatestProjectPayload('Sent');
         const { base64: proposalPdfBase64 } = generateProposalPDF({
-          project,
+          project: latestPayload,
           client,
           rooms,
           liveSummary,
@@ -1934,7 +1927,7 @@ export default function ProjectDetails({
           subject: gmailSubject,
           body: htmlBody,
           pdfBase64: proposalPdfBase64,
-          pdfFilename: `Proposal_${proposalNo}.pdf`,
+          pdfFilename: `Capstone_Painting_Proposal_${proposalNo}.pdf`,
           attachments: imageAttachments,
         });
 
@@ -2402,7 +2395,7 @@ export default function ProjectDetails({
   };
 
   return (
-    <APIProvider apiKey={GOOGLE_MAPS_API_KEY} version="weekly">
+    <>
       <div className="min-h-screen bg-[#0e0e0e] text-zinc-100 flex flex-col font-sans relative selection:bg-blue-600/30 selection:text-white">
       
       {/* 1. TOP DENSE NAVIGATION BAR MATCHING MOCKUP */}
@@ -2587,7 +2580,7 @@ export default function ProjectDetails({
             </div>
           </div>
 
-          {/* Full-width interactive address spec */}
+          {/* Full-width address spec */}
           <div className="flex-grow relative flex items-center">
             <div className="absolute left-3.5 text-zinc-500 z-10">
               <MapPin className="w-3.5 h-3.5 text-zinc-500" />
@@ -2595,27 +2588,10 @@ export default function ProjectDetails({
             <input
               type="text"
               value={clientAddress}
-              onChange={(e) => {
-                setClientAddress(e.target.value);
-                setAddressVerified(false);
-              }}
+              onChange={(e) => setClientAddress(e.target.value)}
               placeholder="Client Address"
-              className="w-full bg-neutral-950 border border-[#222222] focus:border-[#444] rounded-xl pl-10 pr-28 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:ring-0 font-medium"
+              className="w-full bg-neutral-950 border border-[#222222] focus:border-[#444] rounded-xl pl-10 pr-3.5 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:ring-0 font-medium"
             />
-            <div className="absolute right-2 flex items-center gap-1.5 z-10">
-              {addressVerified && (
-                <span className="text-emerald-500 text-[10px] font-mono font-bold flex items-center gap-0.5" title="Verified by Google Maps">
-                  ✓ Verified
-                </span>
-              )}
-              <button
-                onClick={handleVerifyAddress}
-                disabled={isVerifyingAddress}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white text-[10px] font-bold px-2 py-1 rounded-lg transition cursor-pointer font-sans shrink-0"
-              >
-                {isVerifyingAddress ? 'Verifying...' : '✨ Auto-Correct'}
-              </button>
-            </div>
           </div>
 
         </div>
@@ -2694,8 +2670,8 @@ export default function ProjectDetails({
               <RefreshCw className="w-4 h-4 text-[#bf5a15]" />
             </div>
             <div>
-              <span className="font-bold text-[#9c4210]">Editing Change Order CO-1</span>
-              <span className="text-[#bf5a15] font-medium"> — make your changes then send for approval</span>
+              <span className="font-bold text-[#9c4210]">Change Order / Scope Modifications Detected</span>
+              <span className="text-[#bf5a15] font-medium"> — You have modified the scope. Save your changes or send an updated invoice.</span>
             </div>
           </div>
         )}
@@ -3387,42 +3363,57 @@ export default function ProjectDetails({
               </div>
 
               {/* 50% Direct Cost Benchmark Target Breakdown Card */}
-              <div className="bg-neutral-900/60 border border-blue-900/40 p-3.5 rounded-xl mt-3 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider font-mono flex items-center gap-1.5">
-                    <Target className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                    50% Direct Cost Benchmark Target
-                  </span>
-                  <span className="text-[9px] text-zinc-500 font-mono">35% Labor | 15% Material</span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                  <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
-                    <div className="text-[9px] text-zinc-500 uppercase font-bold">Target Labor (35%)</div>
-                    <div className="text-zinc-200 font-bold mt-0.5 text-xs">
-                      ${Math.round(liveSummary.subtotal * 0.35).toLocaleString()}
+              {(() => {
+                const painterWageRate = hourlyLaborRate * 0.35; // Standard 35% labor cost allowance
+                const directLaborWageCost = Math.round(liveSummary.hours * painterWageRate);
+                const directMaterialCost = liveSummary.materialCost;
+                const totalDirectCost = directLaborWageCost + directMaterialCost;
+                const projectedGrossProfit = Math.max(0, liveSummary.subtotal - totalDirectCost);
+                const grossMarginPct = liveSummary.subtotal > 0 ? (projectedGrossProfit / liveSummary.subtotal) * 100 : 50;
+
+                return (
+                  <div className="bg-neutral-900/60 border border-blue-900/40 p-3.5 rounded-xl mt-3 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-blue-400 font-bold uppercase tracking-wider font-mono flex items-center gap-1.5">
+                        <Target className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                        50% Direct Cost Benchmark Target
+                      </span>
+                      <span className="text-[9px] text-zinc-400 font-mono">35% Painter Wages | 15% Materials</span>
                     </div>
-                    <div className="text-[9px] text-zinc-400 mt-1">
-                      Actual: <span className={liveSummary.laborCost <= liveSummary.subtotal * 0.35 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>${liveSummary.laborCost.toLocaleString()}</span> ({((liveSummary.laborCost / (liveSummary.subtotal || 1)) * 100).toFixed(1)}%)
+                    
+                    <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                      <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
+                        <div className="text-[9px] text-zinc-500 uppercase font-bold">Direct Labor (Wages @ 35%)</div>
+                        <div className="text-zinc-200 font-bold mt-0.5 text-xs">
+                          ${directLaborWageCost.toLocaleString()}
+                        </div>
+                        <div className="text-[9px] text-zinc-400 mt-1">
+                          {((directLaborWageCost / (liveSummary.subtotal || 1)) * 100).toFixed(1)}% of subtotal ({liveSummary.hours} hrs @ ${painterWageRate.toFixed(2)}/hr)
+                        </div>
+                      </div>
+
+                      <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
+                        <div className="text-[9px] text-zinc-500 uppercase font-bold">Direct Materials (15% Target)</div>
+                        <div className="text-zinc-200 font-bold mt-0.5 text-xs">
+                          ${directMaterialCost.toLocaleString()}
+                        </div>
+                        <div className="text-[9px] text-zinc-400 mt-1">
+                          {((directMaterialCost / (liveSummary.subtotal || 1)) * 100).toFixed(1)}% of subtotal
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 border-t border-neutral-800/80 text-[10px] font-mono">
+                      <span className="text-zinc-400">
+                        Total Direct Cost: <strong className="text-zinc-200">${totalDirectCost.toLocaleString()}</strong> ({((totalDirectCost / (liveSummary.subtotal || 1)) * 100).toFixed(1)}%)
+                      </span>
+                      <span className="text-zinc-400">
+                        Gross Margin: <strong className={grossMarginPct >= 45 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{grossMarginPct.toFixed(1)}%</strong> (${projectedGrossProfit.toLocaleString()})
+                      </span>
                     </div>
                   </div>
-
-                  <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
-                    <div className="text-[9px] text-zinc-500 uppercase font-bold">Target Material (15%)</div>
-                    <div className="text-zinc-200 font-bold mt-0.5 text-xs">
-                      ${Math.round(liveSummary.subtotal * 0.15).toLocaleString()}
-                    </div>
-                    <div className="text-[9px] text-zinc-400 mt-1">
-                      Actual: <span className={liveSummary.materialCost <= liveSummary.subtotal * 0.15 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>${liveSummary.materialCost.toLocaleString()}</span> ({((liveSummary.materialCost / (liveSummary.subtotal || 1)) * 100).toFixed(1)}%)
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between pt-1 border-t border-neutral-800/80 text-[10px] font-mono">
-                  <span className="text-zinc-400">Total Direct Target (50%): <strong className="text-zinc-200">${Math.round(liveSummary.subtotal * 0.50).toLocaleString()}</strong></span>
-                  <span className="text-zinc-400">Gross Margin Target: <strong className="text-emerald-400">50.0%</strong></span>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Dynamic Adjustments Panel */}
               <div className="bg-neutral-900/40 border border-neutral-850/60 p-3 rounded-xl mt-3 space-y-3">
@@ -3555,23 +3546,30 @@ export default function ProjectDetails({
             {/* PROPOSAL PHOTOS CARD */}
             <div id="section-photos" className="scroll-mt-24 bg-[#161616] border border-[#222222] rounded-2xl p-5 text-left shadow-lg space-y-4">
               <div className="flex items-center justify-between border-b border-neutral-800/60 pb-3">
-                <span className="text-zinc-400 font-bold text-xs uppercase tracking-widest font-mono flex items-center gap-2">
-                  <Camera className="w-4 h-4 text-zinc-500" /> Proposal Photos ({photos.length})
-                </span>
-                <span className="text-[10px] text-zinc-500 font-medium font-mono uppercase">
-                  Site Attachments
+                <div>
+                  <span className="text-zinc-300 font-bold text-xs uppercase tracking-widest font-mono flex items-center gap-2">
+                    <Camera className="w-4 h-4 text-blue-400" /> Proposal & Line Item Photos ({photos.length})
+                  </span>
+                  <p className="text-[10px] text-zinc-500 font-sans mt-0.5">
+                    Link photos directly to specific rooms, surface coats, or prep repair items
+                  </p>
+                </div>
+                <span className="text-[10px] text-blue-400 bg-blue-950/70 border border-blue-800/50 font-bold font-mono px-2 py-0.5 rounded-full uppercase">
+                  PaintScout Sync
                 </span>
               </div>
 
               {/* Photos display flex row/grid */}
               {photos.length === 0 ? (
-                <div className="py-6 border border-dashed border-neutral-800 rounded-xl text-center text-zinc-500 text-xs italic">
-                  No site photos attached yet.
+                <div className="py-8 border border-dashed border-neutral-800 rounded-xl text-center text-zinc-500 text-xs italic space-y-1">
+                  <Camera className="w-6 h-6 text-zinc-600 mx-auto" />
+                  <p>No site photos attached yet.</p>
+                  <p className="text-[10px] text-zinc-600">Upload inspection photos below to link with specific rooms or surfaces.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-3 max-h-[320px] overflow-y-auto pr-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[420px] overflow-y-auto pr-1">
                   {photos.map((item) => (
-                    <div key={item.id} className="group relative bg-[#121212] border border-neutral-850 rounded-xl overflow-hidden shadow-sm flex flex-col">
+                    <div key={item.id} className="group relative bg-[#121212] border border-neutral-850 hover:border-neutral-700 rounded-xl overflow-hidden shadow-sm flex flex-col transition">
                       {/* Image render */}
                       <div className="aspect-video w-full overflow-hidden bg-neutral-950 relative">
                         <img 
@@ -3586,25 +3584,64 @@ export default function ProjectDetails({
                             setPhotos(prev => prev.filter(p => p.id !== item.id));
                             triggerNotification('Photo attachment deleted.');
                           }}
-                          className="absolute top-2 right-2 p-1.5 bg-black/70 hover:bg-neutral-900 text-zinc-300 hover:text-red-400 rounded-lg opacity-0 group-hover:opacity-100 transition cursor-pointer"
+                          className="absolute top-2 right-2 p-1.5 bg-black/70 hover:bg-neutral-900 text-zinc-300 hover:text-red-400 rounded-lg opacity-0 group-hover:opacity-100 transition cursor-pointer z-10"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
+
+                        {/* Linked item tag overlay */}
+                        {item.linkedItemId && (
+                          <div className="absolute bottom-2 left-2 max-w-[85%] bg-black/80 backdrop-blur-xs text-blue-300 border border-blue-500/30 text-[9px] font-mono px-2 py-0.5 rounded flex items-center gap-1 truncate shadow">
+                            <Paperclip className="w-2.5 h-2.5 text-blue-400 shrink-0" />
+                            <span className="truncate">{item.linkedItemName || 'Linked Item'}</span>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Caption text edit inline */}
-                      <div className="p-2 flex-grow">
-                        <input
-                          type="text"
-                          value={item.caption}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setPhotos(prev => prev.map(p => p.id === item.id ? { ...p, caption: val } : p));
-                          }}
-                          className="w-full bg-transparent border-0 font-medium text-[11px] text-zinc-300 placeholder-zinc-600 focus:outline-none focus:ring-0 p-0 truncate font-sans hover:text-white"
-                          title="Click to edit caption"
-                          placeholder="Edit caption..."
-                        />
+                      {/* Photo details: Caption and Line-Item Linker */}
+                      <div className="p-2.5 space-y-2 flex-grow flex flex-col justify-between bg-neutral-950/40">
+                        {/* Caption input */}
+                        <div>
+                          <label className="text-[9px] font-mono text-zinc-500 uppercase block">Photo Caption</label>
+                          <input
+                            type="text"
+                            value={item.caption}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPhotos(prev => prev.map(p => p.id === item.id ? { ...p, caption: val } : p));
+                            }}
+                            className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 font-medium text-[11px] text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500 font-sans hover:text-white mt-0.5"
+                            placeholder="e.g. Cracked drywall repair on north wall..."
+                          />
+                        </div>
+
+                        {/* Attach to Line Item dropdown */}
+                        <div>
+                          <label className="text-[9px] font-mono text-zinc-500 uppercase flex items-center gap-1">
+                            <Paperclip className="w-2.5 h-2.5 text-zinc-400" /> Attach to Specific Item
+                          </label>
+                          <select
+                            value={item.linkedItemId || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const selectedOpt = linkableItems.find(li => li.id === val);
+                              const cleanName = selectedOpt ? selectedOpt.label.replace(/^[^\w\s]+/, '').trim() : undefined;
+                              setPhotos(prev => prev.map(p => p.id === item.id ? { 
+                                ...p, 
+                                linkedItemId: val || undefined, 
+                                linkedItemName: val ? cleanName : undefined 
+                              } : p));
+                              triggerNotification(val ? `Linked photo to "${cleanName}"` : 'Photo set to General Project');
+                            }}
+                            className="w-full bg-neutral-900 border border-neutral-800 rounded px-2 py-1 text-[10px] text-zinc-300 font-mono focus:outline-none focus:border-blue-500 cursor-pointer mt-0.5 truncate"
+                          >
+                            {linkableItems.map((li) => (
+                              <option key={li.id} value={li.id} className="bg-neutral-900 text-zinc-200">
+                                {li.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -3617,7 +3654,7 @@ export default function ProjectDetails({
                   type="file"
                   multiple
                   accept="image/*"
-                  onChange={handlePhotoUpload}
+                  onChange={(e) => handlePhotoUpload(e)}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                 />
                 <Upload className="w-5 h-5 text-zinc-500 group-hover:text-blue-400 group-hover:scale-110 transition duration-300 mb-2" />
@@ -3625,7 +3662,7 @@ export default function ProjectDetails({
                   Upload Site Photos
                 </span>
                 <span className="text-[10px] text-zinc-600 mt-1">
-                  Drag & drop, base64 cached locally
+                  Drag & drop multiple photos, then link them to specific rooms or repairs
                 </span>
               </div>
             </div>
@@ -3869,10 +3906,23 @@ export default function ProjectDetails({
                                       </span>
                                     )}
                                     {room.isOption && (
-                                      <span className="text-[9px] bg-yellow-950/80 text-yellow-500 border border-yellow-500/30 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                                        Option
+                                      <span className="text-[9px] bg-yellow-950/80 text-yellow-500 border border-yellow-500/30 font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+                                        <span>Option</span>
+                                        {room.optionGroupId && (
+                                          <span className="text-yellow-300 font-mono">[{room.optionGroupId} • {room.optionSelectionMode === 'radio' || !room.optionSelectionMode ? 'Radio: Pick 1' : 'Multi'}]</span>
+                                        )}
                                       </span>
                                     )}
+                                    {(() => {
+                                      const roomPhotos = photos.filter(p => p.linkedItemId === room.id || p.linkedItemId?.startsWith(`${room.id}:`));
+                                      if (roomPhotos.length === 0) return null;
+                                      return (
+                                        <span className="text-[9px] bg-blue-950/80 text-blue-300 border border-blue-600/40 font-bold px-2 py-0.5 rounded-full font-mono flex items-center gap-1 shadow-sm">
+                                          <Camera className="w-2.5 h-2.5 text-blue-400" />
+                                          <span>{roomPhotos.length} {roomPhotos.length === 1 ? 'Photo' : 'Photos'}</span>
+                                        </span>
+                                      );
+                                    })()}
                                   </div>
                                   <p className="text-[10px] text-zinc-500 mt-0.5 truncate font-medium">
                                     {getRoomHighlightsText(room)}
@@ -3891,7 +3941,11 @@ export default function ProjectDetails({
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      setRooms(prev => prev.map(r => r.id === room.id ? { ...r, isOption: !r.isOption } : r));
+                                      setRooms(prev => prev.map(r => r.id === room.id ? { 
+                                        ...r, 
+                                        isOption: !r.isOption,
+                                        optionSelectionMode: r.optionSelectionMode || 'radio'
+                                      } : r));
                                     }}
                                     className={`p-1 px-2.5 text-[10px] border rounded-lg transition flex items-center font-bold font-mono cursor-pointer ${
                                       room.isOption
@@ -3926,6 +3980,112 @@ export default function ProjectDetails({
                             {/* EXPANDABLE CORNER DIMENSIONS EDITOR SECTION */}
                             {isExpanded && (
                               <div className="p-5 bg-neutral-950/50 border-t border-neutral-850/60 text-xs text-[#a0a0a5] space-y-4 text-left animate-fade-in">
+                                
+                                {/* Grouped Option Settings Banner if marked as an Option */}
+                                {room.isOption && (
+                                  <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl p-3.5 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[11px] font-bold text-amber-300 uppercase font-mono flex items-center gap-1.5">
+                                        <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Option Grouping & Client Selection Mode
+                                      </span>
+                                      <span className="text-[9px] text-amber-400 font-mono">PaintScout Grouping</span>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                                      <div>
+                                        <label className="text-[10px] text-zinc-400 font-mono block mb-1">
+                                          Option Group ID / Title (e.g. Paint Tier Selection)
+                                        </label>
+                                        <input
+                                          type="text"
+                                          value={room.optionGroupId || ''}
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            setRooms(prev => prev.map(r => r.id === room.id ? { 
+                                              ...r, 
+                                              optionGroupId: val,
+                                              optionGroupName: val
+                                            } : r));
+                                          }}
+                                          placeholder="e.g. Paint Quality Tier, Finish Type, Exterior Option"
+                                          className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 font-mono"
+                                          list="option-groups-datalist"
+                                        />
+                                        <datalist id="option-groups-datalist">
+                                          <option value="Paint Quality Tier (Economy / Standard / Premium)" />
+                                          <option value="Finish Package Upgrades" />
+                                          <option value="Exterior Scope Options" />
+                                          <option value="Deck Stain Quality" />
+                                          <option value="Trim & Millwork Add-Ons" />
+                                        </datalist>
+                                      </div>
+
+                                      <div>
+                                        <label className="text-[10px] text-zinc-400 font-mono block mb-1">
+                                          Client Render & Selection Mode
+                                        </label>
+                                        <select
+                                          value={room.optionSelectionMode || 'radio'}
+                                          onChange={(e) => {
+                                            const val = e.target.value as 'radio' | 'checkbox';
+                                            setRooms(prev => prev.map(r => r.id === room.id ? { ...r, optionSelectionMode: val } : r));
+                                          }}
+                                          className="w-full bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs text-amber-300 focus:outline-none focus:border-amber-500 font-mono cursor-pointer"
+                                        >
+                                          <option value="radio" className="bg-neutral-900 text-white">
+                                            Radio Button (Single Choice - Pick ONE in group)
+                                          </option>
+                                          <option value="checkbox" className="bg-neutral-900 text-white">
+                                            Checkbox (Multiple Choice - Client can pick any)
+                                          </option>
+                                        </select>
+                                      </div>
+                                    </div>
+                                    <p className="text-[10px] text-amber-200/70 font-sans">
+                                      Tip: Give multiple options the same Group ID (e.g. "Paint Tier") with Radio mode so the client picks exactly ONE tier on their proposal!
+                                    </p>
+                                  </div>
+                                )}
+
+                                {/* Attached Photos Preview Row for this Room */}
+                                {(() => {
+                                  const roomPhotos = photos.filter(p => p.linkedItemId === room.id || p.linkedItemId?.startsWith(`${room.id}:`));
+                                  return (
+                                    <div className="bg-neutral-900/80 border border-neutral-800 rounded-xl p-3 space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-bold text-zinc-400 uppercase font-mono flex items-center gap-1.5">
+                                          <Camera className="w-3.5 h-3.5 text-blue-400" /> Attached Site Photos ({roomPhotos.length})
+                                        </span>
+                                        <label className="text-[10px] bg-blue-900/50 hover:bg-blue-800/60 text-blue-300 border border-blue-700/50 px-2 py-0.5 rounded cursor-pointer transition flex items-center gap-1 font-mono">
+                                          <Upload className="w-3 h-3" /> Add Photo to {room.name}
+                                          <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={(e) => handlePhotoUpload(e, room.id, room.name)}
+                                            className="hidden"
+                                          />
+                                        </label>
+                                      </div>
+
+                                      {roomPhotos.length > 0 ? (
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                                          {roomPhotos.map(p => (
+                                            <div key={p.id} className="relative group bg-neutral-950 border border-neutral-800 rounded-lg overflow-hidden">
+                                              <div className="aspect-video w-full overflow-hidden bg-black">
+                                                <img src={p.url} alt={p.caption} className="w-full h-full object-cover group-hover:scale-105 transition" />
+                                              </div>
+                                              <div className="p-1.5 text-[9px] text-zinc-400 truncate font-mono">
+                                                {p.linkedItemName?.includes('→') ? p.linkedItemName.split('→')[1].trim() : 'Entire Room'}: {p.caption}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <p className="text-[10px] text-zinc-500 italic">No photos attached to this room yet.</p>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                                 
                                 {/* Numerical sizing dimensions inputs */}
                                 <div className="grid grid-cols-3 gap-3">
@@ -5151,34 +5311,38 @@ export default function ProjectDetails({
             </div>
 
             {/* General Notes */}
-            <div className="space-y-2 md:col-span-2 border-t border-neutral-800 pt-4 mt-2">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-1">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase font-mono tracking-wider flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 bg-pink-500 rounded-full" />
-                  General Notes (Shows on Proposal PDF)
-                </label>
-                <div className="flex flex-wrap gap-1.5">
+            <div className="space-y-3 md:col-span-2 border-t border-neutral-800 pt-5 mt-3">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-1">
+                <div>
+                  <label className="text-[11px] font-bold text-zinc-300 uppercase font-mono tracking-wider flex items-center gap-2">
+                    <span className="w-2 h-2 bg-pink-500 rounded-full" />
+                    General Project Notes & Expectations (Included in PDF)
+                  </label>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">Select a pre-configured template or customize freely below.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] uppercase font-mono text-zinc-500 font-bold mr-1 hidden sm:inline">Presets:</span>
                   <button
                     type="button"
                     onClick={() => {
-                      const text = proposalSettings.interiorGeneralNotes || DEFAULT_PROPOSAL_SETTINGS.interiorGeneralNotes || 'All interior surfaces will be fully prepared prior to painting. This includes filling nail holes, minor caulking, and dust protection for furniture and flooring. Premium quality materials will be used.';
+                      const text = proposalSettings.interiorGeneralNotes || DEFAULT_PROPOSAL_SETTINGS.interiorGeneralNotes || '';
                       setGeneralNotes(text);
                       triggerNotification('Loaded Interior General Notes preset!', 'success');
                     }}
-                    className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                    className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-750 hover:border-pink-500/50 text-[10px] font-bold text-zinc-300 hover:text-white rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-xs"
                   >
-                    Load Interior Preset
+                    <span>🏠</span> Interior Preset
                   </button>
                   <button
                     type="button"
                     onClick={() => {
-                      const text = proposalSettings.exteriorGeneralNotes || DEFAULT_PROPOSAL_SETTINGS.exteriorGeneralNotes || 'Exterior preparation includes pressure washing to remove dirt and loose paint, scraping peeling areas, priming bare wood, and caulking joints as specified. Premium weather-resistant paint will be applied.';
+                      const text = proposalSettings.exteriorGeneralNotes || DEFAULT_PROPOSAL_SETTINGS.exteriorGeneralNotes || '';
                       setGeneralNotes(text);
                       triggerNotification('Loaded Exterior General Notes preset!', 'success');
                     }}
-                    className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                    className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-750 hover:border-pink-500/50 text-[10px] font-bold text-zinc-300 hover:text-white rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-xs"
                   >
-                    Load Exterior Preset
+                    <span>☀️</span> Exterior Preset
                   </button>
                   <button
                     type="button"
@@ -5187,9 +5351,9 @@ export default function ProjectDetails({
                       setGeneralNotes(text);
                       triggerNotification('Loaded Wood Staining preset!', 'success');
                     }}
-                    className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                    className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-750 hover:border-pink-500/50 text-[10px] font-bold text-zinc-300 hover:text-white rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-xs"
                   >
-                    Load Wood Preset
+                    <span>🪵</span> Wood Preset
                   </button>
                   <button
                     type="button"
@@ -5198,18 +5362,18 @@ export default function ProjectDetails({
                       setGeneralNotes(text);
                       triggerNotification('Loaded Brick Staining preset!', 'success');
                     }}
-                    className="px-2 py-0.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[9px] font-bold text-zinc-400 hover:text-white rounded transition cursor-pointer"
+                    className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-750 hover:border-pink-500/50 text-[10px] font-bold text-zinc-300 hover:text-white rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-xs"
                   >
-                    Load Brick Preset
+                    <span>🧱</span> Brick Preset
                   </button>
                 </div>
               </div>
               <textarea
                 value={generalNotes}
                 onChange={(e) => setGeneralNotes(e.target.value)}
-                placeholder="General notes and warranty info..."
-                rows={4}
-                className="w-full bg-neutral-950 border border-neutral-800 focus:border-blue-500/55 rounded-xl p-3.5 text-xs text-zinc-300 focus:outline-none transition leading-relaxed"
+                placeholder="General project expectations, work standards, and site guidelines..."
+                rows={5}
+                className="w-full bg-neutral-950 border border-neutral-800 focus:border-pink-500/60 rounded-xl p-4 text-xs text-zinc-300 focus:outline-none transition leading-relaxed font-sans"
               />
             </div>
 
@@ -5330,11 +5494,14 @@ export default function ProjectDetails({
 
             {/* PDF Document Header */}
             <div className="flex flex-col sm:flex-row items-baseline sm:justify-between border-b-2 border-zinc-900 pb-6 gap-4">
-              <div>
-                <h1 className="text-2xl font-black tracking-tight text-zinc-900 uppercase">
-                  PaintNav Proposal & Estimate
-                </h1>
-                <p className="text-xs text-zinc-500 font-mono mt-1">Proposal Reference: #{proposalNo}</p>
+              <div className="space-y-2">
+                <CapstoneLogo size="md" theme="light" />
+                <div className="pt-1">
+                  <h1 className="text-xl font-black tracking-tight text-zinc-900 uppercase">
+                    Proposal & Estimate
+                  </h1>
+                  <p className="text-xs text-zinc-500 font-mono mt-0.5">Proposal Reference: #{proposalNo}</p>
+                </div>
               </div>
               <div className="text-left sm:text-right font-mono text-zinc-600 text-xs space-y-1">
                 <p><span className="font-bold text-zinc-400">Date:</span> {projectDate}</p>
@@ -5347,9 +5514,9 @@ export default function ProjectDetails({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 my-8 text-xs leading-relaxed">
               <div className="space-y-1 pb-4 md:pb-0 border-b md:border-b-0 md:border-r border-zinc-200 pr-0 md:pr-8">
                 <span className="text-[10px] text-zinc-400 uppercase font-black tracking-widest block mb-1">Contractor Details</span>
-                <p className="font-bold text-zinc-900 text-sm">PaintNav CRM Professional Services</p>
-                <p className="text-zinc-600">Toronto Siding & Framing Division</p>
-                <p className="text-zinc-600">Email: support@paintnav.com • Tel: (416) 555-0199</p>
+                <p className="font-bold text-zinc-900 text-sm">Capstone Painting Inc.</p>
+                <p className="text-zinc-600">Professional Interior & Exterior Painting</p>
+                <p className="text-zinc-600">Email: pay@capstonepainting.ca • Licensed & Insured</p>
               </div>
               <div className="space-y-1">
                 <span className="text-[10px] text-zinc-400 uppercase font-black tracking-widest block mb-1">Prepared For</span>
@@ -5411,57 +5578,82 @@ export default function ProjectDetails({
 
             {/* Optional choices table (highlighted in yellow outline/background if any exist) */}
             {rooms.some(r => r.isOption) && (
-              <div className="space-y-3 my-8">
+              <div className="space-y-4 my-8">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-amber-600 uppercase font-black tracking-widest flex items-center gap-1.5 font-mono">
                     <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
-                    Optional Extras & Choices (Client Add-Ons)
+                    Optional Extras & Grouped Choices (Client Add-Ons)
                   </span>
                   <span className="text-[10px] text-amber-700 font-mono font-bold">
-                    Toggle switches to include or exclude optional add-ons
+                    Grouped radio choices & independent upgrades
                   </span>
                 </div>
-                <div className="border-2 border-amber-300/80 rounded-xl overflow-hidden divide-y divide-amber-200/60 bg-amber-50/40 shadow-xs">
-                  <div className="grid grid-cols-12 gap-2 bg-amber-100/80 p-3 text-[10px] text-amber-900 uppercase font-bold font-mono">
-                    <div className="col-span-5 text-left">Optional Area / Service</div>
-                    <div className="col-span-4 text-left">Specifications</div>
-                    <div className="col-span-3 text-right">Optional Upgrade Price</div>
-                  </div>
 
-                  {rooms.filter(r => r.isOption).map(room => {
-                    const price = liveSummary.roomCosts[room.id] || 0;
+                {(() => {
+                  const optRooms = rooms.filter(r => r.isOption);
+                  const groupsMap: Record<string, RoomSpec[]> = {};
+                  optRooms.forEach(r => {
+                    const gKey = r.optionGroupId || 'Independent Scope Options';
+                    if (!groupsMap[gKey]) groupsMap[gKey] = [];
+                    groupsMap[gKey].push(r);
+                  });
+
+                  return Object.entries(groupsMap).map(([groupTitle, groupRooms]) => {
+                    const isRadioGroup = groupRooms.some(r => r.optionSelectionMode === 'radio') || groupTitle !== 'Independent Scope Options';
                     return (
-                      <div key={room.id} className="p-3 sm:p-3.5 flex flex-col sm:grid sm:grid-cols-12 gap-2 sm:items-center text-xs text-amber-950">
-                        <div className="sm:col-span-4 text-left font-bold font-mono flex items-center justify-between sm:justify-start gap-1.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full shrink-0" />
-                            <span>{room.name}</span>
-                            <span className="text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-extrabold">OPTION</span>
+                      <div key={groupTitle} className="border-2 border-amber-300/80 rounded-xl overflow-hidden divide-y divide-amber-200/60 bg-amber-50/40 shadow-xs space-y-0">
+                        <div className="bg-amber-100/90 px-3.5 py-2.5 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                            <span className="font-bold text-xs text-amber-950 font-mono">{groupTitle}</span>
                           </div>
-                          <span className="font-bold text-amber-950 sm:hidden">+${price.toLocaleString()}</span>
+                          <span className="text-[9px] bg-amber-200 text-amber-900 border border-amber-400 font-bold px-2 py-0.5 rounded font-mono uppercase">
+                            {isRadioGroup ? '◉ Radio: Pick 1 Option' : '☑ Checkbox: Multiple Selection'}
+                          </span>
                         </div>
-                        <div className="sm:col-span-5 text-left text-amber-900/80 font-mono text-[11px] leading-relaxed break-words">
-                          {getRoomHighlightsText(room)}
+
+                        <div className="grid grid-cols-12 gap-2 bg-amber-50/80 p-2.5 text-[9px] text-amber-900 uppercase font-bold font-mono">
+                          <div className="col-span-5 text-left">Option Area / Package</div>
+                          <div className="col-span-4 text-left">Specifications & Surface Scope</div>
+                          <div className="col-span-3 text-right">Upgrade Price</div>
                         </div>
-                        <div className="sm:col-span-3 text-right font-mono flex items-center justify-between sm:justify-end gap-2 pt-1 sm:pt-0 border-t sm:border-t-0 border-amber-200/60">
-                          <span className="font-bold text-amber-950 hidden sm:inline">+${price.toLocaleString()}</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRooms(prev => prev.map(r => r.id === room.id ? { ...r, isOption: false } : r));
-                              triggerNotification(`Included ${room.name} into standard proposal scope!`);
-                            }}
-                            className="px-2.5 py-1 text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-xs transition cursor-pointer flex items-center gap-1"
-                            title="Click to include this option in the main proposal scope"
-                          >
-                            <Plus className="w-3 h-3" />
-                            <span>Include in Scope</span>
-                          </button>
-                        </div>
+
+                        {groupRooms.map(room => {
+                          const price = liveSummary.roomCosts[room.id] || 0;
+                          return (
+                            <div key={room.id} className="p-3 sm:p-3.5 flex flex-col sm:grid sm:grid-cols-12 gap-2 sm:items-center text-xs text-amber-950">
+                              <div className="sm:col-span-4 text-left font-bold font-mono flex items-center justify-between sm:justify-start gap-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-1.5 h-1.5 bg-amber-500 rounded-full shrink-0" />
+                                  <span>{room.name}</span>
+                                </div>
+                                <span className="font-bold text-amber-950 sm:hidden">+${price.toLocaleString()}</span>
+                              </div>
+                              <div className="sm:col-span-5 text-left text-amber-900/80 font-mono text-[11px] leading-relaxed break-words">
+                                {getRoomHighlightsText(room)}
+                              </div>
+                              <div className="sm:col-span-3 text-right font-mono flex items-center justify-between sm:justify-end gap-2 pt-1 sm:pt-0 border-t sm:border-t-0 border-amber-200/60">
+                                <span className="font-bold text-amber-950 hidden sm:inline">+${price.toLocaleString()}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRooms(prev => prev.map(r => r.id === room.id ? { ...r, isOption: false } : r));
+                                    triggerNotification(`Included ${room.name} into standard proposal scope!`);
+                                  }}
+                                  className="px-2.5 py-1 text-[10px] bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg shadow-xs transition cursor-pointer flex items-center gap-1"
+                                  title="Click to include this option in the main proposal scope"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>Include in Scope</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     );
-                  })}
-                </div>
+                  });
+                })()}
               </div>
             )}
 
@@ -5490,6 +5682,89 @@ export default function ProjectDetails({
                       <span className="w-1.5 h-1.5 bg-amber-500 rounded-full" /> Conditions
                     </span>
                     <div className="text-zinc-600 text-[11px] leading-relaxed whitespace-pre-wrap">{specialConditions}</div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* General Project Expectations & Notes (Expandable on PDF Preview) */}
+            {generalNotes && (
+              <div className="my-8 bg-zinc-50/90 rounded-xl border border-zinc-200 overflow-hidden text-left shadow-xs transition">
+                <div className="p-4 sm:p-5 flex items-center justify-between gap-3 bg-zinc-100/70 border-b border-zinc-200">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span className="text-[11px] text-zinc-900 uppercase font-black tracking-wider font-mono">
+                      General Project Expectations & Notes
+                    </span>
+                    <span className="text-[10px] bg-blue-100 text-blue-800 font-mono font-bold px-2 py-0.5 rounded-full">
+                      {generalNotes.split('\n').filter(l => l.trim().length > 0).length} items
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsPdfGeneralNotesExpanded(prev => !prev)}
+                    className="px-3 py-1 bg-white hover:bg-zinc-100 border border-zinc-300 text-[10px] font-bold text-zinc-700 hover:text-zinc-900 rounded-lg transition cursor-pointer flex items-center gap-1 font-mono shadow-xs"
+                    title={isPdfGeneralNotesExpanded ? "Collapse notes section" : "Expand full notes section"}
+                  >
+                    <span>{isPdfGeneralNotesExpanded ? 'Collapse' : 'Expand Full'}</span>
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isPdfGeneralNotesExpanded ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+                
+                {isPdfGeneralNotesExpanded ? (
+                  <div className="p-5 text-zinc-700 text-xs leading-relaxed whitespace-pre-line font-sans divide-y divide-zinc-200/50 space-y-2">
+                    {generalNotes}
+                  </div>
+                ) : (
+                  <div 
+                    onClick={() => setIsPdfGeneralNotesExpanded(true)}
+                    className="p-4 text-zinc-500 text-xs leading-relaxed font-sans cursor-pointer hover:bg-zinc-100/50 transition relative group"
+                  >
+                    <div className="line-clamp-2 italic">
+                      {generalNotes.split('\n').slice(0, 2).join(' ')}...
+                    </div>
+                    <div className="mt-2 text-[10px] text-blue-600 font-mono font-bold flex items-center gap-1 group-hover:underline">
+                      Click to expand full expectations & project notes →
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Terms and Conditions (Expandable on PDF Preview) */}
+            {termsAndConditions && (
+              <div className="my-8 bg-zinc-50/90 rounded-xl border border-zinc-200 overflow-hidden text-left shadow-xs transition">
+                <div className="p-4 sm:p-5 flex items-center justify-between gap-3 bg-zinc-100/70 border-b border-zinc-200">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-zinc-600 shrink-0" />
+                    <span className="text-[11px] text-zinc-900 uppercase font-black tracking-wider font-mono">
+                      Terms & Conditions
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsPdfTermsExpanded(prev => !prev)}
+                    className="px-3 py-1 bg-white hover:bg-zinc-100 border border-zinc-300 text-[10px] font-bold text-zinc-700 hover:text-zinc-900 rounded-lg transition cursor-pointer flex items-center gap-1 font-mono shadow-xs"
+                  >
+                    <span>{isPdfTermsExpanded ? 'Collapse' : 'Expand Full'}</span>
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isPdfTermsExpanded ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+                {isPdfTermsExpanded ? (
+                  <div className="p-5 text-zinc-600 text-[11px] leading-relaxed whitespace-pre-line font-sans">
+                    {termsAndConditions}
+                  </div>
+                ) : (
+                  <div 
+                    onClick={() => setIsPdfTermsExpanded(true)}
+                    className="p-4 text-zinc-500 text-xs leading-relaxed font-sans cursor-pointer hover:bg-zinc-100/50 transition"
+                  >
+                    <div className="line-clamp-2 italic">
+                      {termsAndConditions.split('\n').slice(0, 2).join(' ')}...
+                    </div>
+                    <div className="mt-2 text-[10px] text-zinc-600 font-mono font-bold flex items-center gap-1">
+                      Click to expand terms & conditions →
+                    </div>
                   </div>
                 )}
               </div>
@@ -6070,67 +6345,82 @@ export default function ProjectDetails({
                         const inclusionsHTML = inclusions ? `<div style="margin-bottom: 12px;"><strong>Inclusions:</strong><br/>${inclusions.replace(/\n/g, '<br/>')}</div>` : '';
                         const exclusionsHTML = exclusions ? `<div style="margin-bottom: 12px;"><strong>Exclusions:</strong><br/>${exclusions.replace(/\n/g, '<br/>')}</div>` : '';
                         const specialHTML = specialConditions ? `<div style="margin-bottom: 12px;"><strong>Special Conditions:</strong><br/>${specialConditions.replace(/\n/g, '<br/>')}</div>` : '';
+                        const generalNotesHTML = generalNotes ? `
+                          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                            <h4 style="margin-top: 0; margin-bottom: 8px; color: #0f172a;">General Project Expectations & Notes</h4>
+                            <div style="font-size: 12px; color: #475569; line-height: 1.6; white-space: pre-line;">${generalNotes}</div>
+                          </div>
+                        ` : '';
 
                         const htmlBody = `
-                          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333; line-height: 1.6;">
-                            <h2 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">PaintNav Proposal & Estimate</h2>
-                            <p>Dear ${clientName},</p>
-                            <p>${gmailMessage.replace(/\n/g, '<br/>')}</p>
-
-                            <div style="text-align: center; margin: 30px 0;">
-                              <a href="${window.location.origin}/?proposalId=${project.id}&action=sign" 
-                                 style="background-color: #2563eb; color: #ffffff !important; padding: 14px 28px; text-decoration: none; border-radius: 12px; font-weight: bold; display: inline-block; font-size: 15px; box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);"
-                                 target="_blank">
-                                ✍️ Review & Sign Proposal Online
-                              </a>
-                            </div>
-                            
-                            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                              <h3 style="margin-top: 0; color: #0f172a;">Summary of Estimate #${proposalNo}</h3>
-                              <p><strong>Date:</strong> ${projectDate}</p>
-                              <p><strong>Client:</strong> ${clientName}</p>
-                              <p><strong>Address:</strong> ${clientAddress}</p>
+                          <div style="font-family: Arial, sans-serif; max-width: 620px; margin: 0 auto; color: #333; line-height: 1.6;">
+                            <div style="background-color: #0f172a; padding: 18px 24px; border-radius: 12px 12px 0 0; text-align: left;">
+                              <h2 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">CAPSTONE PAINTING</h2>
+                              <p style="color: #94a3b8; margin: 4px 0 0 0; font-size: 11px; text-transform: uppercase; font-family: monospace;">Official Proposal & Estimate #${proposalNo}</p>
                             </div>
 
-                            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-                              <thead>
-                                <tr style="background-color: #f1f5f9;">
-                                  <th style="padding: 10px; text-align: left; border-bottom: 2px solid #cbd5e1;">Room / Option</th>
-                                  <th style="padding: 10px; text-align: left; border-bottom: 2px solid #cbd5e1;">Details</th>
-                                  <th style="padding: 10px; text-align: right; border-bottom: 2px solid #cbd5e1;">Cost</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                ${roomsList || '<tr><td colspan="3" style="padding: 10px; text-align: center; color: #999;">No standard scope items</td></tr>'}
-                                ${optionsList}
-                              </tbody>
-                            </table>
+                            <div style="padding: 20px 4px;">
+                              <p>Dear ${clientName},</p>
+                              <p>${gmailMessage.replace(/\n/g, '<br/>')}</p>
 
-                            <div style="text-align: right; margin-bottom: 25px; padding-top: 10px; border-top: 2px solid #e2e8f0;">
-                              <p style="margin: 4px 0;"><strong>Subtotal:</strong> $${liveSummary.subtotal.toLocaleString()}</p>
-                              <p style="margin: 4px 0;"><strong>HST (13%):</strong> $${liveSummary.hst.toLocaleString()}</p>
-                              <h3 style="margin: 8px 0; color: #166534;">Grand Total: $${liveSummary.total.toLocaleString()}</h3>
-                              <p style="font-size: 11px; color: #666; margin: 4px 0;">30% Deposit Due: $${liveSummary.deposit.toLocaleString()}</p>
-                            </div>
-
-                            ${inclusionsHTML || exclusionsHTML || specialHTML ? `
-                              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                                <h4 style="margin-top: 0; margin-bottom: 10px; color: #0f172a;">Scope Comments</h4>
-                                ${inclusionsHTML}
-                                ${exclusionsHTML}
-                                ${specialHTML}
+                              <div style="text-align: center; margin: 30px 0;">
+                                <a href="${window.location.origin}/?proposalId=${project.id}&action=sign" 
+                                   style="background-color: #0070f3; color: #ffffff !important; padding: 14px 28px; text-decoration: none; border-radius: 12px; font-weight: bold; display: inline-block; font-size: 15px; box-shadow: 0 4px 10px rgba(0, 112, 243, 0.25);"
+                                   target="_blank">
+                                  ✍️ Review & Sign Proposal Online
+                                </a>
                               </div>
-                            ` : ''}
+                              
+                              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                                <h3 style="margin-top: 0; color: #0f172a;">Summary of Estimate #${proposalNo}</h3>
+                                <p style="margin: 4px 0;"><strong>Date:</strong> ${projectDate}</p>
+                                <p style="margin: 4px 0;"><strong>Client:</strong> ${clientName}</p>
+                                <p style="margin: 4px 0;"><strong>Address:</strong> ${clientAddress}</p>
+                              </div>
 
-                            <div style="text-align: center; margin-top: 35px; border-top: 1px solid #e2e8f0; padding-top: 20px;">
-                              <p style="font-size: 13px; font-weight: bold; color: #1e3a8a;">This proposal is ready for your signature online.</p>
-                              <p style="font-size: 11px; color: #999; margin-top: 15px;">Powered securely by PaintNav Painting Estimator.</p>
+                              <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                                <thead>
+                                  <tr style="background-color: #f1f5f9;">
+                                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #cbd5e1;">Room / Option</th>
+                                    <th style="padding: 10px; text-align: left; border-bottom: 2px solid #cbd5e1;">Details</th>
+                                    <th style="padding: 10px; text-align: right; border-bottom: 2px solid #cbd5e1;">Cost</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  ${roomsList || '<tr><td colspan="3" style="padding: 10px; text-align: center; color: #999;">No standard scope items</td></tr>'}
+                                  ${optionsList}
+                                </tbody>
+                              </table>
+
+                              <div style="text-align: right; margin-bottom: 25px; padding-top: 10px; border-top: 2px solid #e2e8f0;">
+                                <p style="margin: 4px 0;"><strong>Subtotal:</strong> $${liveSummary.subtotal.toLocaleString()}</p>
+                                <p style="margin: 4px 0;"><strong>HST (13%):</strong> $${liveSummary.hst.toLocaleString()}</p>
+                                <h3 style="margin: 8px 0; color: #166534;">Grand Total: $${liveSummary.total.toLocaleString()}</h3>
+                                <p style="font-size: 11px; color: #666; margin: 4px 0;">30% Deposit Due: $${liveSummary.deposit.toLocaleString()}</p>
+                              </div>
+
+                              ${inclusionsHTML || exclusionsHTML || specialHTML ? `
+                                <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                                  <h4 style="margin-top: 0; margin-bottom: 10px; color: #0f172a;">Scope Comments</h4>
+                                  ${inclusionsHTML}
+                                  ${exclusionsHTML}
+                                  ${specialHTML}
+                                </div>
+                              ` : ''}
+
+                              ${generalNotesHTML}
+
+                              <div style="text-align: center; margin-top: 35px; border-top: 1px solid #e2e8f0; padding-top: 20px;">
+                                <p style="font-size: 13px; font-weight: bold; color: #0f172a;">Capstone Painting Inc. • pay@capstonepainting.ca</p>
+                                <p style="font-size: 11px; color: #999; margin-top: 8px;">Official painting proposal ready for online review and digital signature.</p>
+                              </div>
                             </div>
                           </div>
                         `;
 
+                        const latestPayload = getLatestProjectPayload();
                         const { base64: proposalPdfBase64 } = generateProposalPDF({
-                          project,
+                          project: latestPayload,
                           client,
                           rooms,
                           liveSummary,
@@ -6158,7 +6448,7 @@ export default function ProjectDetails({
                           subject: gmailSubject,
                           body: htmlBody,
                           pdfBase64: proposalPdfBase64,
-                          pdfFilename: `Proposal_${proposalNo}.pdf`,
+                          pdfFilename: `Capstone_Painting_Proposal_${proposalNo}.pdf`,
                           attachments: imageAttachments,
                         });
 
@@ -6213,7 +6503,7 @@ export default function ProjectDetails({
             </button>
             
             <h3 className="font-display font-bold text-white text-base mb-1.5 flex items-center gap-1.5">
-              <Share2 className="w-4.5 h-4.5 text-blue-500" /> Share Change Order Estimate
+              <Share2 className="w-4.5 h-4.5 text-blue-500" /> {showChangeOrderBanner ? 'Share Revised Change Order' : 'Share Proposal & Estimate'}
             </h3>
             <p className="text-zinc-400 text-xs leading-relaxed mb-4">
               Collaborate and capture electronic signatures instantly. Generate a secure, read-only dashboard checkout sheet for homeowner:
@@ -6405,6 +6695,52 @@ export default function ProjectDetails({
                 </div>
               )}
 
+              {/* General Project Expectations & Notes (Modal View) */}
+              {generalNotes && (
+                <div className="bg-neutral-950/60 rounded-xl border border-neutral-800 overflow-hidden text-left">
+                  <div 
+                    onClick={() => setIsPdfGeneralNotesExpanded(prev => !prev)}
+                    className="p-3.5 flex items-center justify-between bg-neutral-900/80 cursor-pointer hover:bg-neutral-850 transition"
+                  >
+                    <span className="text-[10px] text-blue-400 uppercase font-bold tracking-wider font-mono flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-blue-400" /> General Project Expectations & Notes
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-mono flex items-center gap-1">
+                      {isPdfGeneralNotesExpanded ? 'Collapse' : 'Expand'}
+                      <ChevronDown className={`w-3 h-3 transition-transform ${isPdfGeneralNotesExpanded ? 'rotate-180' : ''}`} />
+                    </span>
+                  </div>
+                  {isPdfGeneralNotesExpanded && (
+                    <div className="p-4 text-zinc-300 text-xs leading-relaxed whitespace-pre-line border-t border-neutral-800/80 font-sans">
+                      {generalNotes}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Terms and Conditions (Modal View) */}
+              {termsAndConditions && (
+                <div className="bg-neutral-950/60 rounded-xl border border-neutral-800 overflow-hidden text-left">
+                  <div 
+                    onClick={() => setIsPdfTermsExpanded(prev => !prev)}
+                    className="p-3.5 flex items-center justify-between bg-neutral-900/80 cursor-pointer hover:bg-neutral-850 transition"
+                  >
+                    <span className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider font-mono flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-zinc-500" /> Terms & Conditions
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-mono flex items-center gap-1">
+                      {isPdfTermsExpanded ? 'Collapse' : 'Expand'}
+                      <ChevronDown className={`w-3 h-3 transition-transform ${isPdfTermsExpanded ? 'rotate-180' : ''}`} />
+                    </span>
+                  </div>
+                  {isPdfTermsExpanded && (
+                    <div className="p-4 text-zinc-400 text-[11px] leading-relaxed whitespace-pre-line border-t border-neutral-800/80 font-sans">
+                      {termsAndConditions}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="text-center text-[10px] text-zinc-600 font-mono pt-4 border-t border-neutral-850 select-none">
                 Thank you for your trusted patronage. Powered securely by PaintNav Painting Estimator.
               </div>
@@ -6425,118 +6761,6 @@ export default function ProjectDetails({
                 Close Preview
               </button>
             </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* GOOGLE MAPS CONFIGURATION HELP MODAL */}
-      {showMapsConfigModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4">
-          <motion.div 
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="bg-neutral-900 border border-[#2d2d2d] rounded-2xl w-full max-w-md p-6 relative text-left shadow-2xl space-y-4"
-          >
-            <button
-              onClick={() => {
-                setShowMapsConfigModal(false);
-                setMapsErrorType('NONE');
-              }}
-              className="absolute right-4 top-4 text-zinc-400 hover:text-white transition cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className={`w-12 h-12 ${mapsErrorType !== 'NONE' ? 'bg-red-500/10' : 'bg-blue-500/10'} rounded-full flex items-center justify-center`}>
-              <MapPin className={`w-6 h-6 ${mapsErrorType !== 'NONE' ? 'text-red-400' : 'text-blue-400'}`} />
-            </div>
-
-            <div className="space-y-1">
-              <h3 className="text-sm font-bold text-white uppercase font-mono tracking-widest">
-                {mapsErrorType === 'BILLING' 
-                  ? 'Billing Setup or Geocoding API Required' 
-                  : 'Google Maps API Key Required'}
-              </h3>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                {mapsErrorType === 'BILLING'
-                  ? 'Your Google Cloud Project returned a billing error (REQUEST_DENIED). Google Maps API requires a linked billing account to perform address verification.'
-                  : 'To enable real-time address verification, geocoding, and auto-correction, you need to add your Google Maps Platform API key to this application.'}
-              </p>
-            </div>
-
-            {mapsErrorType === 'BILLING' && (
-              <div className="bg-amber-500/10 border border-amber-500/20 p-3.5 rounded-xl space-y-2 text-xs text-amber-300">
-                <span className="font-bold flex items-center gap-1.5 uppercase font-mono text-[10px] tracking-wider">
-                  💡 Want a quick offline fix?
-                </span>
-                <p className="text-[11px] text-zinc-300 leading-normal">
-                  You can bypass Google Cloud billing completely by using our build-in smart offline formatter:
-                </p>
-                <button
-                  onClick={() => {
-                    setShowMapsConfigModal(false);
-                    setShowOfflineFallbackModal(true);
-                  }}
-                  className="w-full py-1.5 bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-emerald-300 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer mt-1"
-                >
-                  <Sparkles className="w-3.5 h-3.5" /> Open Offline Auto-Correct
-                </button>
-              </div>
-            )}
-
-            <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-850 space-y-3 text-[11px] font-mono leading-relaxed text-zinc-300">
-              {mapsErrorType === 'BILLING' ? (
-                <>
-                  <p>
-                    <strong className="text-red-400">Step 1:</strong> Enable billing for your project:<br />
-                    <a 
-                      href="https://console.cloud.google.com/project/_/billing/enable" 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-blue-400 hover:underline break-all"
-                    >
-                      https://console.cloud.google.com/project/_/billing/enable
-                    </a>
-                  </p>
-                  <p>
-                    <strong className="text-red-400">Step 2:</strong> Ensure the <strong className="text-zinc-200">Geocoding API</strong> and <strong className="text-zinc-200">Places API</strong> are enabled in your Google Cloud API library.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p>
-                    <strong className="text-blue-400">Step 1:</strong> Get an API Key:<br />
-                    <a 
-                      href="https://console.cloud.google.com/google/maps-apis/start?utm_campaign=gmp-code-assist-ais" 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-blue-400 hover:underline break-all"
-                    >
-                      https://console.cloud.google.com/google/maps-apis/start
-                    </a>
-                  </p>
-                  <p>
-                    <strong className="text-blue-400">Step 2:</strong> Add key as an environment variable in AI Studio:
-                  </p>
-                  <ul className="list-disc pl-4 space-y-1 text-zinc-400">
-                    <li>Open <strong className="text-zinc-200">Settings</strong> (⚙️ gear icon in top-right corner)</li>
-                    <li>Go to <strong className="text-zinc-200">Secrets</strong></li>
-                    <li>Add a new secret named <code className="bg-neutral-900 px-1 py-0.5 rounded text-white font-black font-mono">GOOGLE_MAPS_PLATFORM_KEY</code></li>
-                    <li>Paste your API key value and save</li>
-                  </ul>
-                </>
-              )}
-            </div>
-
-            <button
-              onClick={() => {
-                setShowMapsConfigModal(false);
-                setMapsErrorType('NONE');
-              }}
-              className="w-full py-2 bg-neutral-800 hover:bg-neutral-750 text-xs text-white font-bold rounded-xl transition cursor-pointer flex items-center justify-center"
-            >
-              Close instructions
-            </button>
           </motion.div>
         </div>
       )}
@@ -6733,61 +6957,6 @@ export default function ProjectDetails({
                 </div>
               </div>
             )}
-          </motion.div>
-        </div>
-      )}
-
-      {/* OFFLINE FALLBACK AUTO-CORRECT MODAL */}
-      {showOfflineFallbackModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center z-50 p-4">
-          <motion.div 
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="bg-neutral-900 border border-[#2d2d2d] rounded-2xl w-full max-w-md p-6 relative text-left shadow-2xl space-y-4"
-          >
-            <button
-              onClick={() => setShowOfflineFallbackModal(false)}
-              className="absolute right-4 top-4 text-zinc-400 hover:text-white transition cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="w-12 h-12 bg-amber-500/10 rounded-full flex items-center justify-center">
-              <Sparkles className="w-6 h-6 text-amber-400" />
-            </div>
-
-            <div className="space-y-1">
-              <h3 className="text-sm font-bold text-white uppercase font-mono tracking-widest">
-                Offline Auto-Correct Fallback
-              </h3>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Google Maps Platform returned an API key or billing error. To proceed immediately, we can clean, format, and capitalize your address locally.
-              </p>
-            </div>
-
-            <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-850 space-y-2 text-xs">
-              <div className="text-zinc-500">Current Input:</div>
-              <div className="text-zinc-350 font-mono break-all font-semibold">{clientAddress}</div>
-              <div className="text-zinc-500 mt-2">Will be formatted to:</div>
-              <div className="text-emerald-400 font-mono break-all font-bold">
-                {formatAddressLocally(clientAddress) || '(Empty address)'}
-              </div>
-            </div>
-
-            <div className="flex gap-2.5">
-              <button
-                onClick={handleApplyOfflineFallback}
-                className="flex-grow py-2.5 bg-emerald-600 hover:bg-emerald-700 text-xs text-white font-bold rounded-xl transition cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <Sparkles className="w-4 h-4" /> Apply Smart Formatting
-              </button>
-              <button
-                onClick={() => setShowOfflineFallbackModal(false)}
-                className="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-750 text-xs text-zinc-300 font-bold rounded-xl transition cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
           </motion.div>
         </div>
       )}
@@ -7900,6 +8069,6 @@ export default function ProjectDetails({
         </div>
       )}
 
-    </APIProvider>
+    </>
   );
 }

@@ -1,10 +1,11 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { ProjectDetails, ClientLead, RoomSpec, PaintColor } from '../types';
+import { ProjectDetails, ClientLead, RoomSpec, PaintColor, ProjectPhoto } from '../types';
 import { calculateRoomPricing, DEFAULT_REAL_PRODUCTS } from '../utils/pricing';
 import { fetchSingleProjectFromFirestore, fetchSingleClientFromFirestore, updateProjectSignatureInFirestore, saveProjectToFirestore } from '../firebaseService';
 import { fetchSingleProjectFromSupabase, fetchSingleClientFromSupabase, updateProjectSignatureInSupabase, saveProjectToSupabase } from '../supabaseService';
 import { generateProposalPDF, generateReceiptPDF } from '../pdfGenerator';
 import { sendProposalEmail } from '../gmailService';
+import { CapstoneLogo } from './CapstoneLogo';
 import { 
   CheckCircle, 
   FileText, 
@@ -26,9 +27,13 @@ import {
   Tag,
   Sparkles,
   CheckCircle2,
-  DollarSign
+  DollarSign,
+  Camera,
+  Paperclip,
+  ZoomIn,
+  Check
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface RoomCostDetail {
   roomId: string;
@@ -318,6 +323,10 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
   const [error, setError] = useState<string | null>(null);
   const [foundProvider, setFoundProvider] = useState<'firestore' | 'supabase' | null>(null);
 
+  // Grouped Option Selection States & Lightbox
+  const [selectedOptionIds, setSelectedOptionIds] = useState<Record<string, boolean>>({});
+  const [activePhotoModal, setActivePhotoModal] = useState<ProjectPhoto | null>(null);
+
   // Signature States
   const [signerName, setSignerName] = useState<string>('');
   const [signerTitle, setSignerTitle] = useState<string>('Homeowner');
@@ -361,6 +370,24 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
 
         setProject(updatedProj);
         setFoundProvider(provider);
+
+        // Initialize Option choices: Auto-select 1st option in radio groups
+        const initialOptMap: Record<string, boolean> = {};
+        const radioGroupsSeen = new Set<string>();
+        (proj.rooms || []).filter(r => r.isOption).forEach(r => {
+          const gId = r.optionGroupId;
+          if (gId && (r.optionSelectionMode === 'radio' || !r.optionSelectionMode)) {
+            if (!radioGroupsSeen.has(gId)) {
+              radioGroupsSeen.add(gId);
+              initialOptMap[r.id] = true; // Default to first choice in group
+            } else {
+              initialOptMap[r.id] = false;
+            }
+          } else {
+            initialOptMap[r.id] = false; // Checkbox option defaults unselected
+          }
+        });
+        setSelectedOptionIds(initialOptMap);
 
         // Async register initial view event in database
         if (provider === 'firestore') {
@@ -900,21 +927,68 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
     }
   };
 
-  // Compute estimate totals
-  const getTotals = () => {
-    if (!project) return { subtotal: 0, hst: 0, total: 0, deposit: 0, balance: 0, roomBreakdownMap: {}, optionalTotal: 0 };
-    const total = project.summary.totalPrice || 0;
-    const subtotal = total / 1.13;
-    const hst = total - subtotal;
-    const deposit = total * 0.30;
-    const balance = total - deposit;
+  // Option selection handlers for interactive Client Scope customizer
+  const handleToggleRadioOption = (groupKey: string, chosenRoomId: string | null) => {
+    setSelectedOptionIds(prev => {
+      const next = { ...prev };
+      (project?.rooms || []).filter(r => (r.optionGroupId || 'Independent Upgrades') === groupKey).forEach(r => {
+        next[r.id] = r.id === chosenRoomId;
+      });
+      return next;
+    });
+  };
 
-    const roomBreakdownMap = computeDetailedRoomBreakdownMap(project.rooms || [], subtotal, project.summary?.hourlyLaborRate);
+  const handleToggleCheckboxOption = (roomId: string) => {
+    setSelectedOptionIds(prev => ({
+      ...prev,
+      [roomId]: !prev[roomId]
+    }));
+  };
+
+  // Helper to match attached photos to specific rooms, surfaces, or tasks
+  const getAttachedPhotos = (roomId: string, surfaceLabel?: string) => {
+    if (!project?.photos || project.photos.length === 0) return [];
+    return (project.photos as ProjectPhoto[]).filter(p => {
+      if (surfaceLabel) {
+        const cleanSurfaceKey = surfaceLabel.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const targetId = `${roomId}:${cleanSurfaceKey}`;
+        if (p.linkedItemId === targetId) return true;
+        if (p.linkedItemId && p.linkedItemId.startsWith(`${roomId}:`) && p.linkedItemName?.toLowerCase().includes(surfaceLabel.toLowerCase())) return true;
+        return false;
+      }
+      // Room-level general photos
+      return p.linkedItemId === roomId || (!p.linkedItemId && p.linkedItemName?.toLowerCase() === roomId.toLowerCase());
+    });
+  };
+
+  // Compute live estimate totals based on selected client choices
+  const getTotals = () => {
+    if (!project) return { subtotal: 0, hst: 0, total: 0, deposit: 0, balance: 0, roomBreakdownMap: {}, optionalTotal: 0, selectedOptionsTotal: 0, baseSubtotal: 0 };
+    const rawSubtotal = (project.summary.totalPrice || 0) / 1.13;
+
+    const roomBreakdownMap = computeDetailedRoomBreakdownMap(project.rooms || [], rawSubtotal, project.summary?.hourlyLaborRate);
+    
+    // Base included subtotal (non-option rooms)
+    const baseSubtotal = Object.values(roomBreakdownMap)
+      .filter(r => !r.isOption)
+      .reduce((sum, r) => sum + r.totalCost, 0);
+
+    // Selected options total
+    const selectedOptionsTotal = Object.values(roomBreakdownMap)
+      .filter(r => r.isOption && selectedOptionIds[r.roomId])
+      .reduce((sum, r) => sum + r.totalCost, 0);
+
     const optionalTotal = Object.values(roomBreakdownMap)
       .filter(r => r.isOption)
       .reduce((sum, r) => sum + r.totalCost, 0);
 
-    return { subtotal, hst, total, deposit, balance, roomBreakdownMap, optionalTotal };
+    const activeSubtotal = baseSubtotal + selectedOptionsTotal;
+    const hst = activeSubtotal * 0.13;
+    const total = activeSubtotal + hst;
+    const deposit = total * 0.30;
+    const balance = total - deposit;
+
+    return { subtotal: activeSubtotal, hst, total, deposit, balance, roomBreakdownMap, optionalTotal, selectedOptionsTotal, baseSubtotal };
   };
 
   if (loading) {
@@ -938,7 +1012,7 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
     );
   }
 
-  const { subtotal, hst, total, deposit, balance, roomBreakdownMap, optionalTotal } = getTotals();
+  const { subtotal, hst, total, deposit, balance, roomBreakdownMap, optionalTotal, selectedOptionsTotal, baseSubtotal } = getTotals();
 
   const standardRooms = (project.rooms || []).filter(r => !r.isOption);
   const optionRooms = (project.rooms || []).filter(r => r.isOption);
@@ -979,18 +1053,10 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
           
           {/* Document Header Banner */}
           <div className="bg-slate-900 text-white p-6 sm:p-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6 border-b-4 border-blue-600">
-            <div>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-white shadow-md shrink-0">
-                  <Paintbrush className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-display font-black tracking-tight text-white leading-tight">PAINTNAV PAINTING SERVICES</h2>
-                  <p className="text-xs text-blue-300 font-mono">Licensed & Insured Master Painters</p>
-                </div>
-              </div>
-              <p className="text-xs text-zinc-400 mt-3 max-w-md leading-relaxed">
-                Professional interior & exterior coating solutions. Providing quality workmanship, clear timelines, and long-lasting results.
+            <div className="space-y-3">
+              <CapstoneLogo size="lg" theme="dark" />
+              <p className="text-xs text-zinc-300 max-w-md leading-relaxed">
+                Licensed & Fully Insured Professional Painting Contractors • pay@capstonepainting.ca
               </p>
             </div>
 
@@ -1106,33 +1172,60 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
                                         Surfaces & Coating Schedule Breakdown
                                       </span>
                                       <div className="border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100">
-                                        {roomDetail.surfaceItems.map((s, idx) => (
-                                          <div key={idx} className="p-2.5 bg-slate-50/70 flex flex-wrap items-center justify-between gap-2">
-                                            <div className="flex items-center gap-2 font-medium text-slate-800">
-                                              <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
-                                              <span className="font-bold">{s.label}</span>
-                                              <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 font-mono font-semibold">
-                                                {s.coats} Coat(s)
-                                              </span>
-                                              <span className="text-[10px] text-slate-500 font-mono">({s.qtyOrArea})</span>
-                                            </div>
+                                        {roomDetail.surfaceItems.map((s, idx) => {
+                                          const attachedPhotos = getAttachedPhotos(room.id, s.label);
+                                          return (
+                                            <div key={idx} className="p-2.5 bg-slate-50/70 space-y-2">
+                                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2 font-medium text-slate-800">
+                                                  <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0"></span>
+                                                  <span className="font-bold">{s.label}</span>
+                                                  <span className="text-[10px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 font-mono font-semibold">
+                                                    {s.coats} Coat(s)
+                                                  </span>
+                                                  <span className="text-[10px] text-slate-500 font-mono">({s.qtyOrArea})</span>
+                                                </div>
 
-                                            {s.paint && (
-                                              <div className="flex items-center gap-1.5 text-[11px] text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
-                                                {s.paint.hex && (
-                                                  <div className="w-3 h-3 rounded-full border border-slate-300 shrink-0" style={{ backgroundColor: s.paint.hex }} />
+                                                {s.paint && (
+                                                  <div className="flex items-center gap-1.5 text-[11px] text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                                    {s.paint.hex && (
+                                                      <div className="w-3 h-3 rounded-full border border-slate-300 shrink-0" style={{ backgroundColor: s.paint.hex }} />
+                                                    )}
+                                                    <span className="font-semibold text-slate-800">{s.paint.brand}</span>
+                                                    <span>— {s.paint.colorName}</span>
+                                                    <span className="text-slate-400 font-mono">({s.paint.finish})</span>
+                                                  </div>
                                                 )}
-                                                <span className="font-semibold text-slate-800">{s.paint.brand}</span>
-                                                <span>— {s.paint.colorName}</span>
-                                                <span className="text-slate-400 font-mono">({s.paint.finish})</span>
-                                              </div>
-                                            )}
 
-                                            <div className="font-mono font-bold text-slate-900 ml-auto">
-                                              ${s.cost.toLocaleString()}
+                                                <div className="font-mono font-bold text-slate-900 ml-auto">
+                                                  ${s.cost.toLocaleString()}
+                                                </div>
+                                              </div>
+
+                                              {/* Contextual Line Item Attached Photos */}
+                                              {attachedPhotos.length > 0 && (
+                                                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-200/50">
+                                                  <span className="text-[10px] font-mono font-bold text-blue-700 flex items-center gap-1">
+                                                    <Camera className="w-3 h-3 text-blue-600" /> Attached Photos:
+                                                  </span>
+                                                  {attachedPhotos.map((photo) => (
+                                                    <button
+                                                      key={photo.id}
+                                                      type="button"
+                                                      onClick={() => setActivePhotoModal(photo)}
+                                                      className="flex items-center gap-1.5 px-2 py-1 bg-white hover:bg-blue-50 border border-blue-200 rounded-lg text-slate-800 text-[11px] transition shadow-2xs group cursor-pointer"
+                                                      title="Click to view full-resolution photo"
+                                                    >
+                                                      <img src={photo.url} alt={photo.caption || 'Attached photo'} className="w-5 h-5 rounded object-cover border border-slate-200" />
+                                                      <span className="truncate max-w-[140px] font-medium">{photo.caption || 'View inspection photo'}</span>
+                                                      <ZoomIn className="w-3 h-3 text-slate-400 group-hover:text-blue-600 shrink-0" />
+                                                    </button>
+                                                  ))}
+                                                </div>
+                                              )}
                                             </div>
-                                          </div>
-                                        ))}
+                                          );
+                                        })}
                                       </div>
                                     </div>
                                   )}
@@ -1157,6 +1250,38 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
                                     </div>
                                   )}
 
+                                  {/* General Room-Level Attached Photos */}
+                                  {(() => {
+                                    const roomPhotos = getAttachedPhotos(room.id);
+                                    if (roomPhotos.length === 0) return null;
+                                    return (
+                                      <div className="bg-blue-50/60 p-2.5 rounded-xl border border-blue-200/70 space-y-2">
+                                        <span className="text-[10px] uppercase font-bold text-blue-900 font-mono tracking-wider flex items-center gap-1.5">
+                                          <Camera className="w-3.5 h-3.5 text-blue-600" /> Area Inspection Photos ({roomPhotos.length})
+                                        </span>
+                                        <div className="flex flex-wrap gap-2">
+                                          {roomPhotos.map(photo => (
+                                            <div
+                                              key={photo.id}
+                                              onClick={() => setActivePhotoModal(photo)}
+                                              className="relative group cursor-pointer rounded-lg overflow-hidden border border-blue-200 shadow-2xs hover:shadow-md transition"
+                                            >
+                                              <img src={photo.url} alt={photo.caption || 'Room photo'} className="w-20 h-16 object-cover group-hover:scale-105 transition" />
+                                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
+                                                <ZoomIn className="w-4 h-4" />
+                                              </div>
+                                              {photo.caption && (
+                                                <div className="absolute bottom-0 inset-x-0 bg-black/70 text-white text-[9px] px-1 py-0.5 truncate font-mono">
+                                                  {photo.caption}
+                                                </div>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
+
                                   {/* Room Notes */}
                                   {room.notes && (
                                     <p className="text-[11px] text-slate-600 italic bg-amber-50/50 p-2 rounded border border-amber-200/60">
@@ -1178,102 +1303,157 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
                 )}
               </div>
 
-              {/* Optional Upgrades & Add-on Scope Section */}
+              {/* Optional Upgrades & Grouped Choices Section */}
               {optionRooms.length > 0 && (
-                <div className="space-y-4 pt-4 border-t-2 border-amber-200">
-                  <div className="bg-amber-500/10 border-2 border-amber-400/60 rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-400/30 pb-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className="p-2 bg-amber-500 text-white rounded-xl shadow-md">
+                <div className="space-y-6 pt-6 border-t-2 border-amber-300">
+                  <div className="bg-amber-500/10 border-2 border-amber-400/80 rounded-2xl p-4 sm:p-6 space-y-5 shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-400/40 pb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-amber-500 text-white rounded-xl shadow-md">
                           <Sparkles className="w-5 h-5" />
                         </div>
                         <div>
-                          <h3 className="text-sm font-bold text-amber-950 font-display flex items-center gap-1.5">
-                            Optional Upgrades & Add-on Scope ({optionRooms.length} Options Available)
+                          <h3 className="text-base font-bold text-amber-950 font-display flex items-center gap-2">
+                            Client Option Packages & Optional Upgrades
                           </h3>
-                          <p className="text-[11px] text-amber-800">
-                            The following optional areas are quoted separately as project add-ons. Review their individual costs below.
+                          <p className="text-xs text-amber-800">
+                            Select your desired paint tier or optional areas below. Your proposal price adjusts automatically before signing.
                           </p>
                         </div>
                       </div>
-                      <div className="text-left sm:text-right bg-amber-100/90 px-3 py-1.5 rounded-xl border border-amber-300 shrink-0">
-                        <span className="text-[10px] text-amber-800 font-mono uppercase tracking-wider block font-bold">Options Subtotal</span>
-                        <span className="text-base font-bold font-mono text-amber-900">+${optionalTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <div className="text-left sm:text-right bg-amber-100 px-3.5 py-2 rounded-xl border border-amber-300 shrink-0">
+                        <span className="text-[10px] text-amber-800 font-mono uppercase tracking-wider block font-bold">Selected Upgrades</span>
+                        <span className="text-base font-bold font-mono text-amber-900">+${selectedOptionsTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                       </div>
                     </div>
 
-                    <div className="space-y-3">
-                      {optionRooms.map((room) => {
-                        const roomDetail = roomBreakdownMap[room.id];
-                        const roomPrice = roomDetail ? roomDetail.totalCost : 0;
+                    {/* Grouped Option Packages */}
+                    {(() => {
+                      const groupsMap: Record<string, RoomSpec[]> = {};
+                      optionRooms.forEach(r => {
+                        const gKey = r.optionGroupId || 'Independent Scope Upgrades';
+                        if (!groupsMap[gKey]) groupsMap[gKey] = [];
+                        groupsMap[gKey].push(r);
+                      });
+
+                      return Object.entries(groupsMap).map(([groupTitle, groupRooms]) => {
+                        const isRadioGroup = groupRooms.some(r => r.optionSelectionMode === 'radio') || (groupTitle !== 'Independent Scope Upgrades' && groupRooms.length > 1);
 
                         return (
-                          <div key={room.id} className="border-2 border-amber-300/90 rounded-xl overflow-hidden bg-white shadow-sm">
-                            <div className="bg-amber-100 px-4 py-2.5 flex items-center justify-between border-b border-amber-200 text-xs">
+                          <div key={groupTitle} className="border-2 border-amber-300 rounded-xl overflow-hidden bg-white shadow-sm space-y-0">
+                            {/* Group Header */}
+                            <div className="bg-amber-100/90 px-4 py-3 flex flex-wrap items-center justify-between gap-2 border-b border-amber-200">
                               <div className="flex items-center gap-2">
-                                <span className="font-bold text-amber-950 text-sm font-display">{room.name}</span>
-                                <span className="text-[10px] bg-amber-500 text-white font-mono font-bold px-2 py-0.5 rounded shadow-xs">
-                                  OPTIONAL ADD-ON
-                                </span>
+                                <Sparkles className="w-4 h-4 text-amber-600" />
+                                <span className="font-bold text-sm text-amber-950 font-display">{groupTitle}</span>
                               </div>
-                              <div className="flex items-center gap-3">
-                                <span className="font-mono text-amber-800 text-[11px] hidden sm:inline">
-                                  {room.length}' × {room.width}' × {room.height}' ft
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] bg-amber-200 text-amber-900 border border-amber-400 font-bold px-2 py-0.5 rounded font-mono uppercase">
+                                  {isRadioGroup ? '◉ Radio Mode: Pick ONE Option' : '☑ Checkbox Mode: Multiple Selections'}
                                 </span>
-                                <div className="bg-amber-800 text-white font-mono font-bold px-3 py-1 rounded-lg text-xs shadow">
-                                  Option Cost: ${roomPrice.toLocaleString()}
-                                </div>
+                                {isRadioGroup && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleRadioOption(groupTitle, null)}
+                                    className="text-[10px] px-2 py-0.5 bg-white hover:bg-amber-50 text-amber-800 border border-amber-300 font-mono font-bold rounded cursor-pointer transition"
+                                  >
+                                    De-select ($0 Base)
+                                  </button>
+                                )}
                               </div>
                             </div>
 
-                            <div className="p-4 space-y-3 text-xs">
-                              {roomDetail && roomDetail.surfaceItems.length > 0 && (
-                                <div className="space-y-1.5">
-                                  <span className="text-[10px] uppercase font-bold text-amber-900 font-mono tracking-wider block">
-                                    Optional Surfaces & Coating Specs
-                                  </span>
-                                  <div className="border border-amber-200 rounded-lg overflow-hidden divide-y divide-amber-100">
-                                    {roomDetail.surfaceItems.map((s, idx) => (
-                                      <div key={idx} className="p-2.5 bg-amber-50/50 flex flex-wrap items-center justify-between gap-2">
-                                        <div className="flex items-center gap-2 text-slate-800">
-                                          <span className="font-bold text-slate-900">{s.label}</span>
-                                          <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-mono font-semibold border border-amber-200">
-                                            {s.coats} Coat(s)
-                                          </span>
-                                          <span className="text-[10px] text-slate-500 font-mono">({s.qtyOrArea})</span>
-                                        </div>
-                                        <div className="font-mono font-bold text-amber-900 ml-auto">
-                                          ${s.cost.toLocaleString()}
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+                            {/* Group Options Cards */}
+                            <div className="p-4 space-y-3">
+                              {groupRooms.map(room => {
+                                const roomDetail = roomBreakdownMap[room.id];
+                                const roomPrice = roomDetail ? roomDetail.totalCost : 0;
+                                const isSelected = !!selectedOptionIds[room.id];
 
-                              {roomDetail && roomDetail.taskItems.length > 0 && (
-                                <div className="space-y-1.5">
-                                  <span className="text-[10px] uppercase font-bold text-amber-900 font-mono tracking-wider block">
-                                    Optional Prep Tasks
-                                  </span>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    {roomDetail.taskItems.map((t, tIdx) => (
-                                      <div key={tIdx} className="bg-amber-50/60 p-2 rounded-lg border border-amber-200 flex items-center justify-between text-[11px]">
-                                        <span className="text-amber-950 flex items-center gap-1.5">
-                                          <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                          <span>{t.text}</span>
-                                        </span>
-                                        <span className="font-mono font-bold text-amber-800">${t.cost}</span>
+                                return (
+                                  <div
+                                    key={room.id}
+                                    onClick={() => {
+                                      if (isRadioGroup) {
+                                        handleToggleRadioOption(groupTitle, isSelected ? null : room.id);
+                                      } else {
+                                        handleToggleCheckboxOption(room.id);
+                                      }
+                                    }}
+                                    className={`border-2 rounded-xl p-3.5 sm:p-4 transition cursor-pointer select-none ${
+                                      isSelected
+                                        ? 'border-blue-600 bg-blue-50/40 shadow-sm'
+                                        : 'border-slate-200 bg-slate-50/50 hover:border-amber-300 hover:bg-white'
+                                    }`}
+                                  >
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                      <div className="flex items-start gap-3">
+                                        <div className="pt-0.5 shrink-0">
+                                          {isRadioGroup ? (
+                                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-400 bg-white'}`}>
+                                              {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
+                                            </div>
+                                          ) : (
+                                            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-400 bg-white'}`}>
+                                              {isSelected && <Check className="w-3.5 h-3.5 text-white stroke-[3]" />}
+                                            </div>
+                                          )}
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-bold text-sm text-slate-900 font-display">{room.name}</span>
+                                            <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase ${isSelected ? 'bg-blue-600 text-white' : 'bg-amber-100 text-amber-800'}`}>
+                                              {isSelected ? 'SELECTED IN TOTAL' : 'AVAILABLE UPGRADE'}
+                                            </span>
+                                          </div>
+                                          <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                                            {room.notes || `${room.length}' × ${room.width}' ft coating package`}
+                                          </p>
+                                        </div>
                                       </div>
-                                    ))}
+
+                                      <div className="text-left sm:text-right pl-8 sm:pl-0">
+                                        <span className="text-base font-bold font-mono text-blue-700 block">+${roomPrice.toLocaleString()}</span>
+                                        <span className="text-[10px] text-slate-500 font-mono">
+                                          {isSelected ? '✓ Included in Signature Total' : '+ Click to add to proposal'}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {/* Detailed breakdown inside option card */}
+                                    {roomDetail && roomDetail.surfaceItems.length > 0 && (
+                                      <div className="mt-3 pt-3 border-t border-slate-200/80 space-y-1.5">
+                                        <span className="text-[9px] uppercase font-bold text-slate-500 font-mono tracking-wider block">
+                                          Specifications & Coating Details
+                                        </span>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-700">
+                                          {roomDetail.surfaceItems.map((s, sIdx) => {
+                                            const attachedPhotos = getAttachedPhotos(room.id, s.label);
+                                            return (
+                                              <div key={sIdx} className="bg-white p-2 rounded-lg border border-slate-200 flex flex-col gap-1">
+                                                <div className="flex items-center justify-between">
+                                                  <span className="font-medium text-slate-800">{s.label} ({s.coats} coat{s.coats > 1 ? 's' : ''})</span>
+                                                  <span className="font-mono font-bold text-slate-900">${s.cost}</span>
+                                                </div>
+                                                {attachedPhotos.length > 0 && (
+                                                  <div className="flex items-center gap-1.5 pt-1 text-[10px] text-blue-700 font-mono">
+                                                    <Camera className="w-3 h-3" /> {attachedPhotos.length} Attached Photo(s)
+                                                  </div>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
-                                </div>
-                              )}
+                                );
+                              })}
                             </div>
                           </div>
                         );
-                      })}
-                    </div>
+                      });
+                    })()}
                   </div>
                 </div>
               )}
@@ -1297,21 +1477,88 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
               </div>
             )}
 
-            {/* Special Conditions & General Notes */}
-            {(project.specialConditions || project.generalNotes) && (
+            {/* Special Conditions, General Notes & Terms */}
+            {(project.specialConditions || project.generalNotes || project.termsAndConditions) && (
               <div className="space-y-3 bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs">
                 {project.specialConditions && (
                   <div className="space-y-1">
                     <h4 className="font-bold text-slate-800 text-[11px] font-mono uppercase tracking-wider">Special Job Conditions</h4>
-                    <p className="text-slate-700 leading-relaxed">{project.specialConditions}</p>
+                    <p className="text-slate-700 leading-relaxed whitespace-pre-line">{project.specialConditions}</p>
                   </div>
                 )}
                 {project.generalNotes && (
-                  <div className="space-y-1 border-t border-slate-200 pt-2">
-                    <h4 className="font-bold text-slate-800 text-[11px] font-mono uppercase tracking-wider">General Warranty & Notes</h4>
-                    <p className="text-slate-700 leading-relaxed">{project.generalNotes}</p>
+                  <div className={`space-y-1 ${project.specialConditions ? 'border-t border-slate-200 pt-2' : ''}`}>
+                    <h4 className="font-bold text-slate-800 text-[11px] font-mono uppercase tracking-wider">General Project Expectations & Notes</h4>
+                    <p className="text-slate-700 leading-relaxed whitespace-pre-line">{project.generalNotes}</p>
                   </div>
                 )}
+                {project.termsAndConditions && (
+                  <div className="space-y-1 border-t border-slate-200 pt-2">
+                    <h4 className="font-bold text-slate-800 text-[11px] font-mono uppercase tracking-wider">Terms & Conditions</h4>
+                    <p className="text-slate-600 leading-relaxed whitespace-pre-line text-[11px]">{project.termsAndConditions}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Site Inspection & Scope Reference Photos Gallery */}
+            {project.photos && project.photos.length > 0 && (
+              <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-blue-100 text-blue-700 rounded-lg">
+                      <Camera className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-xs font-mono uppercase tracking-wider">
+                        Site Inspection & Substrate Condition Photos ({project.photos.length})
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Photos captured during estimator site walkthrough, tied to specific work items and prep requirements.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    Click any photo to enlarge & inspect
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {(project.photos as ProjectPhoto[]).map((photo) => (
+                    <div
+                      key={photo.id}
+                      onClick={() => setActivePhotoModal(photo)}
+                      className="group cursor-pointer rounded-xl overflow-hidden border border-slate-200 bg-slate-50 hover:border-blue-500 hover:shadow-md transition flex flex-col"
+                    >
+                      <div className="relative aspect-4/3 overflow-hidden bg-slate-900">
+                        <img
+                          src={photo.url}
+                          alt={photo.caption || 'Site inspection'}
+                          className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
+                          <ZoomIn className="w-5 h-5 drop-shadow" />
+                        </div>
+                        {photo.linkedItemName && (
+                          <div className="absolute top-1.5 left-1.5 bg-blue-600/90 backdrop-blur-xs text-white text-[9px] font-mono font-bold px-1.5 py-0.5 rounded shadow-xs truncate max-w-[90%] flex items-center gap-1">
+                            <Paperclip className="w-2.5 h-2.5" />
+                            {photo.linkedItemName}
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-2 space-y-0.5 bg-white">
+                        <p className="text-xs text-slate-800 font-medium truncate">
+                          {photo.caption || 'Inspection photo'}
+                        </p>
+                        {(photo.createdAt || photo.uploadedAt) && (
+                          <span className="text-[9px] text-slate-400 font-mono block">
+                            {new Date(photo.createdAt || photo.uploadedAt!).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -1678,6 +1925,62 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* 5. PHOTO LIGHTBOX MODAL */}
+      {activePhotoModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4"
+          onClick={() => setActivePhotoModal(null)}
+        >
+          <div
+            className="relative max-w-4xl w-full bg-zinc-900 border border-neutral-800 rounded-2xl overflow-hidden shadow-2xl space-y-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 bg-zinc-950 border-b border-neutral-800">
+              <div className="space-y-1">
+                <h4 className="text-white font-bold text-sm font-display flex items-center gap-2">
+                  <Camera className="w-4 h-4 text-blue-400" />
+                  {activePhotoModal.caption || 'Site Inspection Photo'}
+                </h4>
+                {activePhotoModal.linkedItemName && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-mono text-blue-400 bg-blue-950/60 border border-blue-800/80 px-2 py-0.5 rounded">
+                    <Paperclip className="w-3 h-3" /> Linked to: {activePhotoModal.linkedItemName}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePhotoModal(null)}
+                className="p-2 text-zinc-400 hover:text-white bg-neutral-800 hover:bg-neutral-700 rounded-xl cursor-pointer transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Image View */}
+            <div className="bg-black flex items-center justify-center max-h-[70vh] p-2">
+              <img
+                src={activePhotoModal.url}
+                alt={activePhotoModal.caption || 'Preview'}
+                className="max-h-[65vh] w-auto object-contain rounded-lg shadow"
+              />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-zinc-950 border-t border-neutral-800 flex items-center justify-between text-xs text-zinc-400 font-mono">
+              <span>{(activePhotoModal.createdAt || activePhotoModal.uploadedAt) ? `Captured on ${new Date(activePhotoModal.createdAt || activePhotoModal.uploadedAt!).toLocaleString()}` : 'Site Inspection Photo'}</span>
+              <button
+                type="button"
+                onClick={() => setActivePhotoModal(null)}
+                className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-bold rounded-lg cursor-pointer transition"
+              >
+                Close Preview
+              </button>
+            </div>
           </div>
         </div>
       )}

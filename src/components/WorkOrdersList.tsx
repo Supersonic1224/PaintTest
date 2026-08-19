@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { ProjectDetails, ClientLead, RoomSpec, SurfaceTask, ProjectTask } from '../types';
 import { generateWorkOrderPDF } from '../pdfGenerator';
 import { getUniqueRoomName } from '../utils/roomUtils';
@@ -33,7 +33,13 @@ import {
   Lock,
   Target,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Share2,
+  PenTool,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  ArrowRight
 } from 'lucide-react';
 
 export interface PainterShoppingItem {
@@ -194,21 +200,37 @@ function computeShoppingListForRooms(rooms: RoomSpec[]): PainterShoppingItem[] {
   return results;
 }
 
+// Helper to parse strings with various line formats into clean point-form arrays
+const parseScopePoints = (rawText: string | undefined): string[] => {
+  if (!rawText || !rawText.trim()) return [];
+  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length > 1) {
+    return lines.map(l => l.replace(/^[•\-\*\d\.\)\s]+/, '').trim()).filter(Boolean);
+  }
+  const splitPoints = rawText.split(/[•;\|\n]|(?:\s-\s)/).map(s => s.trim()).filter(Boolean);
+  if (splitPoints.length > 1) {
+    return splitPoints.map(l => l.replace(/^[•\-\*\d\.\)\s]+/, '').trim()).filter(Boolean);
+  }
+  return [rawText.trim()];
+};
+
 interface WorkOrdersListProps {
   projects: ProjectDetails[];
   clients: ClientLead[];
   onSaveProject?: (project: ProjectDetails) => void;
   onSelectProjectForFullEdit?: (projectId: string) => void;
+  onNavigateToInstantCalc?: (projectId?: string) => void;
 }
 
 export default function WorkOrdersList({
   projects,
   clients,
   onSaveProject,
+  onSelectProjectForFullEdit,
+  onNavigateToInstantCalc,
 }: WorkOrdersListProps) {
   const [selectedProject, setSelectedProject] = useState<ProjectDetails | null>(null);
   const [selectedScopeFilter, setSelectedScopeFilter] = useState<'interior' | 'exterior' | 'deck'>('interior');
-  const [showCalculationRundown, setShowCalculationRundown] = useState<boolean>(true);
   const [checkedShoppingItems, setCheckedShoppingItems] = useState<Record<string, boolean>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -237,10 +259,25 @@ export default function WorkOrdersList({
   const [specialConditions, setSpecialConditions] = useState<string>('');
   const [teamNotes, setTeamNotes] = useState<string>('');
 
+  // Toggles for editing scope sections inline
+  const [editingDescription, setEditingDescription] = useState<boolean>(false);
+  const [editingInclusions, setEditingInclusions] = useState<boolean>(false);
+  const [editingExclusions, setEditingExclusions] = useState<boolean>(false);
+  const [editingSpecialConditions, setEditingSpecialConditions] = useState<boolean>(false);
+  const [editingTeamNotes, setEditingTeamNotes] = useState<boolean>(false);
+
   const [laborRatePerHour, setLaborRatePerHour] = useState<number>(100);
   const [sundriesPerRoom, setSundriesPerRoom] = useState<number>(12);
   const [taxRatePercent, setTaxRatePercent] = useState<number>(13);
   const [discountAmount, setDiscountAmount] = useState<number>(0);
+
+  // Customer Site Acceptance signature modal states
+  const [isSiteSignatureModalOpen, setIsSiteSignatureModalOpen] = useState<boolean>(false);
+  const [isShareWorkerModalOpen, setIsShareWorkerModalOpen] = useState<boolean>(false);
+  const [signatureInputMode, setSignatureInputMode] = useState<'draw' | 'type'>('draw');
+  const [typedSignerName, setTypedSignerName] = useState<string>('');
+  const [isDrawing, setIsDrawing] = useState<boolean>(false);
+  const sigCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [siteProtocols, setSiteProtocols] = useState<SiteProtocolItem[]>([
     { id: 'proto-1', text: 'Cover all floor surfaces and furniture with heavy-duty drop cloths and 3 mil poly sheeting.', completed: true },
@@ -253,6 +290,22 @@ export default function WorkOrdersList({
     return projects.filter(p => p.status === 'Approved' || p.status === 'Completed' || p.status === 'In Progress' || p.status === 'Sent' || p.status === 'Draft');
   }, [projects]);
 
+  // Automatically open work order if URL contains workOrder query parameter
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const woId = params.get('workOrder');
+    const scopeParam = params.get('scope') as 'interior' | 'exterior' | 'deck' | null;
+    if (woId && projects.length > 0) {
+      const match = projects.find(p => p.id === woId);
+      if (match) {
+        setSelectedProject(match);
+        if (scopeParam && ['interior', 'exterior', 'deck'].includes(scopeParam)) {
+          setSelectedScopeFilter(scopeParam);
+        }
+      }
+    }
+  }, [projects]);
+
   const selectedClient = useMemo(() => {
     if (!selectedProject) return null;
     return clients.find(c => c.id === selectedProject.clientId);
@@ -263,17 +316,31 @@ export default function WorkOrdersList({
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Available scope categories for splitting work order documents for painters
-  const availableScopeCategories = ['interior', 'exterior', 'deck'] as const;
+  // Active scope categories that actually have rooms in this project estimate
+  const availableScopeCategories = useMemo(() => {
+    if (!selectedProject || !selectedProject.rooms || selectedProject.rooms.length === 0) {
+      return ['interior'] as Array<'interior' | 'exterior' | 'deck'>;
+    }
+    const scopesFound = new Set<'interior' | 'exterior' | 'deck'>();
+    selectedProject.rooms.forEach(r => {
+      const cat = (r.category || 'interior') as 'interior' | 'exterior' | 'deck';
+      scopesFound.add(cat);
+    });
+    const result: Array<'interior' | 'exterior' | 'deck'> = [];
+    if (scopesFound.has('interior')) result.push('interior');
+    if (scopesFound.has('exterior')) result.push('exterior');
+    if (scopesFound.has('deck')) result.push('deck');
+    return result.length > 0 ? result : (['interior'] as Array<'interior' | 'exterior' | 'deck'>);
+  }, [selectedProject]);
 
   // Sync selected scope filter with available categories
   useEffect(() => {
-    if (selectedProject && availableScopeCategories.length > 0) {
+    if (availableScopeCategories.length > 0) {
       if (!availableScopeCategories.includes(selectedScopeFilter)) {
         setSelectedScopeFilter(availableScopeCategories[0]);
       }
     }
-  }, [selectedProject, availableScopeCategories]);
+  }, [availableScopeCategories, selectedScopeFilter]);
 
   // Initialize editable states whenever selectedProject changes
   useEffect(() => {
@@ -286,6 +353,7 @@ export default function WorkOrdersList({
       setDiscountAmount(selectedProject.summary?.discount || 0);
       setTaxRatePercent((selectedProject.summary?.taxRate ?? 0.13) * 100);
       setLaborRatePerHour(selectedProject.summary?.hourlyLaborRate || 100);
+      setTypedSignerName(selectedProject.siteAcceptedBy || client?.name || selectedProject.signerName || '');
 
       // Seed contract notes, inclusions, exclusions, and descriptions
       setProjectDescription(selectedProject.description || 'Full surface prep, patching, and two full coats of premium paint specification.');
@@ -585,6 +653,85 @@ export default function WorkOrdersList({
     triggerToast(`Saved Work Order ${getWorkOrderNumber(selectedProject.id, selectedScopeFilter)} changes!`);
   };
 
+  // SIGNATURE CANVAS DRAWING HANDLERS
+  const clearSiteSignatureCanvas = () => {
+    if (sigCanvasRef.current) {
+      const ctx = sigCanvasRef.current.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, sigCanvasRef.current.width, sigCanvasRef.current.height);
+      }
+    }
+  };
+
+  const getCanvasPos = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!sigCanvasRef.current) return { x: 0, y: 0 };
+    const rect = sigCanvasRef.current.getBoundingClientRect();
+    if ('touches' in e && e.touches.length > 0) {
+      return {
+        x: e.touches[0].clientX - rect.left,
+        y: e.touches[0].clientY - rect.top,
+      };
+    } else if ('clientX' in e) {
+      return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+    }
+    return { x: 0, y: 0 };
+  };
+
+  const handleSigStart = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    setIsDrawing(true);
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const pos = getCanvasPos(e);
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+  };
+
+  const handleSigDraw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !sigCanvasRef.current) return;
+    const ctx = sigCanvasRef.current.getContext('2d');
+    if (!ctx) return;
+    const pos = getCanvasPos(e);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+  };
+
+  const handleSigEnd = () => {
+    setIsDrawing(false);
+  };
+
+  const handleSaveCustomerSiteSignature = () => {
+    if (!selectedProject) return;
+    let signatureDataUrl = '';
+    if (sigCanvasRef.current) {
+      signatureDataUrl = sigCanvasRef.current.toDataURL('image/png');
+    }
+    const signer = typedSignerName.trim() || clientName || 'Customer';
+    const nowIso = new Date().toISOString();
+
+    const updatedProject: ProjectDetails = {
+      ...selectedProject,
+      siteAcceptanceSignatureDataUrl: signatureDataUrl || selectedProject.siteAcceptanceSignatureDataUrl,
+      siteAcceptanceDate: nowIso,
+      siteAcceptedBy: signer
+    };
+
+    if (onSaveProject) {
+      onSaveProject(updatedProject);
+    }
+    setSelectedProject(updatedProject);
+    setIsSiteSignatureModalOpen(false);
+    triggerToast('Customer site acceptance signature captured and saved!');
+  };
+
   return (
     <div className="space-y-6 text-left font-sans">
       
@@ -739,41 +886,53 @@ export default function WorkOrdersList({
 
               {/* Expandable Options & Action Buttons (Always visible on desktop lg, toggled on mobile) */}
               <div className={showMobileOptions ? 'flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 w-full lg:w-auto pt-2 lg:pt-0 border-t border-neutral-800/80 lg:border-t-0' : 'hidden lg:flex lg:flex-row items-center justify-between gap-3 w-full lg:w-auto'}>
-                {/* Scope Filter Tabs */}
+                {/* Scope Filter Tabs (Only shown if more than 1 scope category exists in the project estimate) */}
                 <div className="flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 p-1 rounded-xl font-mono text-xs overflow-x-auto max-w-full scrollbar-none whitespace-nowrap">
-                  <span className="text-[10px] uppercase text-zinc-500 font-bold px-2 hidden sm:inline">Active Scope Filter:</span>
-                  {availableScopeCategories.map(cat => {
-                    const roomCount = (selectedProject.rooms || []).filter(r => (r.category || 'interior') === cat).length;
-                    const labelMap: Record<string, string> = {
-                      interior: 'Interior WO',
-                      exterior: 'Exterior WO',
-                      deck: 'Deck WO'
-                    };
-                    const colorMap: Record<string, string> = {
-                      interior: 'bg-emerald-600',
-                      exterior: 'bg-sky-600',
-                      deck: 'bg-amber-600'
-                    };
-                    const activeBg = colorMap[cat] || 'bg-blue-600';
+                  {availableScopeCategories.length > 1 ? (
+                    <>
+                      <span className="text-[10px] uppercase text-zinc-500 font-bold px-2 hidden sm:inline">Active Scope:</span>
+                      {availableScopeCategories.map(cat => {
+                        const roomCount = (selectedProject.rooms || []).filter(r => (r.category || 'interior') === cat).length;
+                        const labelMap: Record<string, string> = {
+                          interior: 'Interior WO',
+                          exterior: 'Exterior WO',
+                          deck: 'Deck WO'
+                        };
+                        const colorMap: Record<string, string> = {
+                          interior: 'bg-emerald-600',
+                          exterior: 'bg-sky-600',
+                          deck: 'bg-amber-600'
+                        };
+                        const activeBg = colorMap[cat] || 'bg-blue-600';
 
-                    return (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => setSelectedScopeFilter(cat)}
-                        className={`px-3 py-1.5 rounded-lg transition text-xs font-bold cursor-pointer shrink-0 ${
-                          selectedScopeFilter === cat
-                            ? `${activeBg} text-white shadow`
-                            : 'text-zinc-400 hover:text-white hover:bg-neutral-800'
-                        }`}
-                      >
-                        {labelMap[cat] || `${cat.toUpperCase()} WO`} ({roomCount})
-                      </button>
-                    );
-                  })}
+                        return (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setSelectedScopeFilter(cat)}
+                            className={`px-3 py-1.5 rounded-lg transition text-xs font-bold cursor-pointer shrink-0 ${
+                              selectedScopeFilter === cat
+                                ? `${activeBg} text-white shadow`
+                                : 'text-zinc-400 hover:text-white hover:bg-neutral-800'
+                            }`}
+                          >
+                            {labelMap[cat] || `${cat.toUpperCase()} WO`} ({roomCount})
+                          </button>
+                        );
+                      })}
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2 px-2.5 py-1">
+                      <span className="text-[10px] uppercase text-zinc-500 font-bold">Scope:</span>
+                      <span className="text-xs font-bold text-emerald-400 uppercase flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        {availableScopeCategories[0] || 'Interior'} Scope ({(selectedProject.rooms || []).length} Areas)
+                      </span>
+                    </div>
+                  )}
                 </div>
 
-                {/* Action Buttons: Save Changes, Export PDF, Print, Close */}
+                {/* Action Buttons: Save Changes, Share/Email, Export PDF, Print, Close */}
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <button
                     type="button"
@@ -782,6 +941,17 @@ export default function WorkOrdersList({
                   >
                     <Save className="w-4 h-4" />
                     <span>Save Changes</span>
+                  </button>
+
+                  {/* SHARE / EMAIL WORK ORDER TO WORKERS */}
+                  <button
+                    type="button"
+                    onClick={() => setIsShareWorkerModalOpen(true)}
+                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-md min-h-[38px] flex-1 sm:flex-none"
+                    title="Share / Email Work Order to Painters & Workers"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Share / Email to Workers</span>
                   </button>
 
                   <button
@@ -1080,92 +1250,202 @@ export default function WorkOrdersList({
                   </div>
                 </div>
 
-                {/* 2B. IMPORTED SCOPE PARAMETERS: INCLUSIONS, EXCLUSIONS, SPECIAL CONDITIONS & NOTES */}
-                <div className="border border-sky-200 bg-sky-50/40 rounded-xl overflow-hidden shadow-sm">
-                  <div className="bg-sky-900 text-white px-4 py-2 flex items-center justify-between">
+                {/* 2B. IMPORTED SCOPE PARAMETERS: INCLUSIONS, EXCLUSIONS, SPECIAL CONDITIONS & NOTES (END-TO-END POINT FORM) */}
+                <div className="border border-slate-300 rounded-xl overflow-hidden bg-white shadow-sm space-y-0">
+                  <div className="bg-slate-900 text-white px-4 py-2.5 flex items-center justify-between">
                     <h3 className="font-bold text-xs uppercase tracking-wider font-mono flex items-center gap-2">
                       <ClipboardList className="w-4 h-4 text-sky-300" />
                       <span>Contract Scope, Inclusions, Exclusions & Special Notes</span>
                     </h3>
-                    <span className="text-[10px] bg-sky-800 text-sky-100 font-mono px-2 py-0.5 rounded uppercase font-bold">
-                      Worker Guidelines
+                    <span className="text-[10px] bg-slate-800 text-slate-200 font-mono px-2 py-0.5 rounded uppercase font-bold border border-slate-700">
+                      End-to-End Point-Form Scope
                     </span>
                   </div>
 
-                  <div className="p-3.5 sm:p-4 grid grid-cols-1 md:grid-cols-2 gap-3.5 font-mono text-xs">
-                    {/* Project Description */}
-                    <div className="bg-white p-3 rounded-lg border border-slate-200 space-y-1 col-span-1 md:col-span-2">
-                      <label className="text-[10px] font-extrabold uppercase text-slate-700 block flex items-center gap-1.5">
-                        <Info className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Project Overview & Scope Description (Editable)</span>
-                      </label>
-                      <textarea
-                        rows={2}
-                        value={projectDescription}
-                        onChange={(e) => setProjectDescription(e.target.value)}
-                        className="w-full text-xs font-mono text-slate-800 border border-slate-200 rounded p-2 focus:border-blue-600 outline-none leading-relaxed"
-                        placeholder="Enter general scope overview..."
-                      />
+                  <div className="p-4 sm:p-5 space-y-4 font-mono text-xs">
+                    {/* 1. Project Overview & Scope Description (Full Width End-to-End) */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2">
+                      <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
+                        <label className="text-xs font-bold uppercase text-slate-800 flex items-center gap-2">
+                          <Info className="w-4 h-4 text-blue-600" />
+                          <span>Project Overview & Scope Description</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setEditingDescription(!editingDescription)}
+                          className="text-[11px] text-blue-700 hover:text-blue-900 font-bold flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-slate-200 shadow-2xs"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>{editingDescription ? 'Done Editing' : 'Edit Description'}</span>
+                        </button>
+                      </div>
+
+                      {editingDescription ? (
+                        <textarea
+                          rows={3}
+                          value={projectDescription}
+                          onChange={(e) => setProjectDescription(e.target.value)}
+                          className="w-full text-xs font-mono text-slate-900 bg-white border border-blue-400 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 leading-relaxed"
+                          placeholder="Enter general scope overview..."
+                        />
+                      ) : (
+                        <ul className="space-y-1.5 pl-1">
+                          {parseScopePoints(projectDescription).map((pt, i) => (
+                            <li key={i} className="flex items-start gap-2.5 text-slate-700 text-xs leading-relaxed">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-600 mt-1.5 shrink-0" />
+                              <span className="font-sans font-medium">{pt}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
 
-                    {/* Inclusions */}
-                    <div className="bg-white p-3 rounded-lg border border-emerald-200 space-y-1">
-                      <label className="text-[10px] font-extrabold uppercase text-emerald-800 block flex items-center gap-1.5">
-                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Contract Inclusions (What IS Included)</span>
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={projectInclusions}
-                        onChange={(e) => setProjectInclusions(e.target.value)}
-                        className="w-full text-xs font-mono text-slate-800 border border-slate-200 rounded p-2 focus:border-emerald-600 outline-none leading-relaxed"
-                        placeholder="List inclusions..."
-                      />
+                    {/* 2. Contract Inclusions (Full Width End-to-End) */}
+                    <div className="bg-emerald-50/50 border border-emerald-200 rounded-xl p-4 space-y-2">
+                      <div className="flex items-center justify-between border-b border-emerald-200/80 pb-2">
+                        <label className="text-xs font-bold uppercase text-emerald-900 flex items-center gap-2">
+                          <CheckCircle className="w-4 h-4 text-emerald-600" />
+                          <span>Contract Inclusions (What IS Included)</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setEditingInclusions(!editingInclusions)}
+                          className="text-[11px] text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-emerald-200 shadow-2xs"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>{editingInclusions ? 'Done Editing' : 'Edit Inclusions'}</span>
+                        </button>
+                      </div>
+
+                      {editingInclusions ? (
+                        <textarea
+                          rows={3}
+                          value={projectInclusions}
+                          onChange={(e) => setProjectInclusions(e.target.value)}
+                          className="w-full text-xs font-mono text-slate-900 bg-white border border-emerald-400 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 leading-relaxed"
+                          placeholder="List inclusions (one per line or separated by bullets)..."
+                        />
+                      ) : (
+                        <ul className="space-y-1.5 pl-1">
+                          {parseScopePoints(projectInclusions).map((pt, i) => (
+                            <li key={i} className="flex items-start gap-2.5 text-emerald-950 text-xs leading-relaxed">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 mt-1.5 shrink-0" />
+                              <span className="font-sans font-medium">{pt}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
 
-                    {/* Exclusions */}
-                    <div className="bg-white p-3 rounded-lg border border-rose-200 space-y-1">
-                      <label className="text-[10px] font-extrabold uppercase text-rose-800 block flex items-center gap-1.5">
-                        <X className="w-3.5 h-3.5 text-rose-600" />
-                        <span>Contract Exclusions (What IS NOT Included)</span>
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={projectExclusions}
-                        onChange={(e) => setProjectExclusions(e.target.value)}
-                        className="w-full text-xs font-mono text-slate-800 border border-slate-200 rounded p-2 focus:border-rose-600 outline-none leading-relaxed"
-                        placeholder="List exclusions..."
-                      />
+                    {/* 3. Contract Exclusions (Full Width End-to-End) */}
+                    <div className="bg-rose-50/40 border border-rose-200 rounded-xl p-4 space-y-2">
+                      <div className="flex items-center justify-between border-b border-rose-200/80 pb-2">
+                        <label className="text-xs font-bold uppercase text-rose-900 flex items-center gap-2">
+                          <X className="w-4 h-4 text-rose-600" />
+                          <span>Contract Exclusions (What IS NOT Included)</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setEditingExclusions(!editingExclusions)}
+                          className="text-[11px] text-rose-700 hover:text-rose-900 font-bold flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-rose-200 shadow-2xs"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>{editingExclusions ? 'Done Editing' : 'Edit Exclusions'}</span>
+                        </button>
+                      </div>
+
+                      {editingExclusions ? (
+                        <textarea
+                          rows={3}
+                          value={projectExclusions}
+                          onChange={(e) => setProjectExclusions(e.target.value)}
+                          className="w-full text-xs font-mono text-slate-900 bg-white border border-rose-400 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-rose-500/20 leading-relaxed"
+                          placeholder="List exclusions (one per line or separated by bullets)..."
+                        />
+                      ) : (
+                        <ul className="space-y-1.5 pl-1">
+                          {parseScopePoints(projectExclusions).map((pt, i) => (
+                            <li key={i} className="flex items-start gap-2.5 text-rose-950 text-xs leading-relaxed">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 shrink-0" />
+                              <span className="font-sans font-medium">{pt}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
 
-                    {/* Special Access Notes */}
-                    <div className="bg-white p-3 rounded-lg border border-amber-200 space-y-1">
-                      <label className="text-[10px] font-extrabold uppercase text-amber-800 block flex items-center gap-1.5">
-                        <MapPin className="w-3.5 h-3.5 text-amber-600" />
-                        <span>Special Site Access & Lockbox Notes</span>
-                      </label>
-                      <textarea
-                        rows={2}
-                        value={specialConditions}
-                        onChange={(e) => setSpecialConditions(e.target.value)}
-                        className="w-full text-xs font-mono text-slate-800 border border-slate-200 rounded p-2 focus:border-amber-600 outline-none leading-relaxed"
-                        placeholder="Lockbox codes, pet rules, entrance notes..."
-                      />
+                    {/* 4. Special Access & Lockbox Notes (Full Width End-to-End) */}
+                    <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-4 space-y-2">
+                      <div className="flex items-center justify-between border-b border-amber-200/80 pb-2">
+                        <label className="text-xs font-bold uppercase text-amber-900 flex items-center gap-2">
+                          <MapPin className="w-4 h-4 text-amber-600" />
+                          <span>Special Site Access & Lockbox Notes</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setEditingSpecialConditions(!editingSpecialConditions)}
+                          className="text-[11px] text-amber-700 hover:text-amber-900 font-bold flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-amber-200 shadow-2xs"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>{editingSpecialConditions ? 'Done Editing' : 'Edit Access Notes'}</span>
+                        </button>
+                      </div>
+
+                      {editingSpecialConditions ? (
+                        <textarea
+                          rows={2}
+                          value={specialConditions}
+                          onChange={(e) => setSpecialConditions(e.target.value)}
+                          className="w-full text-xs font-mono text-slate-900 bg-white border border-amber-400 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-amber-500/20 leading-relaxed"
+                          placeholder="Lockbox codes, pet rules, entrance notes..."
+                        />
+                      ) : (
+                        <ul className="space-y-1.5 pl-1">
+                          {parseScopePoints(specialConditions).map((pt, i) => (
+                            <li key={i} className="flex items-start gap-2.5 text-amber-950 text-xs leading-relaxed">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-1.5 shrink-0" />
+                              <span className="font-sans font-medium">{pt}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
 
-                    {/* Crew Notes */}
-                    <div className="bg-white p-3 rounded-lg border border-blue-200 space-y-1">
-                      <label className="text-[10px] font-extrabold uppercase text-blue-800 block flex items-center gap-1.5">
-                        <Wrench className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Team & Crew Site Briefing Notes</span>
-                      </label>
-                      <textarea
-                        rows={2}
-                        value={teamNotes}
-                        onChange={(e) => setTeamNotes(e.target.value)}
-                        className="w-full text-xs font-mono text-slate-800 border border-slate-200 rounded p-2 focus:border-blue-600 outline-none leading-relaxed"
-                        placeholder="Daily crew briefing, paint storage rules..."
-                      />
+                    {/* 5. Team & Crew Site Briefing Notes (Full Width End-to-End) */}
+                    <div className="bg-blue-50/50 border border-blue-200 rounded-xl p-4 space-y-2">
+                      <div className="flex items-center justify-between border-b border-blue-200/80 pb-2">
+                        <label className="text-xs font-bold uppercase text-blue-900 flex items-center gap-2">
+                          <Wrench className="w-4 h-4 text-blue-600" />
+                          <span>Team & Crew Site Briefing Notes</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setEditingTeamNotes(!editingTeamNotes)}
+                          className="text-[11px] text-blue-700 hover:text-blue-900 font-bold flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-blue-200 shadow-2xs"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>{editingTeamNotes ? 'Done Editing' : 'Edit Briefing'}</span>
+                        </button>
+                      </div>
+
+                      {editingTeamNotes ? (
+                        <textarea
+                          rows={2}
+                          value={teamNotes}
+                          onChange={(e) => setTeamNotes(e.target.value)}
+                          className="w-full text-xs font-mono text-slate-900 bg-white border border-blue-400 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 leading-relaxed"
+                          placeholder="Daily crew briefing, paint storage rules..."
+                        />
+                      ) : (
+                        <ul className="space-y-1.5 pl-1">
+                          {parseScopePoints(teamNotes).map((pt, i) => (
+                            <li key={i} className="flex items-start gap-2.5 text-blue-950 text-xs leading-relaxed">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-600 mt-1.5 shrink-0" />
+                              <span className="font-sans font-medium">{pt}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2103,240 +2383,135 @@ export default function WorkOrdersList({
                   )}
                 </div>
 
-                {/* 6. PRICE & QUANTITY CALCULATION FORMULAS RUNDOWN (EDITABLE FINANCIAL PARAMS) */}
-                <div className="border border-slate-300 rounded-xl overflow-hidden bg-slate-50/50">
-                  <div className="bg-slate-100 px-4 py-3 border-b border-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Calculator className="w-4 h-4 text-emerald-700" />
+                {/* 6. OPERATIONAL SCOPE SUMMARY & INSTANT CALCULATOR PRICE BREAKDOWN LINK */}
+                <div className="border border-slate-300 rounded-xl overflow-hidden bg-slate-50 shadow-sm p-4 sm:p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 bg-blue-100 text-blue-700 rounded-lg">
+                        <Calculator className="w-5 h-5" />
+                      </div>
                       <div>
                         <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider font-mono">
-                          Financial Rates & Calculation Formula Parameters
+                          Work Order Scope & Operational Overview
                         </h3>
-                        <p className="text-[10px] text-slate-500 font-mono">
-                          Adjust labor rates, sundries per room, tax rates, and discounts directly below
+                        <p className="text-[11px] text-slate-500 font-mono">
+                          Financial formulas, labor rates & margin models have been centralized in the Instant Calculator
                         </p>
                       </div>
                     </div>
 
                     <button
                       type="button"
-                      onClick={() => setShowCalculationRundown(!showCalculationRundown)}
-                      className="text-xs font-mono font-bold text-blue-700 bg-white px-2.5 py-1 rounded border border-slate-300 self-start sm:self-auto cursor-pointer"
+                      onClick={() => {
+                        handleSaveDocument();
+                        if (onNavigateToInstantCalc) {
+                          onNavigateToInstantCalc(selectedProject.id);
+                        } else {
+                          triggerToast('Navigate to Instant Calculator from the top navigation bar');
+                        }
+                      }}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-md shrink-0"
                     >
-                      {showCalculationRundown ? 'Hide Formulas ▲' : 'View Formulas ▼'}
+                      <ArrowRight className="w-4 h-4" />
+                      <span>View Price Breakdown in Instant Calculator</span>
                     </button>
                   </div>
 
-                  {/* Financial Rate Inputs Bar */}
-                  <div className="p-4 bg-slate-100/70 border-b border-slate-300 grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
-                    <div className="bg-white p-2 rounded border border-slate-300 space-y-1">
-                      <label className="text-[10px] text-slate-500 font-bold uppercase block">Labor Rate ($/hr)</label>
-                      <input 
-                        type="number"
-                        value={laborRatePerHour}
-                        onChange={(e) => setLaborRatePerHour(Number(e.target.value))}
-                        className="w-full font-black text-slate-900 text-sm outline-none bg-slate-50 p-1 rounded"
-                      />
+                  {/* Summary Metric Chips */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs text-center">
+                    <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
+                      <span className="text-[10px] text-slate-500 uppercase font-bold block">Scope Category</span>
+                      <span className="text-sm font-black text-slate-900 uppercase">{selectedScopeFilter}</span>
                     </div>
-
-                    <div className="bg-white p-2 rounded border border-slate-300 space-y-1">
-                      <label className="text-[10px] text-slate-500 font-bold uppercase block">Sundries / Room ($)</label>
-                      <input 
-                        type="number"
-                        value={sundriesPerRoom}
-                        onChange={(e) => setSundriesPerRoom(Number(e.target.value))}
-                        className="w-full font-black text-slate-900 text-sm outline-none bg-slate-50 p-1 rounded"
-                      />
+                    <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
+                      <span className="text-[10px] text-slate-500 uppercase font-bold block">Assigned Areas</span>
+                      <span className="text-sm font-black text-blue-700">{activeRoomsForScope.length} Rooms</span>
                     </div>
-
-                    <div className="bg-white p-2 rounded border border-slate-300 space-y-1">
-                      <label className="text-[10px] text-slate-500 font-bold uppercase block">Tax Rate (HST %)</label>
-                      <input 
-                        type="number"
-                        value={taxRatePercent}
-                        onChange={(e) => setTaxRatePercent(Number(e.target.value))}
-                        className="w-full font-black text-slate-900 text-sm outline-none bg-slate-50 p-1 rounded"
-                      />
+                    <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
+                      <span className="text-[10px] text-slate-500 uppercase font-bold block">Est. Labor Time</span>
+                      <span className="text-sm font-black text-emerald-700">{projectMetrics.totalHours} Hours</span>
                     </div>
-
-                    <div className="bg-white p-2 rounded border border-slate-300 space-y-1">
-                      <label className="text-[10px] text-slate-500 font-bold uppercase block">Discount ($)</label>
-                      <input 
-                        type="number"
-                        value={discountAmount}
-                        onChange={(e) => setDiscountAmount(Number(e.target.value))}
-                        className="w-full font-black text-rose-700 text-sm outline-none bg-rose-50 p-1 rounded"
-                      />
-                    </div>
-                  </div>
-
-                  {showCalculationRundown && (
-                    <div className="p-5 space-y-4 bg-white font-mono text-xs text-slate-800">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* 1. Area Formula Box */}
-                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5">
-                          <h4 className="font-bold text-slate-900 text-xs uppercase flex items-center gap-1.5 border-b border-slate-200 pb-1">
-                            <Layers className="w-3.5 h-3.5 text-blue-600" />
-                            <span>1. Surface Area Formulas</span>
-                          </h4>
-                          <p className="text-[11px] text-slate-600 leading-relaxed">
-                            <strong>Wall Surface:</strong> <code>2 × Height × (Length + Width)</code><br />
-                            <strong>Ceiling Surface:</strong> <code>Length × Width</code><br />
-                            <strong>Trim Length:</strong> <code>2 × (Length + Width)</code>
-                          </p>
-                          <div className="text-[11px] text-slate-800 font-bold pt-1 bg-white p-2 rounded border border-slate-200">
-                            Scope Totals: {projectMetrics.wallArea.toFixed(0)} sq ft Walls + {projectMetrics.ceilingArea.toFixed(0)} sq ft Ceilings
-                          </div>
-                        </div>
-
-                        {/* 2. Paint Gallons Required Formula Box */}
-                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5">
-                          <h4 className="font-bold text-slate-900 text-xs uppercase flex items-center gap-1.5 border-b border-slate-200 pb-1">
-                            <ShoppingCart className="w-3.5 h-3.5 text-emerald-600" />
-                            <span>2. Paint Gallons Formula</span>
-                          </h4>
-                          <p className="text-[11px] text-slate-600 leading-relaxed">
-                            <strong>Exact Gallons:</strong> <code>(Total Sq Ft × Coats) ÷ 350 sq ft/gal</code><br />
-                            <strong>Store Cans to Buy:</strong> <code>Math.ceil(Exact Gallons)</code> (Min 1 can/color)
-                          </p>
-                          <div className="text-[11px] text-slate-800 font-bold pt-1 bg-white p-2 rounded border border-slate-200">
-                            Standard Paint Coverage: 350 sq ft per gallon (2 full coats standard)
-                          </div>
-                        </div>
-
-                        {/* 3. Material Budget Breakdown Box */}
-                        <div className="p-3.5 bg-emerald-50/50 border border-emerald-200 rounded-lg space-y-1.5">
-                          <h4 className="font-bold text-emerald-900 text-xs uppercase flex items-center gap-1.5 border-b border-emerald-200 pb-1">
-                            <DollarSign className="w-3.5 h-3.5 text-emerald-700" />
-                            <span>3. Material Budget Breakdown & Formula</span>
-                          </h4>
-                          <p className="text-[11px] text-emerald-900 leading-relaxed">
-                            <strong>Paint Materials:</strong> <code>Sum of Shopping Items = ${projectMetrics.sumPaintMaterial.toLocaleString()}</code><br />
-                            <strong>Sundries & Prep:</strong> <code>{activeRoomsForScope.length} Areas × ${sundriesPerRoom}.00 / area = ${projectMetrics.sundriesBudget}</code><br />
-                            <em>(Covers Scotch Blue tape, 3 mil poly drop cloths, spackle, caulk, roller covers & mini-rollers)</em>
-                          </p>
-                          <div className="text-[11px] text-emerald-950 font-bold pt-1 bg-white p-2 rounded border border-emerald-300">
-                            Total Scope Material Budget = ${projectMetrics.materialCost.toLocaleString()}
-                          </div>
-                        </div>
-
-                        {/* 4. Financial & Tax Pricing Formula Box */}
-                        <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5">
-                          <h4 className="font-bold text-slate-900 text-xs uppercase flex items-center gap-1.5 border-b border-slate-200 pb-1">
-                            <Clock className="w-3.5 h-3.5 text-amber-600" />
-                            <span>4. Labor & Financial Grand Total Formula</span>
-                          </h4>
-                          <p className="text-[11px] text-slate-600 leading-relaxed">
-                            <strong>Labor Hours:</strong> <code>Total Sq Ft ÷ 150 sq ft/hr = {projectMetrics.totalHours} hrs</code><br />
-                            <strong>Labor Cost:</strong> <code>{projectMetrics.totalHours} hrs × ${laborRatePerHour}.00 / hr = ${projectMetrics.laborCost.toLocaleString()}</code><br />
-                            <strong>HST Tax ({taxRatePercent}%):</strong> <code>Subtotal (${projectMetrics.subtotal.toLocaleString()}) × {taxRatePercent / 100} = ${projectMetrics.hst.toLocaleString()}</code>
-                          </p>
-                          <div className="text-[11px] text-slate-900 font-bold pt-1 bg-slate-200 p-2 rounded">
-                            Grand Total: ${projectMetrics.subtotal.toLocaleString()} Subtotal + ${projectMetrics.hst.toLocaleString()} HST = ${projectMetrics.totalCost.toLocaleString()}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* 7. FINANCIAL SUMMARY BAR */}
-                <div className="border-2 border-slate-900 rounded-xl overflow-hidden p-4 bg-slate-50 space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-4 font-mono text-xs">
-                    <div className="space-y-1">
-                      <span className="text-[10px] uppercase font-bold text-slate-500 block">Scope Financial Breakdown</span>
-                      <div className="flex flex-wrap items-center gap-4 text-slate-800 font-bold">
-                        <span>Labor Budget: ${projectMetrics.laborCost.toLocaleString()}</span>
-                        <span>&bull;</span>
-                        <span>Material Budget: ${projectMetrics.materialCost.toLocaleString()}</span>
-                        <span>&bull;</span>
-                        <span>Subtotal: ${projectMetrics.subtotal.toLocaleString()}</span>
-                        <span>&bull;</span>
-                        <span>HST ({taxRatePercent}%): ${projectMetrics.hst.toLocaleString()}</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-900 text-white p-3 rounded-lg text-right shrink-0">
-                      <span className="text-[10px] text-slate-400 uppercase block font-bold">Grand Total ({selectedScopeFilter.toUpperCase()})</span>
-                      <span className="text-lg font-black text-emerald-400">${projectMetrics.totalCost.toLocaleString()}</span>
-                    </div>
-                  </div>
-
-                  {/* 50% Target Benchmark Breakdown Card */}
-                  <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-lg text-xs font-mono text-slate-800 space-y-1.5">
-                    <div className="flex flex-wrap items-center justify-between gap-2 font-bold text-blue-900">
-                      <span className="flex items-center gap-1.5">
-                        <Target className="w-4 h-4 text-blue-600 shrink-0" />
-                        Project Target Benchmark (35% Labor Target | 15% Material Target | 50% Margin Target)
-                      </span>
-                      <span className="text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded text-[10px] uppercase">Target Gross Margin: 50.0%</span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] pt-1">
-                      <div className="bg-white p-2.5 rounded border border-blue-100 shadow-2xs">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase block">Target Labor (35%)</span>
-                        <span className="font-bold text-slate-900 font-mono text-sm">${Math.round(projectMetrics.subtotal * 0.35).toLocaleString()}</span>
-                        <div className="text-[10px] text-slate-600 mt-1">
-                          Actual Labor: <strong className={projectMetrics.laborCost <= projectMetrics.subtotal * 0.35 ? 'text-emerald-700' : 'text-amber-700'}>${projectMetrics.laborCost.toLocaleString()}</strong> ({((projectMetrics.laborCost / (projectMetrics.subtotal || 1)) * 100).toFixed(1)}%)
-                        </div>
-                      </div>
-
-                      <div className="bg-white p-2.5 rounded border border-blue-100 shadow-2xs">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase block">Target Material (15%)</span>
-                        <span className="font-bold text-slate-900 font-mono text-sm">${Math.round(projectMetrics.subtotal * 0.15).toLocaleString()}</span>
-                        <div className="text-[10px] text-slate-600 mt-1">
-                          Actual Material: <strong className={projectMetrics.materialCost <= projectMetrics.subtotal * 0.15 ? 'text-emerald-700' : 'text-amber-700'}>${projectMetrics.materialCost.toLocaleString()}</strong> ({((projectMetrics.materialCost / (projectMetrics.subtotal || 1)) * 100).toFixed(1)}%)
-                        </div>
-                      </div>
-
-                      <div className="bg-white p-2.5 rounded border border-blue-100 shadow-2xs">
-                        <span className="text-[10px] text-slate-500 font-bold uppercase block">Combined Target Cost (50%)</span>
-                        <span className="font-bold text-slate-900 font-mono text-sm">${Math.round(projectMetrics.subtotal * 0.50).toLocaleString()}</span>
-                        <div className="text-[10px] text-slate-600 mt-1">
-                          Actual Total Direct: <strong>${(projectMetrics.laborCost + projectMetrics.materialCost).toLocaleString()}</strong> ({(((projectMetrics.laborCost + projectMetrics.materialCost) / (projectMetrics.subtotal || 1)) * 100).toFixed(1)}%)
-                        </div>
-                      </div>
+                    <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
+                      <span className="text-[10px] text-slate-500 uppercase font-bold block">Shopping Line Items</span>
+                      <span className="text-sm font-black text-indigo-700">{editableShoppingList.length} Items</span>
                     </div>
                   </div>
                 </div>
 
-                {/* 8. SIGNATURE & QUALITY ASSURANCE FOOTER */}
-                <div className="pt-6 border-t-2 border-slate-300 space-y-6 font-mono text-xs">
+                {/* 7. SIGNATURE & CLIENT SITE ACCEPTANCE SECTION */}
+                <div className="pt-4 border-t-2 border-slate-300 space-y-6 font-mono text-xs">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
-                    <div className="space-y-4">
-                      <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider block">
-                        Site Lead / Operations Sign-off
+                    {/* Site Lead / Supervisor Sign-off */}
+                    <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      <span className="text-[10px] font-extrabold uppercase text-slate-600 tracking-wider block flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-blue-600" />
+                        <span>Site Lead / Operations Sign-off</span>
                       </span>
-                      <div className="h-10 border-b-2 border-slate-900 flex items-end pb-1 font-bold text-slate-800">
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 block">Lead Name / Crew Lead:</label>
                         <input 
                           type="text"
                           value={supervisorName}
                           onChange={(e) => setSupervisorName(e.target.value)}
-                          className="w-full font-bold text-slate-900 outline-none bg-transparent"
+                          placeholder="Enter site lead name..."
+                          className="w-full font-bold text-slate-900 border-b border-slate-400 bg-transparent py-1 outline-none focus:border-blue-600"
                         />
                       </div>
-                      <div className="flex justify-between text-[10px] text-slate-500">
-                        <span>Authorized Signature</span>
+                      <div className="flex justify-between text-[10px] text-slate-500 pt-1">
+                        <span className="text-emerald-700 font-bold">✓ Authorized Crew Lead</span>
                         <span>Date: {new Date().toLocaleDateString()}</span>
                       </div>
                     </div>
 
-                    <div className="space-y-4">
-                      <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider block">
-                        Customer Site Acceptance
-                      </span>
-                      <div className="h-10 border-b-2 border-slate-300 flex items-end pb-1 text-slate-400 italic">
-                        Sign upon job completion
+                    {/* Customer Site Acceptance */}
+                    <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-extrabold uppercase text-slate-600 tracking-wider flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>Customer Site Acceptance</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsSiteSignatureModalOpen(true)}
+                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] rounded-lg transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>{selectedProject.siteAcceptanceSignatureDataUrl ? 'Update Signature' : 'Sign On Site'}</span>
+                        </button>
                       </div>
+
+                      {selectedProject.siteAcceptanceSignatureDataUrl ? (
+                        <div className="space-y-2 bg-white p-2.5 rounded-lg border border-emerald-300">
+                          <img
+                            src={selectedProject.siteAcceptanceSignatureDataUrl}
+                            alt="Customer Acceptance Signature"
+                            className="h-14 max-w-full object-contain mx-auto border-b border-slate-200 pb-1"
+                          />
+                          <div className="flex items-center justify-between text-[10px] text-emerald-800 font-bold">
+                            <span>Signed by: {selectedProject.siteAcceptedBy || clientName || 'Customer'}</span>
+                            <span>{selectedProject.siteAcceptanceDate ? new Date(selectedProject.siteAcceptanceDate).toLocaleDateString() : new Date().toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          onClick={() => setIsSiteSignatureModalOpen(true)}
+                          className="h-16 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:border-emerald-500 hover:text-emerald-700 hover:bg-emerald-50/50 cursor-pointer transition"
+                        >
+                          <span className="text-[11px] font-bold">Click here to capture customer sign-off</span>
+                          <span className="text-[9px]">Confirm completed scope with customer on site</span>
+                        </div>
+                      )}
+
                       <div className="flex justify-between text-[10px] text-slate-500">
-                        <span>Client Signature</span>
-                        <span>Date: ____ / ____ / ________</span>
+                        <span>Client Signature Status: <strong className={selectedProject.siteAcceptanceSignatureDataUrl ? 'text-emerald-700' : 'text-amber-700'}>{selectedProject.siteAcceptanceSignatureDataUrl ? 'ACCEPTED' : 'PENDING'}</strong></span>
+                        <span>Date: {selectedProject.siteAcceptanceDate ? new Date(selectedProject.siteAcceptanceDate).toLocaleDateString() : 'Pending'}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="bg-slate-100 p-3 rounded-lg text-center text-[10px] text-slate-600 space-y-0.5">
-                    <p className="font-bold text-slate-800">CAPSTONE PAINTING INC. &bull; QUALITY ASSURANCE GUARANTEE</p>
-                    <p>All work is executed according to professional painting standards using premium materials. Thank you for choosing Capstone Painting!</p>
+                  <div className="bg-slate-100 p-3.5 rounded-xl text-center text-[10px] text-slate-600 space-y-0.5 border border-slate-200">
+                    <p className="font-bold text-slate-800 tracking-wide uppercase">CAPSTONE PAINTING INC. &bull; QUALITY ASSURANCE & SITE COMPLETION GUARANTEE</p>
+                    <p>All work is executed according to professional painting standards using premium materials. Customer signature confirms work was reviewed and approved.</p>
                   </div>
                 </div>
 
@@ -2344,25 +2519,33 @@ export default function WorkOrdersList({
             </div>
 
             {/* Modal Control Footer Bar */}
-            <div className="p-4 sm:px-6 border-t border-neutral-800 bg-[#111111] flex items-center justify-between no-print">
+            <div className="p-4 sm:px-6 border-t border-neutral-800 bg-[#111111] flex flex-wrap items-center justify-between gap-3 no-print">
               <span className="text-xs text-zinc-400 font-mono">
                 PaintCRM Interactive Document Engine &bull; Official Work Order {getWorkOrderNumber(selectedProject.id, selectedScopeFilter)}
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsShareWorkerModalOpen(true)}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span>Email / Share to Workers</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleSaveDocument}
                   className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-900/30"
                 >
                   <Save className="w-4 h-4" />
-                  <span>Save Work Order Changes</span>
+                  <span>Save Changes</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => window.print()}
                   className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white font-mono font-bold text-xs rounded-xl transition cursor-pointer border border-neutral-700"
                 >
-                  Print Official Document
+                  Print Document
                 </button>
                 <button
                   type="button"
@@ -2374,6 +2557,168 @@ export default function WorkOrdersList({
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOMER SITE ACCEPTANCE SIGNATURE MODAL */}
+      {isSiteSignatureModalOpen && selectedProject && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-800 w-full max-w-lg rounded-2xl p-6 space-y-5 shadow-2xl text-white font-mono">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-sm text-white">Customer Site Acceptance Sign-off</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSiteSignatureModalOpen(false)}
+                className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-neutral-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-300">
+              Please have the customer sign below to confirm that all completed scope, areas, and surfaces for project <strong className="text-white">{selectedProject.name}</strong> have been inspected and accepted.
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs text-zinc-400 font-bold uppercase block">Customer / Signer Full Name:</label>
+              <input
+                type="text"
+                value={typedSignerName}
+                onChange={(e) => setTypedSignerName(e.target.value)}
+                placeholder="Enter customer name..."
+                className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            {/* Signature Canvas Pad */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-zinc-400 font-bold uppercase block">Digital Signature (Draw or Sign):</label>
+                <button
+                  type="button"
+                  onClick={clearSiteSignatureCanvas}
+                  className="text-[11px] text-rose-400 hover:text-rose-300 font-bold cursor-pointer"
+                >
+                  Clear Signature Pad
+                </button>
+              </div>
+
+              <div className="bg-white rounded-xl border border-neutral-700 overflow-hidden touch-none relative">
+                <canvas
+                  ref={sigCanvasRef}
+                  width={460}
+                  height={150}
+                  onMouseDown={handleSigStart}
+                  onMouseMove={handleSigDraw}
+                  onMouseUp={handleSigEnd}
+                  onMouseLeave={handleSigEnd}
+                  onTouchStart={handleSigStart}
+                  onTouchMove={handleSigDraw}
+                  onTouchEnd={handleSigEnd}
+                  className="w-full h-[150px] bg-white cursor-crosshair"
+                />
+                <span className="absolute bottom-2 right-3 text-[10px] text-slate-400 select-none pointer-events-none">
+                  Sign above with finger or stylus
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setIsSiteSignatureModalOpen(false)}
+                className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-zinc-300 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCustomerSiteSignature}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-900/40"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Save Customer Acceptance</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SHARE / EMAIL WORK ORDER TO WORKERS MODAL */}
+      {isShareWorkerModalOpen && selectedProject && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-800 w-full max-w-lg rounded-2xl p-6 space-y-5 shadow-2xl text-white font-mono">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <Mail className="w-5 h-5 text-indigo-400" />
+                <h3 className="font-bold text-sm text-white">Email & Share Work Order to Workers</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsShareWorkerModalOpen(false)}
+                className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-neutral-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-300 leading-relaxed">
+              Workers and crew leads can access this work order directly on mobile or tablet, view room dimensions and prep notes, and obtain customer site acceptance signatures upon job completion.
+            </p>
+
+            <div className="space-y-3 bg-neutral-800/80 p-4 rounded-xl border border-neutral-700/80">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-zinc-400 font-bold uppercase">Work Order Link:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const directUrl = `${window.location.origin}${window.location.pathname}?workOrder=${selectedProject.id}&scope=${selectedScopeFilter}`;
+                    navigator.clipboard.writeText(directUrl);
+                    triggerToast('Copied Work Order Link to clipboard!');
+                  }}
+                  className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy Direct URL</span>
+                </button>
+              </div>
+
+              <input
+                type="text"
+                readOnly
+                value={`${window.location.origin}${window.location.pathname}?workOrder=${selectedProject.id}&scope=${selectedScopeFilter}`}
+                className="w-full bg-neutral-900 border border-neutral-700 rounded-lg p-2 text-xs text-zinc-300 font-mono select-all"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-xs text-zinc-400 font-bold uppercase block">Quick Email Crew Dispatch:</span>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href={`mailto:?subject=${encodeURIComponent(`Work Order: ${selectedProject.name} (${selectedScopeFilter.toUpperCase()})`)}&body=${encodeURIComponent(
+                    `Hello Crew,\n\nPlease find the active Work Order for ${selectedProject.name} (${clientAddress || 'Client Site'}).\n\nScope: ${selectedScopeFilter.toUpperCase()}\nAreas: ${activeRoomsForScope.length} Rooms\nEst. Labor Hours: ${projectMetrics.totalHours} hrs\n\nOnline Work Order & Customer Site Acceptance Link:\n${window.location.origin}${window.location.pathname}?workOrder=${selectedProject.id}&scope=${selectedScopeFilter}\n\nPlease review all site preparation, room notes, and obtain customer sign-off upon completion.\n\nThank you,\nCapstone Painting Operations`
+                  )}`}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md flex-1 justify-center"
+                >
+                  <Mail className="w-4 h-4" />
+                  <span>Open in Email App (Dispatch to Crew)</span>
+                </a>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end pt-2 border-t border-neutral-800">
+              <button
+                type="button"
+                onClick={() => setIsShareWorkerModalOpen(false)}
+                className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-zinc-300 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

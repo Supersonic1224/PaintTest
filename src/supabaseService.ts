@@ -444,23 +444,23 @@ export async function checkIsAuthorized(email?: string): Promise<boolean> {
   }
 
   const client = getSupabase();
-  if (!client) return false;
+  if (client) {
+    try {
+      const { data, error } = await (client
+        .from('authorized_users') as any)
+        .select('email')
+        .eq('email', cleanEmail);
 
-  try {
-    const { data, error } = await (client
-      .from('authorized_users') as any)
-      .select('email')
-      .eq('email', cleanEmail);
-
-    if (error) {
-      console.warn('Supabase authorization check error:', error.message);
-      return false;
+      if (!error && data && data.length > 0) {
+        saveLocalAuthorizedUser(cleanEmail);
+        return true;
+      }
+    } catch (err) {
+      console.warn('Supabase authorization check exception:', err);
     }
-    return !!data && data.length > 0;
-  } catch (err) {
-    console.warn('Supabase authorization check exception:', err);
-    return false;
   }
+
+  return false;
 }
 
 /**

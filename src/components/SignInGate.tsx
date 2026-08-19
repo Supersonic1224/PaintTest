@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Paintbrush, ShieldCheck, Mail, ArrowRight, CheckCircle2, Lock, ExternalLink, Sparkles, Laptop, ShieldAlert } from 'lucide-react';
+import React from 'react';
+import { Paintbrush, ArrowRight, CheckCircle2, Lock, Sparkles, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface SignInGateProps {
@@ -16,16 +16,7 @@ export default function SignInGate({
   loading,
   onOpenAuthHelp
 }: SignInGateProps) {
-  const [inputEmail, setInputEmail] = useState('');
-  const [emailTouched, setEmailTouched] = useState(false);
-
-  const isValidEmail = (email: string) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-  };
-
-  const handleFormSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setEmailTouched(true);
+  const handleGoogleClick = async () => {
     await onSignInWithGoogle();
   };
 
@@ -69,7 +60,7 @@ export default function SignInGate({
           <div className="lg:col-span-6 space-y-6 text-left">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-950/60 border border-blue-800/50 text-blue-400 text-xs font-semibold">
               <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
-              <span>Sign In Required to Launch Workspace</span>
+              <span>Workspace Access</span>
             </div>
 
             <div className="space-y-3">
@@ -100,7 +91,7 @@ export default function SignInGate({
             </div>
           </div>
 
-          {/* Right Column: Sign In Card Form */}
+          {/* Right Column: Direct 1-Click Sign In Card */}
           <motion.div 
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
@@ -113,38 +104,16 @@ export default function SignInGate({
                   <Lock className="w-4 h-4 text-emerald-400" />
                 </span>
               </div>
-              <p className="text-zinc-400 text-xs">
-                Enter your Google email address below to sign into your PaintNav workspace.
+              <p className="text-zinc-400 text-xs leading-relaxed">
+                Click below to open the secure Google account selector and authenticate your PaintNav workspace.
               </p>
             </div>
 
-            <form onSubmit={handleFormSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-zinc-300 flex items-center justify-between">
-                  <span>Google Email Address</span>
-                  <span className="text-[10px] text-zinc-500 font-mono">@gmail.com / Workspace</span>
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-500">
-                    <Mail className="w-4 h-4" />
-                  </div>
-                  <input
-                    type="email"
-                    required
-                    value={inputEmail}
-                    onChange={(e) => setInputEmail(e.target.value)}
-                    placeholder="e.g. daniel@capstonepainting.ca"
-                    className="w-full bg-neutral-950 border border-neutral-800 focus:border-blue-500 rounded-xl pl-10 pr-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none transition font-mono"
-                  />
-                </div>
-                {emailTouched && inputEmail && !isValidEmail(inputEmail) && (
-                  <p className="text-[11px] text-rose-400 mt-1">Please enter a valid email address.</p>
-                )}
-              </div>
-
-              {/* Primary Sign In Button */}
+            <div className="space-y-4">
+              {/* Primary 1-Click Sign In Button */}
               <button
-                type="submit"
+                type="button"
+                onClick={handleGoogleClick}
                 disabled={loading}
                 className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold py-3.5 px-5 rounded-xl transition duration-150 shadow-lg shadow-blue-600/20 cursor-pointer flex items-center justify-center gap-3 disabled:opacity-50 text-sm"
               >
@@ -174,11 +143,18 @@ export default function SignInGate({
                   </>
                 )}
               </button>
-            </form>
+
+              <div className="flex items-center gap-2 p-3 bg-neutral-950/40 border border-neutral-800/60 rounded-xl text-zinc-400 text-xs">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="text-[11px] leading-snug">
+                  Direct Google OAuth popup. Select any authorized Google or Google Workspace email.
+                </span>
+              </div>
+            </div>
 
             <div className="pt-2 border-t border-neutral-800 space-y-3 text-center">
               <p className="text-[11px] text-zinc-500 leading-snug">
-                Your email will be used for authentication and permissions across PaintNav. We never share or sell your information.
+                Your email is used for authentication and permissions across PaintNav. We never share or sell your information.
               </p>
 
               {onOpenAuthHelp && (

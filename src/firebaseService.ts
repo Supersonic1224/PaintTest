@@ -471,9 +471,44 @@ export async function fetchAuthorizedUsersFromFirestore(): Promise<AuthorizedUse
     const ref = collection(db, 'authorized_users');
     const querySnapshot = await getDocs(ref);
     const users: AuthorizedUser[] = [];
+    const seen = new Set<string>();
+
     querySnapshot.forEach((doc) => {
-      users.push({ id: doc.id, ...doc.data() } as AuthorizedUser);
+      const data = doc.data();
+      const email = data.email ? String(data.email).toLowerCase().trim() : '';
+      if (email && !seen.has(email)) {
+        seen.add(email);
+        users.push({ id: doc.id, ...data, email } as AuthorizedUser);
+      }
     });
+
+    // Merge with any locally saved authorized users
+    const localEmails = getLocalAuthorizedUsers();
+    localEmails.forEach(email => {
+      const clean = email.toLowerCase().trim();
+      if (clean && !seen.has(clean)) {
+        seen.add(clean);
+        users.push({
+          id: clean.replace(/[^a-zA-Z0-9_.-]/g, '_'),
+          email: clean,
+          created_at: new Date().toISOString()
+        });
+      }
+    });
+
+    // Always ensure primary owners/admins are included
+    const defaultOwners = ['aalnasih4846@gmail.com', 'daniel@capstonepainting.ca'];
+    defaultOwners.forEach(owner => {
+      if (!seen.has(owner)) {
+        seen.add(owner);
+        users.unshift({
+          id: owner.replace(/[^a-zA-Z0-9_.-]/g, '_'),
+          email: owner,
+          created_at: new Date().toISOString()
+        });
+      }
+    });
+
     return users;
   } catch (err: any) {
     console.warn('Firestore fetch authorized users error (falling back to local storage and owner default):', err);
@@ -486,7 +521,7 @@ export async function fetchAuthorizedUsersFromFirestore(): Promise<AuthorizedUse
       }));
       // Always include owner & admin
       if (!localEmails.includes('aalnasih4846@gmail.com')) {
-        users.push({
+        users.unshift({
           id: 'aalnasih4846_gmail_com',
           email: 'aalnasih4846@gmail.com',
           created_at: new Date().toISOString()
@@ -592,15 +627,20 @@ export async function checkIsAuthorizedInFirestore(email: string): Promise<boole
   if (getLocalAuthorizedUsers().includes(cleanEmail)) {
     return true;
   }
-  
+
+  // Check Firestore authorized_users collection
   try {
     const ref = collection(db, 'authorized_users');
     const q = query(ref, where('email', '==', cleanEmail));
     const querySnapshot = await getDocs(q);
-    return !querySnapshot.empty;
+    if (!querySnapshot.empty) {
+      saveLocalAuthorizedUser(cleanEmail);
+      return true;
+    }
   } catch (err) {
-    console.warn('Firestore authorization check error (falling back to local cache):', err);
-    return false;
+    console.warn('Firestore authorization check query warning:', err);
   }
+
+  return false;
 }
 

@@ -340,8 +340,6 @@ export default function SettingsPanel({
       let msg = err.message || 'Failed to sign in.';
       if (msg.toLowerCase().includes('email not confirmed')) {
         msg = 'Your email is not confirmed. Please check your email inbox (and spam folder) for the verification link sent by Supabase. Alternatively, you can disable "Confirm email" on your Supabase dashboard under Authentication > Providers > Email settings.';
-      } else if (sbPassword.trim() === 'capstone_painting') {
-        msg = 'Note: "capstone_painting" is the Master Team Password used for authorizing new team members in the Admin Portal, NOT your personal account login password. Please click "Don\'t have an account? Sign Up" below to register your account with your own password!';
       } else if (msg.toLowerCase().includes('invalid login credentials')) {
         msg = 'Invalid login credentials. Make sure you have already signed up (using the "Don\'t have an account? Sign Up" link below) for this Supabase project with your own custom password.';
       }
@@ -1251,14 +1249,11 @@ ON CONFLICT (email) DO NOTHING;`;
           {!supabaseUser && (
             <form onSubmit={sbIsRegistering ? handleSupabaseSignUp : handleSupabaseSignIn} className="space-y-3.5 pt-1">
               <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 text-[10.5px] text-zinc-400 space-y-1 leading-relaxed">
-                <span className="font-bold text-emerald-400 block">💡 Supabase Login vs Team Authorization Password:</span>
+                <span className="font-bold text-emerald-400 block">💡 Supabase Account Login:</span>
                 <p>
                   {sbIsRegistering 
                     ? "Set ANY personal password you prefer to create your Supabase login account!" 
                     : "Enter your personal email and custom password created during registration."}
-                </p>
-                <p className="text-[10px] text-zinc-500">
-                  *Note: <strong className="text-zinc-300 font-mono">capstone_painting</strong> is the master team key used in the Admin Portal to authorize team members, NOT your personal account login password.
                 </p>
               </div>
 

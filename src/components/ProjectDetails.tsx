@@ -55,6 +55,22 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
+const parseScopePoints = (text?: string): string[] => {
+  if (!text || !text.trim()) return [];
+  const clean = text.trim();
+  const lines = clean.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length > 1) {
+    return lines.map(l => l.replace(/^[•\-\*\d\.\)\s]+/, '').trim()).filter(Boolean);
+  }
+  if (clean.includes('•') || clean.includes(';') || clean.includes(' | ') || clean.includes(' - ')) {
+    return clean.split(/[•;\|\n]|(?:\s-\s)/).map(s => s.replace(/^[•\-\*\d\.\)\s]+/, '').trim()).filter(Boolean);
+  }
+  if (clean.includes(',') && clean.length > 35) {
+    return clean.split(/,\s*(?:and\s+)?/i).map(s => s.replace(/^(?:includes|excludes|includes:?|excludes:?)\s+/i, '').replace(/\.$/, '').trim()).filter(Boolean);
+  }
+  return [clean];
+};
+
 interface ProjectDetailsProps {
   key?: string;
   project: ProjectType;
@@ -575,6 +591,12 @@ export default function ProjectDetails({
 
   // Group collapsing tracker
   const [collapsedGroupNames, setCollapsedGroupNames] = useState<Record<string, boolean>>({});
+
+  // Batch Height & Coats Editable States with Recommendations
+  const [batchHeightVal, setBatchHeightVal] = useState<string>('8');
+  const [batchCoatsVal, setBatchCoatsVal] = useState<string>('2');
+  const [showBatchHeightMenu, setShowBatchHeightMenu] = useState<boolean>(false);
+  const [showBatchCoatsMenu, setShowBatchCoatsMenu] = useState<boolean>(false);
 
   const toggleGroupCollapse = (groupName: string) => {
     setCollapsedGroupNames(prev => ({
@@ -3751,61 +3773,166 @@ export default function ProjectDetails({
                 </div>
               </div>
 
-              {/* Grouping Name Input & Action Buttons */}
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex-1 min-w-[260px] flex items-center gap-2">
-                  <label className="text-xs font-bold text-blue-300 font-mono whitespace-nowrap shrink-0">
-                    Group Heading:
-                  </label>
-                  <input
-                    type="text"
-                    value={groupInputName}
-                    onChange={(e) => setGroupInputName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleGroupSelectedRooms(groupInputName);
-                      }
-                    }}
-                    placeholder="Enter heading name (e.g. Main Level, Master Suite, Deck Area...)"
-                    className="flex-1 bg-neutral-950 border border-blue-600/60 focus:border-blue-400 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-500 font-mono outline-none shadow-inner"
-                  />
-                </div>
+                {/* Group Heading & Batch Settings Toolbar */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex-1 min-w-[240px] flex items-center gap-2">
+                    <label className="text-xs font-bold text-blue-300 font-mono whitespace-nowrap shrink-0">
+                      Group Heading:
+                    </label>
+                    <input
+                      type="text"
+                      value={groupInputName}
+                      onChange={(e) => setGroupInputName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleGroupSelectedRooms(groupInputName);
+                        }
+                      }}
+                      placeholder="Enter heading name (e.g. Main Level, Master Suite...)"
+                      className="flex-1 bg-neutral-950 border border-blue-600/60 focus:border-blue-400 rounded-xl px-3 py-1.5 text-xs text-white placeholder-zinc-500 font-mono outline-none shadow-inner"
+                    />
+                  </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleGroupSelectedRooms(groupInputName)}
-                  disabled={Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length === 0}
-                  className={`px-4 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 cursor-pointer shadow-lg ${
-                    Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length > 0
-                      ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/50 border border-blue-400'
-                      : 'bg-neutral-900 text-zinc-600 border border-neutral-800 cursor-not-allowed'
-                  }`}
-                >
-                  <FolderPlus className="w-4 h-4" />
-                  <span>Group Selected Rooms</span>
-                </button>
-
-                {Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length > 0 && (
                   <button
                     type="button"
-                    onClick={() => {
-                      const selectedIds = Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]);
-                      if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected room(s)?`)) {
-                        setRooms(prev => prev.filter(r => !selectedIds.includes(r.id)));
-                        setSelectedRoomIds({});
-                        triggerNotification(`Deleted ${selectedIds.length} room(s)`);
-                      }
-                    }}
-                    className="px-3 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-800/80 text-red-300 hover:text-white text-xs font-mono font-bold rounded-xl transition flex items-center gap-1 cursor-pointer"
+                    onClick={() => handleGroupSelectedRooms(groupInputName)}
+                    disabled={Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length === 0}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition flex items-center gap-1.5 cursor-pointer shadow-lg ${
+                      Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length > 0
+                        ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-900/50 border border-blue-400'
+                        : 'bg-neutral-900 text-zinc-600 border border-neutral-800 cursor-not-allowed'
+                    }`}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete ({Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length})</span>
+                    <FolderPlus className="w-4 h-4" />
+                    <span>Group Selected</span>
                   </button>
-                )}
+
+                  {/* Batch Set Height (Recommended + Editable) */}
+                  <div className="flex items-center gap-1 bg-neutral-950 border border-neutral-800 px-2 py-1 rounded-xl">
+                    <span className="text-[10px] font-mono font-bold text-zinc-400">Height:</span>
+                    <div className="flex items-center gap-1">
+                      {[8, 9, 10, 12].map(h => (
+                        <button
+                          key={h}
+                          type="button"
+                          onClick={() => {
+                            setBatchHeightVal(String(h));
+                            handleBulkSetCeilingHeight(h);
+                          }}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition ${
+                            batchHeightVal === String(h)
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-neutral-900 hover:bg-neutral-800 text-zinc-300'
+                          }`}
+                          title={`Quick set ${h} ft`}
+                        >
+                          {h}'
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1 ml-1 border-l border-neutral-800 pl-1.5">
+                      <input
+                        type="number"
+                        min="1"
+                        max="50"
+                        step="0.5"
+                        value={batchHeightVal}
+                        onChange={(e) => setBatchHeightVal(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const val = parseFloat(batchHeightVal);
+                            if (val > 0) handleBulkSetCeilingHeight(val);
+                          }
+                        }}
+                        className="w-12 bg-neutral-900 border border-neutral-700 rounded px-1.5 py-0.5 text-[11px] font-mono font-bold text-white text-center outline-none focus:border-blue-400"
+                        placeholder="ft"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const val = parseFloat(batchHeightVal);
+                          if (val > 0) handleBulkSetCeilingHeight(val);
+                        }}
+                        className="px-2 py-0.5 bg-blue-700 hover:bg-blue-600 text-white rounded text-[10px] font-mono font-bold transition"
+                      >
+                        Set
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Batch Set Coats (Recommended + Editable) */}
+                  <div className="flex items-center gap-1 bg-neutral-950 border border-neutral-800 px-2 py-1 rounded-xl">
+                    <span className="text-[10px] font-mono font-bold text-zinc-400">Coats:</span>
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3].map(c => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => {
+                            setBatchCoatsVal(String(c));
+                            handleBulkSetCoats(c);
+                          }}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition ${
+                            batchCoatsVal === String(c)
+                              ? 'bg-amber-600 text-white'
+                              : 'bg-neutral-900 hover:bg-neutral-800 text-zinc-300'
+                          }`}
+                          title={`Quick set ${c} coat${c > 1 ? 's' : ''}`}
+                        >
+                          {c}c
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1 ml-1 border-l border-neutral-800 pl-1.5">
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={batchCoatsVal}
+                        onChange={(e) => setBatchCoatsVal(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const val = parseInt(batchCoatsVal, 10);
+                            if (val > 0) handleBulkSetCoats(val);
+                          }
+                        }}
+                        className="w-10 bg-neutral-900 border border-neutral-700 rounded px-1.5 py-0.5 text-[11px] font-mono font-bold text-white text-center outline-none focus:border-amber-400"
+                        placeholder="coats"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const val = parseInt(batchCoatsVal, 10);
+                          if (val > 0) handleBulkSetCoats(val);
+                        }}
+                        className="px-2 py-0.5 bg-amber-700 hover:bg-amber-600 text-white rounded text-[10px] font-mono font-bold transition"
+                      >
+                        Set
+                      </button>
+                    </div>
+                  </div>
+
+                  {Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const selectedIds = Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]);
+                        if (window.confirm(`Are you sure you want to delete ${selectedIds.length} selected room(s)?`)) {
+                          setRooms(prev => prev.filter(r => !selectedIds.includes(r.id)));
+                          setSelectedRoomIds({});
+                          triggerNotification(`Deleted ${selectedIds.length} room(s)`);
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-800/80 text-red-300 hover:text-white text-xs font-mono font-bold rounded-xl transition flex items-center gap-1 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete ({Object.keys(selectedRoomIds).filter(id => selectedRoomIds[id]).length})</span>
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
 
 
@@ -5657,31 +5784,72 @@ export default function ProjectDetails({
               </div>
             )}
 
-            {/* Inclusions, Exclusions, Special Conditions Comments block */}
+            {/* Inclusions, Exclusions, Special Conditions - Full Width End-to-End Point Form */}
             {(inclusions || exclusions || specialConditions) && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 my-8 pt-4 border-t border-zinc-100">
+              <div className="w-full space-y-4 my-8 pt-6 border-t border-zinc-200">
                 {inclusions && (
-                  <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200/60 space-y-1 text-left">
-                    <span className="text-[9px] text-emerald-600 uppercase font-black tracking-wider font-mono flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" /> Inclusions
-                    </span>
-                    <div className="text-zinc-600 text-[11px] leading-relaxed whitespace-pre-wrap">{inclusions}</div>
+                  <div className="w-full bg-emerald-50/40 p-4 sm:p-5 rounded-2xl border border-emerald-200/80 text-left space-y-2.5 shadow-2xs">
+                    <div className="flex items-center gap-2 border-b border-emerald-200/60 pb-2">
+                      <span className="w-2 h-2 bg-emerald-500 rounded-full shrink-0" />
+                      <h4 className="text-xs font-black text-emerald-900 uppercase font-mono tracking-wider">
+                        Contract Inclusions
+                      </h4>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-mono font-bold px-2 py-0.5 rounded-full">
+                        {parseScopePoints(inclusions).length} item{parseScopePoints(inclusions).length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <ul className="space-y-1.5 text-zinc-700 text-xs font-sans">
+                      {parseScopePoints(inclusions).map((item, idx) => (
+                        <li key={idx} className="flex items-start gap-2 leading-relaxed">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 mt-0.5 shrink-0" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
+
                 {exclusions && (
-                  <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200/60 space-y-1 text-left">
-                    <span className="text-[9px] text-red-600 uppercase font-black tracking-wider font-mono flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 bg-red-500 rounded-full" /> Exclusions
-                    </span>
-                    <div className="text-zinc-600 text-[11px] leading-relaxed whitespace-pre-wrap">{exclusions}</div>
+                  <div className="w-full bg-rose-50/40 p-4 sm:p-5 rounded-2xl border border-rose-200/80 text-left space-y-2.5 shadow-2xs">
+                    <div className="flex items-center gap-2 border-b border-rose-200/60 pb-2">
+                      <span className="w-2 h-2 bg-rose-500 rounded-full shrink-0" />
+                      <h4 className="text-xs font-black text-rose-900 uppercase font-mono tracking-wider">
+                        Contract Exclusions
+                      </h4>
+                      <span className="text-[10px] bg-rose-100 text-rose-800 font-mono font-bold px-2 py-0.5 rounded-full">
+                        {parseScopePoints(exclusions).length} item{parseScopePoints(exclusions).length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <ul className="space-y-1.5 text-zinc-700 text-xs font-sans">
+                      {parseScopePoints(exclusions).map((item, idx) => (
+                        <li key={idx} className="flex items-start gap-2 leading-relaxed">
+                          <X className="w-3.5 h-3.5 text-rose-600 mt-0.5 shrink-0" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
+
                 {specialConditions && (
-                  <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200/60 space-y-1 text-left">
-                    <span className="text-[9px] text-amber-600 uppercase font-black tracking-wider font-mono flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 bg-amber-500 rounded-full" /> Conditions
-                    </span>
-                    <div className="text-zinc-600 text-[11px] leading-relaxed whitespace-pre-wrap">{specialConditions}</div>
+                  <div className="w-full bg-amber-50/40 p-4 sm:p-5 rounded-2xl border border-amber-200/80 text-left space-y-2.5 shadow-2xs">
+                    <div className="flex items-center gap-2 border-b border-amber-200/60 pb-2">
+                      <span className="w-2 h-2 bg-amber-500 rounded-full shrink-0" />
+                      <h4 className="text-xs font-black text-amber-900 uppercase font-mono tracking-wider">
+                        Special Conditions & Site Access
+                      </h4>
+                      <span className="text-[10px] bg-amber-100 text-amber-800 font-mono font-bold px-2 py-0.5 rounded-full">
+                        {parseScopePoints(specialConditions).length} item{parseScopePoints(specialConditions).length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <ul className="space-y-1.5 text-zinc-700 text-xs font-sans">
+                      {parseScopePoints(specialConditions).map((item, idx) => (
+                        <li key={idx} className="flex items-start gap-2 leading-relaxed">
+                          <span className="text-amber-600 font-bold mt-0.5 shrink-0">&bull;</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>
@@ -6645,7 +6813,7 @@ export default function ProjectDetails({
               {/* Total finalization breakdown statement */}
               <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-850 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
                 <div className="space-y-1 text-left leading-relaxed max-w-sm text-zinc-500">
-                  <p className="font-bold text-zinc-400 uppercase text-[10px] font-mono">Payment Terms Terms</p>
+                  <p className="font-bold text-zinc-400 uppercase text-[10px] font-mono">Payment Terms & Schedule</p>
                   <p>A standard 30% initial deposit of <strong>${liveSummary.deposit.toLocaleString()}</strong> is required to coordinate paint supply channels. Remaining balance is settleable upon final site walkthrough validation.</p>
                 </div>
 
@@ -6665,31 +6833,61 @@ export default function ProjectDetails({
                 </div>
               </div>
 
-              {/* Proposal Scope Notes (Inclusions, Exclusions, Special Conditions) */}
+              {/* Proposal Scope Notes (Inclusions, Exclusions, Special Conditions) - Full Width End-to-End */}
               {(inclusions || exclusions || specialConditions) && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                <div className="w-full space-y-3 pt-2">
                   {inclusions && (
-                    <div className="bg-neutral-950/40 p-4 rounded-xl border border-neutral-850/60 space-y-1.5 text-left">
-                      <span className="text-[9px] text-emerald-400 uppercase font-bold tracking-wider font-mono flex items-center gap-1.5">
-                        <span className="w-1 h-1 bg-emerald-400 rounded-full" /> Inclusions
-                      </span>
-                      <div className="text-zinc-400 text-[11px] leading-relaxed whitespace-pre-wrap">{inclusions}</div>
+                    <div className="w-full bg-neutral-950/60 p-4 rounded-xl border border-emerald-900/40 space-y-2 text-left">
+                      <div className="flex items-center gap-1.5 border-b border-neutral-800 pb-1.5">
+                        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />
+                        <span className="text-[10px] text-emerald-400 uppercase font-bold tracking-wider font-mono">
+                          Inclusions
+                        </span>
+                      </div>
+                      <ul className="space-y-1 text-zinc-300 text-xs">
+                        {parseScopePoints(inclusions).map((item, idx) => (
+                          <li key={idx} className="flex items-start gap-2">
+                            <Check className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   )}
                   {exclusions && (
-                    <div className="bg-neutral-950/40 p-4 rounded-xl border border-neutral-850/60 space-y-1.5 text-left">
-                      <span className="text-[9px] text-red-400 uppercase font-bold tracking-wider font-mono flex items-center gap-1.5">
-                        <span className="w-1 h-1 bg-red-400 rounded-full" /> Exclusions
-                      </span>
-                      <div className="text-zinc-400 text-[11px] leading-relaxed whitespace-pre-wrap">{exclusions}</div>
+                    <div className="w-full bg-neutral-950/60 p-4 rounded-xl border border-rose-900/40 space-y-2 text-left">
+                      <div className="flex items-center gap-1.5 border-b border-neutral-800 pb-1.5">
+                        <span className="w-1.5 h-1.5 bg-rose-400 rounded-full" />
+                        <span className="text-[10px] text-rose-400 uppercase font-bold tracking-wider font-mono">
+                          Exclusions
+                        </span>
+                      </div>
+                      <ul className="space-y-1 text-zinc-300 text-xs">
+                        {parseScopePoints(exclusions).map((item, idx) => (
+                          <li key={idx} className="flex items-start gap-2">
+                            <X className="w-3.5 h-3.5 text-rose-400 mt-0.5 shrink-0" />
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   )}
                   {specialConditions && (
-                    <div className="bg-neutral-950/40 p-4 rounded-xl border border-neutral-850/60 space-y-1.5 text-left">
-                      <span className="text-[9px] text-amber-400 uppercase font-bold tracking-wider font-mono flex items-center gap-1.5">
-                        <span className="w-1 h-1 bg-amber-400 rounded-full" /> Special Conditions
-                      </span>
-                      <div className="text-zinc-400 text-[11px] leading-relaxed whitespace-pre-wrap">{specialConditions}</div>
+                    <div className="w-full bg-neutral-950/60 p-4 rounded-xl border border-amber-900/40 space-y-2 text-left">
+                      <div className="flex items-center gap-1.5 border-b border-neutral-800 pb-1.5">
+                        <span className="w-1.5 h-1.5 bg-amber-400 rounded-full" />
+                        <span className="text-[10px] text-amber-400 uppercase font-bold tracking-wider font-mono">
+                          Special Conditions
+                        </span>
+                      </div>
+                      <ul className="space-y-1 text-zinc-300 text-xs">
+                        {parseScopePoints(specialConditions).map((item, idx) => (
+                          <li key={idx} className="flex items-start gap-2">
+                            <span className="text-amber-400 font-bold shrink-0">&bull;</span>
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   )}
                 </div>
@@ -7687,39 +7885,105 @@ export default function ProjectDetails({
                   <span>Group Rooms</span>
                 </button>
 
-                {/* Bulk Set Ceiling Height dropdown */}
-                <div className="relative">
-                  <select
-                    onChange={(e) => {
-                      const h = parseFloat(e.target.value);
-                      if (h > 0) handleBulkSetCeilingHeight(h);
-                      e.target.value = "";
+                {/* Bulk Set Ceiling Height: Recommended + Editable Input */}
+                <div className="flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-1">
+                  <span className="text-[10px] font-bold text-zinc-400">Height:</span>
+                  <div className="flex items-center gap-0.5">
+                    {[8, 9, 10, 12].map(h => (
+                      <button
+                        key={h}
+                        type="button"
+                        onClick={() => {
+                          setBatchHeightVal(String(h));
+                          handleBulkSetCeilingHeight(h);
+                        }}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition ${
+                          batchHeightVal === String(h)
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-neutral-800 hover:bg-neutral-700 text-zinc-300'
+                        }`}
+                        title={`Set ${h} ft`}
+                      >
+                        {h}'
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    step="0.5"
+                    value={batchHeightVal}
+                    onChange={(e) => setBatchHeightVal(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const h = parseFloat(batchHeightVal);
+                        if (h > 0) handleBulkSetCeilingHeight(h);
+                      }
                     }}
-                    className="bg-neutral-900 hover:bg-neutral-800 border border-neutral-850 text-zinc-300 hover:text-white rounded-xl px-2.5 py-2 outline-none cursor-pointer text-[10px] font-bold"
+                    placeholder="ft"
+                    className="w-11 bg-neutral-950 border border-neutral-700 text-white rounded px-1 py-0.5 text-[10px] font-bold text-center outline-none focus:border-blue-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const h = parseFloat(batchHeightVal);
+                      if (h > 0) handleBulkSetCeilingHeight(h);
+                    }}
+                    className="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold rounded transition"
                   >
-                    <option value="">Set Height...</option>
-                    <option value="8">8 ft</option>
-                    <option value="9">9 ft</option>
-                    <option value="10">10 ft</option>
-                    <option value="12">12 ft</option>
-                  </select>
+                    Set
+                  </button>
                 </div>
 
-                {/* Bulk Set Coats dropdown */}
-                <div className="relative">
-                  <select
-                    onChange={(e) => {
-                      const coats = parseInt(e.target.value, 10);
-                      if (coats > 0) handleBulkSetCoats(coats);
-                      e.target.value = "";
+                {/* Bulk Set Coats: Recommended + Editable Input */}
+                <div className="flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-1">
+                  <span className="text-[10px] font-bold text-zinc-400">Coats:</span>
+                  <div className="flex items-center gap-0.5">
+                    {[1, 2, 3].map(c => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => {
+                          setBatchCoatsVal(String(c));
+                          handleBulkSetCoats(c);
+                        }}
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition ${
+                          batchCoatsVal === String(c)
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-neutral-800 hover:bg-neutral-700 text-zinc-300'
+                        }`}
+                        title={`Set ${c} coat${c > 1 ? 's' : ''}`}
+                      >
+                        {c}c
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={batchCoatsVal}
+                    onChange={(e) => setBatchCoatsVal(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const coats = parseInt(batchCoatsVal, 10);
+                        if (coats > 0) handleBulkSetCoats(coats);
+                      }
                     }}
-                    className="bg-neutral-900 hover:bg-neutral-800 border border-neutral-850 text-zinc-300 hover:text-white rounded-xl px-2.5 py-2 outline-none cursor-pointer text-[10px] font-bold"
+                    placeholder="c"
+                    className="w-9 bg-neutral-950 border border-neutral-700 text-white rounded px-1 py-0.5 text-[10px] font-bold text-center outline-none focus:border-amber-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const coats = parseInt(batchCoatsVal, 10);
+                      if (coats > 0) handleBulkSetCoats(coats);
+                    }}
+                    className="px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold rounded transition"
                   >
-                    <option value="">Set Coats...</option>
-                    <option value="1">1 Coat</option>
-                    <option value="2">2 Coats</option>
-                    <option value="3">3 Coats</option>
-                  </select>
+                    Set
+                  </button>
                 </div>
 
                 <button

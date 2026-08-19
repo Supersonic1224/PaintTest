@@ -332,7 +332,7 @@ export function generateProposalPDF({
     doc.setFont('Helvetica', 'bold');
     doc.setFontSize(10);
     doc.setTextColor(30, 41, 59);
-    doc.text('ADDITIONAL TERMS & PROJECT COMMENTS', 15, y);
+    doc.text('SCOPE SPECIFICATIONS & PROJECT CONDITIONS', 15, y);
     y += 6;
 
     const columnWidth = (pageWidth - 40) / 3;
@@ -1524,11 +1524,19 @@ export function generateWorkOrderPDF({
   doc.setFontSize(8.5);
   doc.setTextColor(30, 41, 59);
   doc.text('Operations Lead Sign-off: _______________________', 15, y);
-  doc.text('Customer Acceptance: _______________________', pageWidth / 2 + 10, y);
+  doc.text('Customer Site Acceptance: _______________________', pageWidth / 2 + 10, y);
   doc.setFont('Helvetica', 'normal');
   doc.setFontSize(7.5);
-  doc.text('Date: ____ / ____ / ________', 15, y + 6);
-  doc.text('Date: ____ / ____ / ________', pageWidth / 2 + 10, y + 6);
+  doc.text('Date: ' + new Date().toLocaleDateString(), 15, y + 6);
+  const siteSig = project.siteAcceptanceSignatureDataUrl || project.signatureDataUrl;
+  if (siteSig) {
+    try {
+      doc.addImage(siteSig, 'PNG', pageWidth / 2 + 35, y - 9, 32, 12);
+    } catch (e) {
+      console.warn('Could not draw site signature on PDF:', e);
+    }
+  }
+  doc.text('Date: ' + (project.siteAcceptanceDate || project.signedDate || '____ / ____ / ________'), pageWidth / 2 + 10, y + 6);
 
   const base64 = doc.output('datauristring').split(',')[1];
   let blobUrl = '';

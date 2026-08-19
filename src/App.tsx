@@ -21,7 +21,8 @@ import {
   deleteClientFromFirestore, 
   deleteProjectFromFirestore,
   checkIsAuthorizedInFirestore,
-  addAuthorizedUserToFirestore
+  addAuthorizedUserToFirestore,
+  getLocalAuthorizedUsers
 } from './firebaseService';
 import { getSupabase } from './supabase';
 import {
@@ -220,7 +221,12 @@ export default function App() {
   });
   
   // App navigation state: 'dashboard' | 'proposals' | 'invoices' | 'work-orders' | 'settings' | 'clients' | 'edit-client' | 'project-details' | 'quick-calc'
-  const [currentView, setCurrentView] = useState<'dashboard' | 'proposals' | 'invoices' | 'work-orders' | 'settings' | 'clients' | 'edit-client' | 'project-details' | 'quick-calc' | 'admin-portal'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'proposals' | 'invoices' | 'work-orders' | 'settings' | 'clients' | 'edit-client' | 'project-details' | 'quick-calc' | 'admin-portal'>(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('workOrder')) return 'work-orders';
+    if (params.get('calc')) return 'quick-calc';
+    return 'dashboard';
+  });
   
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [needsAuth, setNeedsAuth] = useState(true);
@@ -261,29 +267,29 @@ export default function App() {
 
   const getActiveUid = (): string => {
     if (dbProvider === 'supabase') {
-      return supabaseUser?.id || getAnonId();
+      return supabaseUser?.id || currentUser?.uid || getAnonId();
     }
-    return currentUser?.uid || getAnonId();
+    return currentUser?.uid || supabaseUser?.id || getAnonId();
   };
 
   const isAuthorizedUser = useMemo(() => {
     if (isDemoMode) return true;
 
-    // Check if user is main owner/admin email to auto-authorize
-    const loggedInEmail = dbProvider === 'supabase' ? supabaseUser?.email : currentUser?.email;
+    // Check if user is main owner/admin email to auto-authorize across all views/providers
+    const loggedInEmail = currentUser?.email || supabaseUser?.email;
     if (loggedInEmail) {
       const clean = loggedInEmail.trim().toLowerCase();
       if (clean === 'aalnasih4846@gmail.com' || clean === 'daniel@capstonepainting.ca') {
         return true;
       }
+      if (getLocalAuthorizedUsers().includes(clean)) {
+        return true;
+      }
     }
 
-    if (dbProvider === 'supabase') {
-      return !!supabaseUser && isSupabaseAuthorized;
-    } else {
-      return !!currentUser && isFirestoreAuthorized;
-    }
-  }, [isDemoMode, dbProvider, supabaseUser, isSupabaseAuthorized, currentUser, isFirestoreAuthorized]);
+    // Universal authorization: authorized in either provider counts for the session
+    return isFirestoreAuthorized || isSupabaseAuthorized;
+  }, [isDemoMode, supabaseUser, isSupabaseAuthorized, currentUser, isFirestoreAuthorized]);
 
   const displayClients = useMemo(() => {
     if (isDemoMode) {
@@ -484,7 +490,7 @@ export default function App() {
 
       const activeUid = getActiveUid();
 
-      if (dbProvider === 'firebase' && currentUser) {
+      if ((dbProvider === 'firestore' || (dbProvider as any) === 'firebase') && currentUser) {
         for (const c of importedClients) {
           await saveClientToFirestore(currentUser.uid, c).catch(err => console.warn("Firestore backup upload client err:", err));
         }
@@ -495,7 +501,7 @@ export default function App() {
           success: true,
           message: `Successfully restored and uploaded backup into Firebase Firestore! (${importedClients.length} clients, ${importedProjects.length} projects synced).`
         };
-      } else if (dbProvider === 'supabase' && supabaseUser) {
+      } else if (dbProvider === 'supabase' && getSupabase()) {
         for (const c of importedClients) {
           await saveClientToSupabase(activeUid, c).catch(err => console.warn("Supabase backup upload client err:", err));
         }
@@ -526,8 +532,8 @@ export default function App() {
   const handlePushToSupabase = async (): Promise<{ success: boolean; message: string }> => {
     const activeUid = getActiveUid();
     const supabase = getSupabase();
-    if (!supabase || !supabaseUser) {
-      return { success: false, message: 'You must be logged into a configured Supabase account to push data.' };
+    if (!supabase) {
+      return { success: false, message: 'Supabase credentials are not configured in settings or environment variables.' };
     }
     
     setLoading(true);
@@ -547,8 +553,8 @@ export default function App() {
       // Refresh list to verify successful push
       const cList = await fetchClientsFromSupabase(activeUid);
       const pList = await fetchProjectsFromSupabase(activeUid);
-      setClients(cList);
-      setProjects(pList);
+      if (cList.length > 0) setClients(cList);
+      if (pList.length > 0) setProjects(pList);
       
       return { 
         success: true, 
@@ -1502,6 +1508,13 @@ export default function App() {
                   setCurrentView('project-details');
                 }
               }}
+              onNavigateToInstantCalc={(projId) => {
+                if (projId) {
+                  const targetProj = projects.find(p => p.id === projId);
+                  if (targetProj) setSelectedProject(targetProj);
+                }
+                setCurrentView('quick-calc');
+              }}
             />
           )}
 
@@ -1612,9 +1625,16 @@ export default function App() {
               projects={projects}
               clients={clients}
               proposalSettings={appProposalSettings}
+              initialProjectId={selectedProject?.id}
+              initialTab={selectedProject ? 'work-order-breakdown' : 'profitability'}
               onOpenProject={(proj) => {
                 setSelectedProject(proj);
                 setCurrentView('project-details');
+              }}
+              onNavigateToWorkOrder={(projId) => {
+                const target = projects.find(p => p.id === projId);
+                if (target) setSelectedProject(target);
+                setCurrentView('work-orders');
               }}
               onCreateProjectFromEstimate={handleCreateProjectFromEstimate}
               onOpenMenu={() => setMobileMenuOpen(true)}

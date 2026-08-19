@@ -1459,43 +1459,91 @@ export default function ClientSignPortal({ proposalId, onBackToApp }: ClientSign
               )}
             </div>
 
-            {/* Inclusions & Exclusions */}
-            {(project.inclusions || project.exclusions) && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Inclusions, Exclusions & Special Conditions - End to End Point Form */}
+            {(project.inclusions || project.exclusions || project.specialConditions || project.generalNotes) && (
+              <div className="w-full space-y-4">
                 {project.inclusions && (
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-1.5 text-xs">
-                    <h4 className="font-bold text-emerald-800 text-[11px] font-mono uppercase tracking-wider">✓ Included Prep & Work Scope</h4>
-                    <p className="text-emerald-950 leading-relaxed whitespace-pre-line text-xs">{project.inclusions}</p>
+                  <div className="w-full bg-emerald-50/70 border border-emerald-200 rounded-2xl p-5 space-y-3 shadow-2xs">
+                    <div className="flex items-center gap-2 border-b border-emerald-200/70 pb-2">
+                      <span className="w-2 h-2 bg-emerald-500 rounded-full shrink-0" />
+                      <h4 className="font-bold text-emerald-900 text-xs font-mono uppercase tracking-wider">
+                        Included Prep & Work Scope
+                      </h4>
+                    </div>
+                    <ul className="space-y-1.5 text-zinc-700 text-xs leading-relaxed">
+                      {(project.inclusions.includes('\n') 
+                        ? project.inclusions.split('\n') 
+                        : project.inclusions.split(/[•;\|\n]|(?:\s-\s)/)
+                      ).map(l => l.trim().replace(/^[•\-\*\d\.\)\s]+/, '')).filter(Boolean).map((pt, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 mt-0.5 shrink-0" />
+                          <span>{pt}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
-                {project.exclusions && (
-                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 space-y-1.5 text-xs">
-                    <h4 className="font-bold text-rose-800 text-[11px] font-mono uppercase tracking-wider">✕ Excluded Items</h4>
-                    <p className="text-rose-950 leading-relaxed whitespace-pre-line text-xs">{project.exclusions}</p>
-                  </div>
-                )}
-              </div>
-            )}
 
-            {/* Special Conditions, General Notes & Terms */}
-            {(project.specialConditions || project.generalNotes || project.termsAndConditions) && (
-              <div className="space-y-3 bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs">
+                {project.exclusions && (
+                  <div className="w-full bg-rose-50/70 border border-rose-200 rounded-2xl p-5 space-y-3 shadow-2xs">
+                    <div className="flex items-center gap-2 border-b border-rose-200/70 pb-2">
+                      <span className="w-2 h-2 bg-rose-500 rounded-full shrink-0" />
+                      <h4 className="font-bold text-rose-900 text-xs font-mono uppercase tracking-wider">
+                        Excluded Items
+                      </h4>
+                    </div>
+                    <ul className="space-y-1.5 text-zinc-700 text-xs leading-relaxed">
+                      {(project.exclusions.includes('\n') 
+                        ? project.exclusions.split('\n') 
+                        : project.exclusions.split(/[•;\|\n]|(?:\s-\s)/)
+                      ).map(l => l.trim().replace(/^[•\-\*\d\.\)\s]+/, '')).filter(Boolean).map((pt, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <X className="w-3.5 h-3.5 text-rose-600 mt-0.5 shrink-0" />
+                          <span>{pt}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 {project.specialConditions && (
-                  <div className="space-y-1">
-                    <h4 className="font-bold text-slate-800 text-[11px] font-mono uppercase tracking-wider">Special Job Conditions</h4>
-                    <p className="text-slate-700 leading-relaxed whitespace-pre-line">{project.specialConditions}</p>
+                  <div className="w-full bg-amber-50/70 border border-amber-200 rounded-2xl p-5 space-y-3 shadow-2xs">
+                    <div className="flex items-center gap-2 border-b border-amber-200/70 pb-2">
+                      <span className="w-2 h-2 bg-amber-500 rounded-full shrink-0" />
+                      <h4 className="font-bold text-amber-900 text-xs font-mono uppercase tracking-wider">
+                        Special Job Conditions
+                      </h4>
+                    </div>
+                    <ul className="space-y-1.5 text-zinc-700 text-xs leading-relaxed">
+                      {(project.specialConditions.includes('\n') 
+                        ? project.specialConditions.split('\n') 
+                        : project.specialConditions.split(/[•;\|\n]|(?:\s-\s)/)
+                      ).map(l => l.trim().replace(/^[•\-\*\d\.\)\s]+/, '')).filter(Boolean).map((pt, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="text-amber-600 font-bold shrink-0">&bull;</span>
+                          <span>{pt}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
+
                 {project.generalNotes && (
-                  <div className={`space-y-1 ${project.specialConditions ? 'border-t border-slate-200 pt-2' : ''}`}>
-                    <h4 className="font-bold text-slate-800 text-[11px] font-mono uppercase tracking-wider">General Project Expectations & Notes</h4>
-                    <p className="text-slate-700 leading-relaxed whitespace-pre-line">{project.generalNotes}</p>
-                  </div>
-                )}
-                {project.termsAndConditions && (
-                  <div className="space-y-1 border-t border-slate-200 pt-2">
-                    <h4 className="font-bold text-slate-800 text-[11px] font-mono uppercase tracking-wider">Terms & Conditions</h4>
-                    <p className="text-slate-600 leading-relaxed whitespace-pre-line text-[11px]">{project.termsAndConditions}</p>
+                  <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-3 shadow-2xs">
+                    <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                      <FileText className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <h4 className="font-bold text-slate-800 text-xs font-mono uppercase tracking-wider">
+                        General Project Expectations & Notes
+                      </h4>
+                    </div>
+                    <ul className="space-y-1.5 text-slate-700 text-xs leading-relaxed">
+                      {project.generalNotes.split('\n').map(l => l.trim().replace(/^[•\-\*\d\.\)\s]+/, '')).filter(Boolean).map((pt, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="text-blue-500 font-bold shrink-0">&bull;</span>
+                          <span>{pt}</span>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>

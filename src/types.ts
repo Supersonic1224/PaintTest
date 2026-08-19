@@ -119,6 +119,9 @@ export interface ProjectDetails {
   signerTitle?: string;
   signedDate?: string;
   signatureDataUrl?: string;
+  siteAcceptanceSignatureDataUrl?: string;
+  siteAcceptanceDate?: string;
+  siteAcceptedBy?: string;
   contractorAccessToken?: string;
   installments?: Installment[];
   viewCount?: number;

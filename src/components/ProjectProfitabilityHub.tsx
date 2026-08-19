@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   ProjectDetails as ProjectType, 
   ClientLead, 
@@ -8,6 +8,7 @@ import {
   RoomSpec 
 } from '../types';
 import { calculateRoomPricing } from '../utils/pricing';
+import { WorkOrderPricingTab } from './WorkOrderPricingTab';
 import { 
   Calculator, 
   DollarSign, 
@@ -36,7 +37,8 @@ import {
   Building2,
   Percent,
   Clock,
-  Printer
+  Printer,
+  Receipt
 } from 'lucide-react';
 
 interface ProjectProfitabilityHubProps {
@@ -46,6 +48,9 @@ interface ProjectProfitabilityHubProps {
   onCreateProjectFromEstimate?: (room: RoomSpec, title?: string) => void;
   proposalSettings?: ProposalSettings;
   onOpenMenu?: () => void;
+  initialProjectId?: string;
+  initialTab?: 'profitability' | 'work-order-breakdown' | 'estimator';
+  onNavigateToWorkOrder?: (projectId: string, scope?: string) => void;
 }
 
 export const ProjectProfitabilityHub: React.FC<ProjectProfitabilityHubProps> = ({
@@ -54,9 +59,28 @@ export const ProjectProfitabilityHub: React.FC<ProjectProfitabilityHubProps> = (
   onOpenProject,
   onCreateProjectFromEstimate,
   proposalSettings = DEFAULT_PROPOSAL_SETTINGS,
+  initialProjectId,
+  initialTab = 'profitability',
+  onNavigateToWorkOrder,
 }) => {
-  // Navigation Tabs: 'profitability' (Financial Gain & Project Linking) vs 'estimator' (Instant Paint Estimator)
-  const [activeTab, setActiveTab] = useState<'profitability' | 'estimator'>('profitability');
+  // Navigation Tabs: 'profitability' (Financial Gain & Project Linking) vs 'work-order-breakdown' (Work Order Pricing Breakdown & Logic) vs 'estimator' (Instant Paint Estimator)
+  const [activeTab, setActiveTab] = useState<'profitability' | 'work-order-breakdown' | 'estimator'>(initialTab);
+
+  // Selected project for the work order breakdown tab
+  const [selectedBreakdownProjectId, setSelectedBreakdownProjectId] = useState<string>(() => {
+    if (initialProjectId && projects.some(p => p.id === initialProjectId)) {
+      return initialProjectId;
+    }
+    return projects[0]?.id || '';
+  });
+
+  // Sync when initialProjectId or initialTab changes
+  useEffect(() => {
+    if (initialProjectId && projects.some(p => p.id === initialProjectId)) {
+      setSelectedBreakdownProjectId(initialProjectId);
+      if (initialTab) setActiveTab(initialTab);
+    }
+  }, [initialProjectId, initialTab, projects]);
 
   // -------------------------------------------------------------
   // 1. LINKED PROJECTS STATE & FILTERING
@@ -440,10 +464,10 @@ export const ProjectProfitabilityHub: React.FC<ProjectProfitabilityHubProps> = (
           </div>
 
           {/* Mode Switcher Tabs */}
-          <div className="flex items-center bg-neutral-950 p-1.5 rounded-xl border border-neutral-800 self-start lg:self-auto shrink-0 shadow-inner">
+          <div className="flex items-center bg-neutral-950 p-1.5 rounded-xl border border-neutral-800 self-start lg:self-auto shrink-0 shadow-inner overflow-x-auto max-w-full">
             <button
               onClick={() => setActiveTab('profitability')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold font-mono transition cursor-pointer flex items-center gap-2 ${
+              className={`px-3.5 sm:px-4 py-2 rounded-lg text-xs font-bold font-mono transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
                 activeTab === 'profitability'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-zinc-400 hover:text-white hover:bg-neutral-900'
@@ -453,8 +477,19 @@ export const ProjectProfitabilityHub: React.FC<ProjectProfitabilityHubProps> = (
               <span>Project Gains & Linker ({linkedProjectIds.length})</span>
             </button>
             <button
+              onClick={() => setActiveTab('work-order-breakdown')}
+              className={`px-3.5 sm:px-4 py-2 rounded-lg text-xs font-bold font-mono transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+                activeTab === 'work-order-breakdown'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-white hover:bg-neutral-900'
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              <span>Work Order Price Breakdown</span>
+            </button>
+            <button
               onClick={() => setActiveTab('estimator')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold font-mono transition cursor-pointer flex items-center gap-2 ${
+              className={`px-3.5 sm:px-4 py-2 rounded-lg text-xs font-bold font-mono transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
                 activeTab === 'estimator'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-zinc-400 hover:text-white hover:bg-neutral-900'
@@ -745,9 +780,9 @@ export const ProjectProfitabilityHub: React.FC<ProjectProfitabilityHubProps> = (
 
             {/* Linked Projects Performance Table */}
             <div className="overflow-x-auto border border-neutral-800 rounded-xl">
-              <table className="w-full text-left border-collapse text-xs">
+              <table className="w-full text-left border-collapse text-xs min-w-[720px]">
                 <thead>
-                  <tr className="bg-neutral-950 border-b border-neutral-800 text-zinc-400 font-mono text-[10px] uppercase">
+                  <tr className="bg-neutral-950 border-b border-neutral-800 text-zinc-400 font-mono text-[10px] uppercase whitespace-nowrap">
                     <th className="py-3 px-3.5 w-10 text-center">Link</th>
                     <th className="py-3 px-3">Project / Client</th>
                     <th className="py-3 px-3">Status</th>
@@ -759,7 +794,7 @@ export const ProjectProfitabilityHub: React.FC<ProjectProfitabilityHubProps> = (
                     <th className="py-3 px-3 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-850">
+                <tbody className="divide-y divide-neutral-855">
                   {displayedProjectMetrics.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="py-8 text-center text-zinc-500 text-xs font-mono">
@@ -780,11 +815,11 @@ export const ProjectProfitabilityHub: React.FC<ProjectProfitabilityHubProps> = (
                           }`}
                         >
                           {/* Checkbox Link Toggle */}
-                          <td className="py-3 px-3.5 text-center">
+                          <td className="py-3 px-3.5 text-center whitespace-nowrap">
                             <button
                               type="button"
                               onClick={() => toggleProjectLink(pm.project.id)}
-                              className={`w-5 h-5 rounded-md flex items-center justify-center transition cursor-pointer ${
+                              className={`w-5 h-5 rounded-md flex items-center justify-center transition cursor-pointer mx-auto ${
                                 isLinked 
                                   ? 'bg-blue-600 text-white' 
                                   : 'bg-neutral-950 border border-neutral-700 text-transparent hover:border-zinc-500'
@@ -802,12 +837,12 @@ export const ProjectProfitabilityHub: React.FC<ProjectProfitabilityHubProps> = (
                             </div>
                             <div className="text-[11px] text-zinc-400 mt-0.5 flex items-center gap-1.5">
                               <Building2 className="w-3 h-3 text-zinc-500" />
-                              <span>{pm.client?.name || 'Unassigned Client'}</span>
+                              <span className="truncate max-w-[180px]">{pm.client?.name || 'Unassigned Client'}</span>
                             </div>
                           </td>
 
                           {/* Status */}
-                          <td className="py-3 px-3">
+                          <td className="py-3 px-3 whitespace-nowrap">
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
                               pm.project.status === 'Approved' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/60' :
                               pm.project.status === 'In Progress' ? 'bg-blue-950 text-blue-300 border border-blue-800/60' :
@@ -820,30 +855,30 @@ export const ProjectProfitabilityHub: React.FC<ProjectProfitabilityHubProps> = (
                           </td>
 
                           {/* Revenue */}
-                          <td className="py-3 px-3 text-right font-mono font-bold text-white">
+                          <td className="py-3 px-3 text-right font-mono font-bold text-white whitespace-nowrap">
                             ${pm.subtotal.toLocaleString()}
                           </td>
 
                           {/* Direct Labor */}
-                          <td className="py-3 px-3 text-right font-mono text-blue-300">
+                          <td className="py-3 px-3 text-right font-mono text-blue-300 whitespace-nowrap">
                             ${pm.directLaborCost.toLocaleString()}
                             <span className="text-[10px] text-zinc-500 block">{pm.adjustedLaborHours} hrs</span>
                           </td>
 
                           {/* Materials */}
-                          <td className="py-3 px-3 text-right font-mono text-purple-300">
+                          <td className="py-3 px-3 text-right font-mono text-purple-300 whitespace-nowrap">
                             ${pm.directMaterialCost.toLocaleString()}
                           </td>
 
                           {/* Net Gain */}
-                          <td className="py-3 px-3 text-right font-mono font-bold">
+                          <td className="py-3 px-3 text-right font-mono font-bold whitespace-nowrap">
                             <span className={pm.grossGain >= 0 ? 'text-emerald-400' : 'text-red-400'}>
                               ${pm.grossGain.toLocaleString()}
                             </span>
                           </td>
 
                           {/* Margin Badge */}
-                          <td className="py-3 px-3 text-center">
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
                               isHighMargin ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' :
                               isLowMargin ? 'bg-red-500/10 text-red-400 border border-red-500/30' :
@@ -854,11 +889,14 @@ export const ProjectProfitabilityHub: React.FC<ProjectProfitabilityHubProps> = (
                           </td>
 
                           {/* Actions */}
-                          <td className="py-3 px-3 text-right">
+                          <td className="py-3 px-3 text-right whitespace-nowrap">
                             <div className="flex items-center justify-end gap-1.5">
                               <button
                                 type="button"
-                                onClick={() => setBreakdownModalProject(pm.project)}
+                                onClick={() => {
+                                  setSelectedBreakdownProjectId(pm.project.id);
+                                  setActiveTab('work-order-breakdown');
+                                }}
                                 className="px-2 py-1 bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 text-[10px] text-zinc-300 hover:text-white rounded-md transition cursor-pointer flex items-center gap-1 font-mono"
                                 title="View detailed price and cost breakdown"
                               >
@@ -889,7 +927,22 @@ export const ProjectProfitabilityHub: React.FC<ProjectProfitabilityHubProps> = (
       )}
 
       {/* ========================================================= */}
-      {/* TAB 2: INSTANT PAINT & DRYWALL ESTIMATOR                  */}
+      {/* TAB 2: WORK ORDER PRICING BREAKDOWN & PRICING LOGIC       */}
+      {/* ========================================================= */}
+      {activeTab === 'work-order-breakdown' && (
+        <WorkOrderPricingTab
+          projects={projects}
+          clients={clients}
+          selectedProjectId={selectedBreakdownProjectId}
+          onSelectProjectId={(id) => setSelectedBreakdownProjectId(id)}
+          proposalSettings={proposalSettings}
+          onOpenProject={onOpenProject}
+          onNavigateToWorkOrder={onNavigateToWorkOrder}
+        />
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 3: INSTANT PAINT & DRYWALL ESTIMATOR                  */}
       {/* ========================================================= */}
       {activeTab === 'estimator' && (
         <div className="space-y-6">
